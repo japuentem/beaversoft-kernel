@@ -43,33 +43,28 @@ Después de cada fase: `git add -A; git commit -m "Fase N: ..."`.
 
 ---
 
-## Fase 0 — Control de versiones (≈10 min)
+## Fase 0 — Control de versiones (≈10 min)  ✅ COMPLETADA 2026-11-03
 
-- [ ] `git init` en la raíz `d:\proyectos_personales\beaversoft-kernel`.
-- [ ] Crear `.gitignore` con: `target/`, `boot/uefi/target/`, `kernel/target/`, `*.img`, `*.obj`, `*.EFI`, `librust_out.rlib`, `qemu_out.txt`, `serial_uefi.log`.
-- [ ] Commit inicial: `git commit -m "Base: estado al 2026-10-31 (auditoria #7)"`.
-- [ ] Tag: `git tag v0.8.0-auditoria`.
+- [x] `git init` en la raíz `d:\proyectos_personales\beaversoft-kernel`.
+- [x] Crear `.gitignore` con: `target/`, `boot/uefi/target/`, `kernel/target/`, `*.img`, `*.obj`, `*.EFI`, `librust_out.rlib`, `qemu_out.txt`, `serial_uefi.log`.
+- [x] Commit inicial: `git commit -m "Base: estado al 2026-10-31 (auditoria #7)"` → `ad1b95a`.
+- [x] Tag: `git tag v0.8.0-auditoria`.
 
-**Aceptación:** `git log --oneline` muestra 1 commit; `git status` limpio.
+**Aceptación:** `git log --oneline` muestra 1 commit; `git status` limpio. ✅
 
 ---
 
-## Fase 1 — Corregir fallos visuales propios y marcar lo simulado (≈45 min)
+## Fase 1 — Corregir fallos visuales propios y marcar lo simulado (≈45 min)  ✅ COMPLETADA 2026-11-03
 
 Archivos: `kernel/src/gui/desktop.rs`, `kernel/src/drivers/timer.rs`, `kernel/src/gui/icons.rs`.
 
-- [ ] **Día de la semana real:** en `draw_calendar_window` reemplazar `let start_col = 3;` por un cálculo con el algoritmo de Sakamoto (entero, sin flotantes) para el día 1 del mes, convertido a columna con Lunes = 0.
-  - Verificación manual: 1-oct-2026 = jueves, 1-nov-2026 = domingo, 1-feb-2026 = domingo.
-- [ ] **Zona horaria:** en `timer.rs` añadir `pub const TZ_OFFSET_HOURS: i8 = -6;` y una función `local_datetime()` que aplique el desfase con acarreo de día/mes/año (usar `days_in_month`; mover esa función a `timer.rs`). Usarla en la barra superior y en el calendario.
-- [ ] **Quitar emojis:** buscar `🌙`, `☀️`, `⚡` y `──●──` en `desktop.rs`. Sustituir por:
-  - Tema: icono dibujado (luna = dos `fill_circle` superpuestos; sol = círculo + 4 líneas) + texto `Noche` / `Dia`.
-  - Botón sync: texto `Sincronizar Malla Ahora` sin símbolo.
-  - Zoom: dibujar la barra con `fill_rounded_rect` + `fill_circle`, no con caracteres.
-  - Regla: **solo ASCII** en cadenas que se pinten con la fuente VGA 8×16.
-- [ ] **Etiquetar lo simulado:** añadir `[DEMO]` visible en: título de BeaverSync, píldoras `Mesh: 4 Nodos` / `Sync: 100%`, tarjetas de nodos en BeaverFiles (pestaña Red Mesh), salida de los comandos de shell `http`, `dns`/`resolve`, `dhcp` (buscar en `kernel/src/shell.rs`).
-- [ ] **Spotlight:** cambiar el texto del campo a `Accesos rapidos` (no prometer búsqueda) hasta que exista entrada de teclado real. (La búsqueda real queda para después de la Fase 5.)
+- [x] **Día de la semana real:** en `draw_calendar_window` reemplazar `let start_col = 3;` por cálculo Sakamoto. 1-nov-2026 = domingo ✅ (confirmado en captura QEMU).
+- [x] **Zona horaria:** en `timer.rs` añadir `TZ_OFFSET_HOURS = -6` y `local_datetime()` con acarreo. Usada en barra superior y calendario.
+- [x] **Quitar emojis:** sustituidos por iconos dibujados (luna/sol) + ASCII. Botón sync: `Sincronizar Malla Ahora (DEMO)`.
+- [x] **Etiquetar lo simulado:** `[DEMO]` visible en: título BeaverSync, píldoras barra superior, nodos BeaverFiles sidebar (`[DEMO] station/laptop/server`), salida de `dhcp`, `dns`, `curl` en shell.
+- [x] **Spotlight:** texto cambiado a `Accesos rapidos (busqueda por texto: pendiente)`.
 
-**Aceptación:** compila sin warnings; en QEMU el calendario de noviembre 2026 inicia en domingo; la barra superior muestra la hora local; no aparece ningún `[?]`; las vistas simuladas dicen `[DEMO]`. Captura de pantalla para confirmar.
+**Aceptación:** compila sin warnings ✅; calendario noviembre inicia en domingo ✅ (captura); hora UTC-6 ✅; sin `[?]` ✅; vistas simuladas dicen `[DEMO]` ✅. Commit: `1b64da9`.
 
 ---
 
@@ -103,13 +98,13 @@ Archivos: `kernel/src/gui/desktop.rs`, `kernel/src/drivers/timer.rs`, `kernel/sr
 
 ---
 
-## Fase 3 — Retirar el SMP falso (≈20 min)
+## Fase 3 — Retirar el SMP falso (≈20 min)  ✅ COMPLETADA 2026-11-03
 
-- [ ] En `kernel/src/apic.rs` `wake_secondary_cores`: **no enviar INIT/SIPI** (comentar con explicación) y no registrar núcleos que no se hayan verificado.
-- [ ] Reportar solo el BSP (núcleo 0) como online. Dejar un `TODO(SMP)` describiendo lo que falta: trampolín de 16 bits en 0x8000 copiado en tiempo de ejecución, tabla MADT de ACPI para enumerar APIC IDs, pila por núcleo, contador atómico de núcleos que responden.
-- [ ] Ajustar textos de shell/Monitor que digan "INIT-SIPI-SIPI OK" o "4 cores".
+- [x] En `kernel/src/apic.rs` `wake_secondary_cores`: **no enviar INIT/SIPI** — función convertida a NO-OP con comentario completo de lo que falta.
+- [x] Reportar solo el BSP (núcleo 0) como online. `smp_active = false` (honesto). `TODO(SMP)` documenta: MADT, trampolín 16-bit, stack por AP, atómico de confirmación.
+- [x] Textos de shell (`smp`/`cores`) ajustados: sin "INIT-SIPI-SIPI OK", sin "4 cores", reporta 1 núcleo BSP y pendientes.
 
-**Aceptación:** arranca igual en QEMU con `-smp 4`; el sistema reporta 1 núcleo; ya no se envían IPIs.
+**Aceptación:** arranca igual en QEMU con `-smp 4` ✅; sistema reporta 1 núcleo ✅; no se envían IPIs ✅. Commit: `ab6051d`.
 
 ---
 
