@@ -11,7 +11,10 @@ param(
     [switch]$DebugBuild,
     [switch]$NoGui,
     [switch]$Clean,
-    [switch]$Uefi
+    [switch]$Uefi,
+    # -Node A: escucha :5555  MAC ..:BE:A0:01  IP 10.0.0.1
+    # -Node B: conecta :5555  MAC ..:BE:A0:02  IP 10.0.0.2
+    [string]$Node = ''
 )
 
 $ErrorActionPreference = "Stop"
@@ -117,5 +120,19 @@ if ($Uefi) {
     }
 }
 
+# Banco de pruebas: dos QEMU conectados por socket (Fase 4 - E1000 real)
+if ($Node -eq 'A') {
+    $QemuArgs = $QemuArgs | Where-Object { $_ -ne 'model=e1000' -and $_ -ne '-nic' }
+    # Nodo A: escucha en puerto 5555, MAC fija ...:BE:A0:01
+    $QemuArgs += @("-netdev", "socket,id=n0,listen=:5555")
+    $QemuArgs += @("-device", "e1000,netdev=n0,mac=52:54:00:BE:A0:01")
+    Write-Host "[NET] Nodo A: escuchando en :5555 (IP estatica 10.0.0.1)" -ForegroundColor Cyan
+} elseif ($Node -eq 'B') {
+    $QemuArgs = $QemuArgs | Where-Object { $_ -ne 'model=e1000' -and $_ -ne '-nic' }
+    # Nodo B: conecta al nodo A, MAC fija ...:BE:A0:02
+    $QemuArgs += @("-netdev", "socket,id=n0,connect=127.0.0.1:5555")
+    $QemuArgs += @("-device", "e1000,netdev=n0,mac=52:54:00:BE:A0:02")
+    Write-Host "[NET] Nodo B: conectando a 127.0.0.1:5555 (IP estatica 10.0.0.2)" -ForegroundColor Cyan
+}
 Write-Host "[INFO] Ejecutando: qemu-system-x86_64 $($QemuArgs -join ' ')" -ForegroundColor DarkGray
 & qemu-system-x86_64 @QemuArgs

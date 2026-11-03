@@ -1570,7 +1570,7 @@ impl Shell {
 
             "ping" => {
                 if args.is_empty() {
-                    kprintln!("Uso: ping <direccion_ipv4>  (ejemplo: ping 10.0.2.2 o ping 8.8.8.8)");
+                    kprintln!("Uso: ping <direccion_ipv4>  (ejemplo: ping 10.0.0.2)");
                     return;
                 }
                 let target_ip = match crate::drivers::net::Ipv4Addr::parse(args[0]) {
@@ -1580,22 +1580,61 @@ impl Shell {
                         return;
                     }
                 };
-                kprintln!("PING {} ({}) 56(84) bytes de datos en Beaver OS Stack.", args[0], target_ip.to_string());
-                for seq in 1..=4 {
+
+                // Verificar que el driver E1000 DMA este inicializado
+                let driver_ready = {
+                    crate::drivers::e1000::E1000.lock().initialized
+                };
+                if !driver_ready {
+                    kprintln!("Error: driver E1000 no inicializado. Tarjeta no detectada o DMA fallo.");
+                    kprintln!("Ejecuta 'ifconfig' para verificar el estado de la tarjeta de red.");
+                    return;
+                }
+
+                kprintln!("PING {} 56(84) bytes de datos.", args[0]);
+                let mut tx_count: u32 = 0;
+                let mut rx_count: u32 = 0;
+
+                for seq in 1u16..=4 {
+                    // Limpiar flag de respuesta antes de enviar
+                    {
+                        let mut n = crate::drivers::net::NET_INTERFACE.lock();
+                        n.last_ping_replied = false;
+                    }
+
+                    // Enviar ICMP Echo Request real por E1000 DMA
                     crate::drivers::net::send_icmp_ping(target_ip, seq);
-                    for _ in 0..3_000_000 { core::hint::spin_loop(); }
-                    let (replied, ttl) = {
+                    tx_count += 1;
+
+                    // Esperar respuesta: hasta ~2000 rondas de polling
+                    // Cada ronda: 500 spin_loop + net_poll_rx (no bloqueo infinito)
+                    let mut replied = false;
+                    let mut ttl_val: u8 = 0;
+                    for _attempt in 0..2000 {
+                        for _ in 0..500 { core::hint::spin_loop(); }
+                        crate::drivers::net::net_poll_rx();
                         let n = crate::drivers::net::NET_INTERFACE.lock();
-                        (n.last_ping_replied, n.last_ping_ttl)
-                    };
+                        if n.last_ping_replied {
+                            replied = true;
+                            ttl_val = n.last_ping_ttl;
+                            break;
+                        }
+                    }
+
                     if replied {
-                        kprintln!("64 bytes desde {}: icmp_seq={} ttl={} tiempo=0.{} ms", target_ip.to_string(), seq, ttl, 12 + seq * 3);
+                        kprintln!("64 bytes desde {}: icmp_seq={} ttl={}", target_ip.to_string(), seq, ttl_val);
+                        rx_count += 1;
                     } else {
                         kprintln!("Tiempo de espera agotado para icmp_seq={}", seq);
                     }
                 }
+
+                // Estadisticas reales — sin cifras inventadas
+                let lost = tx_count.saturating_sub(rx_count);
+                let pct_loss = if tx_count > 0 { (lost * 100) / tx_count } else { 100 };
                 kprintln!("--- estadisticas de ping {} ---", args[0]);
-                kprintln!("4 paquetes transmitidos, 4 recibidos, 0% perdida de paquetes");
+                kprintln!("{} paquetes transmitidos, {} recibidos, {}% perdida de paquetes",
+                    tx_count, rx_count, pct_loss);
             }
 
             "netstat" => {

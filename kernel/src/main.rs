@@ -320,10 +320,12 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
         crate::gui::desktop::render_desktop();
     }
 
-    // 14. Bucle principal de la Tarea 0 (Shell interactivo concurrente)
+    // 14. Bucle principal de la Tarea 0: sondeo de red (RX polling) + espera de interrupciones
     loop {
+        // Sondear anillo RX del E1000 para recibir tramas (ARP, ICMP, UDP/BeaverSync)
+        crate::drivers::net::net_poll_rx();
         unsafe {
-            asm!("hlt");
+            asm!("hlt"); // Esperar la siguiente interrupcion (PIT 100Hz)
         }
     }
 }

@@ -182,6 +182,29 @@ pub fn init() {
                             net.mac_address[5] = ((rah >> 8) & 0xFF) as u8;
                         }
                     }
+
+                    // Asignar IP estatica segun MAC (para banco de pruebas con dos QEMU)
+                    // MAC ...:BE:A0:01 -> 10.0.0.1  (Nodo A)
+                    // MAC ...:BE:A0:02 -> 10.0.0.2  (Nodo B)
+                    let mac4 = net.mac_address[4];
+                    let mac5 = net.mac_address[5];
+                    if net.mac_address[3] == 0xBE && mac4 == 0xA0 {
+                        net.ip_address  = Ipv4Addr::new(10, 0, 0, mac5);
+                        net.netmask     = Ipv4Addr::new(255, 255, 255, 0);
+                        net.gateway     = Ipv4Addr::new(10, 0, 0, 1);
+                        net.dns_server  = Ipv4Addr::new(10, 0, 0, 1);
+                        net.link_up     = true;
+                    }
+
+                    // Inicializar E1000 driver DMA (Fase 4)
+                    drop(net); // liberar lock antes de llamar al driver (evitar deadlock)
+                    let init_ok = crate::drivers::e1000::E1000.lock().init(bar0 as u64);
+                    if !init_ok {
+                        crate::kprintln!("[E1000] ADVERTENCIA: init DMA fallo (RAM insuficiente?)");
+                    } else {
+                        crate::kprintln!("[E1000] Driver DMA inicializado. TX/RX rings listos.");
+                    }
+                    return;
                 }
 
                 // Registrar Gateway predeterminado en tabla ARP
@@ -223,23 +246,36 @@ pub fn internet_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-/// Construye y envía una trama Ethernet II
+/// Construye y envía una trama Ethernet II.
+/// Si el driver E1000 DMA está inicializado, transmite por hardware real.
+/// Si no, descarta silenciosamente (sin loopback — el loopback enmascaraba fallos).
 pub fn send_ethernet_frame(dest_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
-    let mut net = NET_INTERFACE.lock();
     let frame_len = 14 + payload.len();
+    let mut frame = alloc::vec::Vec::with_capacity(frame_len);
 
-    let mut frame = Vec::with_capacity(frame_len);
-    frame.extend_from_slice(&dest_mac);
-    frame.extend_from_slice(&net.mac_address);
-    frame.extend_from_slice(&ethertype.to_be_bytes());
-    frame.extend_from_slice(payload);
+    {
+        let net = NET_INTERFACE.lock();
+        frame.extend_from_slice(&dest_mac);
+        frame.extend_from_slice(&net.mac_address);
+        frame.extend_from_slice(&ethertype.to_be_bytes());
+        frame.extend_from_slice(payload);
+    }
 
-    net.tx_packets += 1;
-    net.tx_bytes += frame.len() as u64;
+    // Actualizar contadores TX
+    {
+        let mut net = NET_INTERFACE.lock();
+        net.tx_packets += 1;
+        net.tx_bytes += frame.len() as u64;
+    }
 
-    // Si la tarjeta E1000 física está activa y tiene MMIO asignado, transmitir vía DMA
-    // En entorno bare-metal local/emulado, se procesa la trama en el loopback de entrada
-    process_incoming_packet(&frame, &mut net);
+    // Transmitir por hardware real E1000 DMA (Fase 4).
+    // Si el driver no está inicializado (sin tarjeta), el paquete se descarta.
+    // NO hay loopback — eso enmascaraba que la red no funcionaba.
+    if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
+        if e1000.initialized {
+            e1000.send(&frame);
+        }
+    }
 }
 
 /// Construye y transmite una solicitud ARP (¿Quién tiene la IP X? Avisa a Y)
@@ -321,7 +357,8 @@ pub fn send_icmp_ping(target_ip: Ipv4Addr, sequence: u16) {
     send_ethernet_frame(dest_mac, ETHERTYPE_IPV4, &full_payload);
 }
 
-/// Procesa paquetes entrantes y responde automáticamente a ARP y Pings
+/// Procesa paquetes entrantes: actualiza contadores, tabla ARP,
+/// responde ARP requests e ICMP echo requests por hardware real.
 fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) {
     if frame.len() < 14 {
         return;
@@ -330,31 +367,67 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) {
     net.rx_packets += 1;
     net.rx_bytes += frame.len() as u64;
 
+    let src_eth = {
+        let mut m = [0u8; 6];
+        m.copy_from_slice(&frame[6..12]);
+        m
+    };
     let ethertype = u16::from_be_bytes([frame[12], frame[13]]);
     let payload = &frame[14..];
 
     if ethertype == ETHERTYPE_ARP && payload.len() >= 28 {
-        let _opcode = u16::from_be_bytes([payload[6], payload[7]]);
-        let sender_ip = Ipv4Addr::new(payload[14], payload[15], payload[16], payload[17]);
+        let opcode     = u16::from_be_bytes([payload[6], payload[7]]);
+        let sender_ip  = Ipv4Addr::new(payload[14], payload[15], payload[16], payload[17]);
+        let target_ip  = Ipv4Addr::new(payload[24], payload[25], payload[26], payload[27]);
         let mut sender_mac = [0u8; 6];
         sender_mac.copy_from_slice(&payload[8..14]);
 
         // Registrar o actualizar tabla ARP
         for entry in net.arp_table.iter_mut() {
             if !entry.valid || entry.ip.0 == sender_ip.0 {
-                entry.ip = sender_ip;
+                entry.ip  = sender_ip;
                 entry.mac = sender_mac;
                 entry.valid = true;
                 break;
             }
         }
-    } else if ethertype == ETHERTYPE_IPV4 && payload.len() >= 20 {
-        let proto = payload[9];
-        let src_ip = Ipv4Addr::new(payload[12], payload[13], payload[14], payload[15]);
-        let _dst_ip = Ipv4Addr::new(payload[16], payload[17], payload[18], payload[19]);
-        let ihl = ((payload[0] & 0x0F) * 4) as usize;
 
-        // Ignorar paquetes emitidos por nosotros mismos en loopback para evitar recursión y deadlocks
+        // Responder ARP Request dirigido a nuestra IP
+        if opcode == ARP_REQUEST && target_ip.0 == net.ip_address.0 {
+            let my_mac = net.mac_address;
+            let my_ip  = net.ip_address;
+            // Construir ARP Reply (28 bytes de payload)
+            let mut arp_reply = alloc::vec::Vec::with_capacity(28);
+            arp_reply.extend_from_slice(&1u16.to_be_bytes());             // HW: Ethernet
+            arp_reply.extend_from_slice(&ETHERTYPE_IPV4.to_be_bytes());   // Proto: IPv4
+            arp_reply.push(6); arp_reply.push(4);                          // HW+proto len
+            arp_reply.extend_from_slice(&ARP_REPLY.to_be_bytes());         // Opcode: Reply
+            arp_reply.extend_from_slice(&my_mac);                          // Sender MAC (nosotros)
+            arp_reply.extend_from_slice(&my_ip.0);                         // Sender IP
+            arp_reply.extend_from_slice(&sender_mac);                      // Target MAC
+            arp_reply.extend_from_slice(&sender_ip.0);                     // Target IP
+
+            // Transmitir por E1000 sin re-adquirir net lock (ya lo tenemos)
+            let frame_len = 14 + arp_reply.len();
+            let mut eth = alloc::vec::Vec::with_capacity(frame_len);
+            eth.extend_from_slice(&sender_mac);
+            eth.extend_from_slice(&my_mac);
+            eth.extend_from_slice(&ETHERTYPE_ARP.to_be_bytes());
+            eth.extend_from_slice(&arp_reply);
+            net.tx_packets += 1;
+            net.tx_bytes += eth.len() as u64;
+            if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
+                if e1000.initialized { e1000.send(&eth); }
+            }
+        }
+
+    } else if ethertype == ETHERTYPE_IPV4 && payload.len() >= 20 {
+        let proto   = payload[9];
+        let src_ip  = Ipv4Addr::new(payload[12], payload[13], payload[14], payload[15]);
+        let dst_ip  = Ipv4Addr::new(payload[16], payload[17], payload[18], payload[19]);
+        let ihl     = ((payload[0] & 0x0F) * 4) as usize;
+
+        // Descartar paquetes con nuestra propia IP como origen (sin loopback)
         if src_ip.0 == net.ip_address.0 {
             return;
         }
@@ -363,27 +436,119 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) {
             let icmp_data = &payload[ihl..];
             let icmp_type = icmp_data[0];
 
-            if icmp_type == ICMP_ECHO_REQUEST {
-                // Generar ICMP Echo Reply para responder a peticiones externas
+            if icmp_type == ICMP_ECHO_REPLY {
+                // Respuesta a nuestro ping — registrar
                 net.last_ping_replied = true;
                 net.last_ping_ttl = payload[8];
                 net.last_ping_seq = u16::from_be_bytes([icmp_data[6], icmp_data[7]]);
-            } else if icmp_type == ICMP_ECHO_REPLY {
-                net.last_ping_replied = true;
-                net.last_ping_ttl = payload[8];
-                net.last_ping_seq = u16::from_be_bytes([icmp_data[6], icmp_data[7]]);
+
+            } else if icmp_type == ICMP_ECHO_REQUEST && dst_ip.0 == net.ip_address.0 {
+                // Alguien nos hace ping — responder con ICMP Echo Reply real
+                let my_ip  = net.ip_address;
+                let my_mac = net.mac_address;
+                let seq    = u16::from_be_bytes([icmp_data[6], icmp_data[7]]);
+                let id     = u16::from_be_bytes([icmp_data[4], icmp_data[5]]);
+                let data_section = if icmp_data.len() > 8 { &icmp_data[8..] } else { &[] };
+
+                // ICMP Echo Reply
+                let mut icmp_reply: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(8 + data_section.len());
+                icmp_reply.push(ICMP_ECHO_REPLY); // Type 0
+                icmp_reply.push(0);                // Code 0
+                icmp_reply.extend_from_slice(&0u16.to_be_bytes()); // checksum placeholder
+                icmp_reply.extend_from_slice(&id.to_be_bytes());
+                icmp_reply.extend_from_slice(&seq.to_be_bytes());
+                icmp_reply.extend_from_slice(data_section);
+                let csum = internet_checksum(&icmp_reply);
+                icmp_reply[2] = (csum >> 8) as u8;
+                icmp_reply[3] = (csum & 0xFF) as u8;
+
+                // IP header para el reply
+                let total_len = (20 + icmp_reply.len()) as u16;
+                let mut ip_hdr: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(20 + icmp_reply.len());
+                ip_hdr.push(0x45); ip_hdr.push(0x00);
+                ip_hdr.extend_from_slice(&total_len.to_be_bytes());
+                ip_hdr.extend_from_slice(&0x0000u16.to_be_bytes()); // ID
+                ip_hdr.extend_from_slice(&0x4000u16.to_be_bytes()); // DF bit
+                ip_hdr.push(64); ip_hdr.push(IP_PROTO_ICMP);
+                ip_hdr.extend_from_slice(&0u16.to_be_bytes()); // checksum placeholder
+                ip_hdr.extend_from_slice(&my_ip.0);
+                ip_hdr.extend_from_slice(&src_ip.0);
+                let ip_csum = internet_checksum(&ip_hdr);
+                ip_hdr[10] = (ip_csum >> 8) as u8;
+                ip_hdr[11] = (ip_csum & 0xFF) as u8;
+                ip_hdr.extend_from_slice(&icmp_reply);
+
+                // Trama Ethernet
+                let mut eth: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(14 + ip_hdr.len());
+                eth.extend_from_slice(&src_eth);
+                eth.extend_from_slice(&my_mac);
+                eth.extend_from_slice(&ETHERTYPE_IPV4.to_be_bytes());
+                eth.extend_from_slice(&ip_hdr);
+                net.tx_packets += 1;
+                net.tx_bytes += eth.len() as u64;
+                if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
+                    if e1000.initialized { e1000.send(&eth); }
+                }
             }
+
         } else if proto == IP_PROTO_UDP && payload.len() >= ihl + 8 {
             let udp_data = &payload[ihl..];
             let src_port = u16::from_be_bytes([udp_data[0], udp_data[1]]);
             let dst_port = u16::from_be_bytes([udp_data[2], udp_data[3]]);
-            let udp_len = u16::from_be_bytes([udp_data[4], udp_data[5]]) as usize;
+            let udp_len  = u16::from_be_bytes([udp_data[4], udp_data[5]]) as usize;
             if dst_port == 4242 && udp_data.len() >= 8 {
                 let end = udp_len.min(udp_data.len());
                 let mesh_payload = &udp_data[8..end];
-                // Inmunidad absoluta contra deadlocks: usar try_lock para jamás bloquear el hilo
                 if let Some(mut mgr) = crate::drivers::mesh::MESH_MANAGER.try_lock() {
                     mgr.handle_packet(src_ip, src_port, mesh_payload);
+                }
+            }
+        }
+    }
+}
+
+/// Sondea el anillo RX del E1000 y procesa todos los paquetes pendientes.
+/// Llamar desde el bucle principal del kernel o desde el tick del PIT.
+/// Usa try_lock para no bloquear nunca el hilo principal.
+pub fn net_poll_rx() {
+    // Intentar adquirir el driver; si está ocupado, omitir esta ronda
+    let e1000_guard = match crate::drivers::e1000::E1000.try_lock() {
+        Some(g) => g,
+        None    => return,
+    };
+    if !e1000_guard.initialized {
+        return;
+    }
+
+    // Recolectar tramas en un buffer temporal (sin mantener el lock de e1000 durante el proceso)
+    // Necesitamos liberar e1000 antes de llamar process_incoming_packet que puede lock net.
+    // Usamos un arreglo de trama fija en el stack (sin heap extra).
+    // Procesamos hasta 8 tramas por llamada para no monopolizar la CPU.
+    const MAX_FRAMES: usize = 8;
+    let mut frames: [([u8; 1536], usize); MAX_FRAMES] = [([0u8; 1536], 0); MAX_FRAMES];
+    let mut count = 0usize;
+
+    // Necesitamos &mut para poll_rx — drop el guard inmutabel y re-acquire como mutable
+    drop(e1000_guard);
+
+    if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
+        e1000.poll_rx(|frame| {
+            if count < MAX_FRAMES && frame.len() <= 1536 {
+                let len = frame.len();
+                frames[count].0[..len].copy_from_slice(frame);
+                frames[count].1 = len;
+                count += 1;
+            }
+        });
+    }
+
+    // Procesar cada trama fuera del lock del E1000
+    if count > 0 {
+        if let Some(mut net) = NET_INTERFACE.try_lock() {
+            for i in 0..count {
+                let len = frames[i].1;
+                if len > 0 {
+                    process_incoming_packet(&frames[i].0[..len], &mut net);
                 }
             }
         }
