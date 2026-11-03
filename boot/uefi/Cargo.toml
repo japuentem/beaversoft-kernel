@@ -1,0 +1,13 @@
+[package]
+name = "beaver-uefi-bootloader"
+version = "0.8.0"
+edition = "2021"
+authors = ["José Alberto Puente Maldonado (japuentem)"]
+
+[workspace]
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true

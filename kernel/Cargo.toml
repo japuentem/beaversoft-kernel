@@ -1,0 +1,8 @@
+[package]
+name = "beaversoft-kernel"
+version = "0.1.0"
+authors = ["José Alberto Puente Maldonado <japuentem>"]
+edition = "2021"
+
+[dependencies]
+# Entorno completamente autónomo no_std sin dependencias externas pesadas

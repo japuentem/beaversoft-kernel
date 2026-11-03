@@ -1,0 +1,8 @@
+help
+pwd
+cd /disk
+pwd
+ls
+calc 1024 * 768
+ver
+

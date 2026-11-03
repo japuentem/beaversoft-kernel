@@ -1,0 +1,23 @@
+# ============================================================================
+# Project: Beaversoft Meta-Kernel
+# Author: José Alberto Puente Maldonado (japuentem)
+# Brand: Beaversoft
+# Description: Archivos excluidos del control de versiones
+# ============================================================================
+
+# Artefactos de compilación Rust
+target/
+boot/uefi/target/
+kernel/target/
+
+# Imágenes y binarios generados
+*.img
+*.obj
+*.EFI
+*.efi
+librust_out.rlib
+
+# Logs y capturas de ejecución de QEMU
+qemu_out.txt
+qemu_in.txt
+serial_uefi.log
