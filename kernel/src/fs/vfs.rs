@@ -766,7 +766,7 @@ pub fn generate_human_meminfo() -> String {
     let k_end = kernel_end();
     let kernel_bytes = k_end - k_start;
     let frames_alloc = FRAME_ALLOCATOR.allocated_frames_count();
-    let frames_total = FRAME_ALLOCATOR.total_frames_count();
+    let frames_total = FRAME_ALLOCATOR.total_usable_frames();
     let physical_total_kib = (frames_total * 4096) / 1024;
 
     let mut out = String::new();
