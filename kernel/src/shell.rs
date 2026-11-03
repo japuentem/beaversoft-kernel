@@ -372,7 +372,7 @@ impl Shell {
                 let k_end = kernel_end();
                 let kernel_bytes = k_end - k_start;
                 let frames_alloc = FRAME_ALLOCATOR.allocated_frames_count();
-                let frames_total = FRAME_ALLOCATOR.total_frames_count();
+                let frames_total = FRAME_ALLOCATOR.total_usable_frames();
 
                 kprintln!("\n==================== MAPA VISUAL DE MEMORIA (BEAVER) ====================");
                 kprintln!("  (Disenado para eliminar la confusion de buffers, caches y pools ocultos)");
@@ -828,7 +828,7 @@ impl Shell {
                 let k_start = kernel_start();
                 let k_end = kernel_end();
                 let frames_alloc = FRAME_ALLOCATOR.allocated_frames_count();
-                let total_frames = FRAME_ALLOCATOR.total_frames_count();
+                let total_frames = FRAME_ALLOCATOR.total_usable_frames();
 
                 kprintln!("==================== MAPA DE MEMORIA DEL SISTEMA ====================");
                 kprint_color!(VgaColor::Yellow, VgaColor::Black, "[IMAGEN DEL KERNEL]\n");
@@ -858,6 +858,40 @@ impl Shell {
                 kprintln!("=====================================================================");
             }
 
+            // Prueba del bitmap frame allocator: asignar 1000 marcos, liberar, verificar contador
+            "test-frames" => {
+                kprintln!("[TEST] Prueba de Bitmap Frame Allocator (Fase 2)...");
+                let free_antes = FRAME_ALLOCATOR.free_frames_count();
+                kprintln!("  Marcos libres antes: {}", free_antes);
+
+                // Asignar 1000 marcos individuales
+                let mut frames: [usize; 1000] = [0; 1000];
+                let mut asignados = 0usize;
+                for slot in frames.iter_mut() {
+                    if let Some(addr) = FRAME_ALLOCATOR.allocate_frame() {
+                        *slot = addr;
+                        asignados += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let free_durante = FRAME_ALLOCATOR.free_frames_count();
+                kprintln!("  Marcos asignados:    {} (esperado: 1000)", asignados);
+                kprintln!("  Marcos libres ahora: {}", free_durante);
+
+                // Liberar todos los marcos asignados
+                for i in 0..asignados {
+                    FRAME_ALLOCATOR.free_frame(frames[i]);
+                }
+                let free_despues = FRAME_ALLOCATOR.free_frames_count();
+                kprintln!("  Marcos libres tras liberar: {} (esperado: {})", free_despues, free_antes);
+
+                if free_despues == free_antes && asignados == 1000 {
+                    kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Bitmap allocator: asignacion y liberacion correctas.\n");
+                } else {
+                    kprint_color!(VgaColor::LightRed, VgaColor::Black, "[FAIL] Discrepancia en contadores del allocator.\n");
+                }
+            }
             "test-alloc" => {
                 kprintln!("[TEST] Iniciando prueba de asignación dinámica de memoria...");
 
@@ -2264,7 +2298,7 @@ fn print_free() {
     let (total_heap, used_heap, free_heap, alloc_count, dealloc_count) = HEAP_ALLOCATOR.stats();
     let usage_pct = HEAP_ALLOCATOR.usage_percent();
     let frames_alloc = FRAME_ALLOCATOR.allocated_frames_count();
-    let frames_total = FRAME_ALLOCATOR.total_frames_count();
+    let frames_total = FRAME_ALLOCATOR.total_usable_frames();
 
     kprintln!("              Total        Usado        Libre   Reserva-OOM  Ocupacion");
     kprintln!("Memoria:    {:>6} KiB   {:>6} KiB   {:>6} KiB     {:>4} KiB       {:>3}%",

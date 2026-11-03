@@ -58,6 +58,10 @@ _start:
     /* 1. Configurar pila temporal de 32 bits */
     mov esp, offset stack_top
 
+    /* 1b. Preservar magic de Multiboot (eax) e info pointer (ebx) ANTES de que rep stosd destruya edi/eax */
+    mov [mb_magic], eax
+    mov [mb_info],  ebx
+
     /* 2. Configurar tablas de páginas para Modo Largo (Identity Mapping de los primeros 4 GB) */
     /* Limpiar tablas de páginas (PML4, PDPT, 4*PD = 6 * 4096 bytes = 6144 dwords) */
     mov edi, offset pml4_table
@@ -138,6 +142,9 @@ long_mode_start:
     mov rsp, offset stack_top
 
     /* Invocar el punto de entrada principal del kernel Beaver en Rust */
+    /* Pasar magic (rdi) e info-pointer (rsi) como argumentos System V AMD64 ABI */
+    mov edi, [mb_magic]
+    mov esi, [mb_info]
     call kernel_main
 
     /* Si kernel_main retorna, detener la CPU en reposo */
@@ -193,6 +200,9 @@ uefi_entry:
     mov rax, offset pml4_table
     mov cr3, rax
 
+    /* Pasar UEFI boot magic (rdi) y direccion de UefiBootInfo en 0x9000 (rsi) */
+    mov edi, 0xBEA0B007
+    mov esi, 0x9000
     call kernel_main
     cli
 uefi_halt:
@@ -201,8 +211,7 @@ uefi_halt:
 
 .section .rodata
 .align 8
-gdt64:
-    .quad 0x0000000000000000 /* 0x00: Descriptor Nulo */
+gdt64:    .quad 0x0000000000000000 /* 0x00: Descriptor Nulo */
     .quad 0x00209a0000000000 /* 0x08: Descriptor de Código 64-bit (Ring 0, Exec/Read, L=1) */
     .quad 0x0000920000000000 /* 0x10: Descriptor de Datos 64-bit (Ring 0, Read/Write) */
 gdt64_end:
@@ -229,3 +238,13 @@ pd_tables:
 stack_bottom:
     .skip 16384 /* Pila de arranque de 16 KB */
 stack_top:
+
+/* Variables para preservar magic e info pointer de Multiboot antes de rep stosd */
+.section .data
+.align 4
+.global mb_magic
+mb_magic:
+    .long 0
+.global mb_info
+mb_info:
+    .long 0

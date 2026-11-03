@@ -276,7 +276,10 @@ pub fn draw_monitor_window() {
     let (total_heap, used_heap, free_heap, alloc_count, _dealloc_count) = HEAP_ALLOCATOR.stats();
     let pct = HEAP_ALLOCATOR.usage_percent();
     let frames_alloc = FRAME_ALLOCATOR.allocated_frames_count();
-    let frames_total = FRAME_ALLOCATOR.total_frames_count();
+    let frames_total = FRAME_ALLOCATOR.total_usable_frames();
+    let frames_free  = FRAME_ALLOCATOR.free_frames_count();
+    let ram_free_mib  = frames_free  * 4096 / (1024 * 1024);
+    let ram_total_mib = frames_total * 4096 / (1024 * 1024);
 
     Canvas::draw_string_prop(x + 15, y + 38, "ARQUITECTURA DE PROCESAMIENTO", Color::BEAVER_AMBER_DARK, None);
     Canvas::draw_string_prop(x + 15, y + 56, "CPU: x86_64 Long Mode Bare-Metal | PIC 100Hz", Color::BEAVER_TEXT_DARK, None);
@@ -302,7 +305,7 @@ pub fn draw_monitor_window() {
     Canvas::draw_string_prop(x + 15, y + 220, "TID 1: telemetry_daemon | SLEEP   | UID: 0 (root)", Color::BEAVER_TEXT_MUTED, None);
     Canvas::draw_string_prop(x + 15, y + 238, "TID 2: storage_guard    | SLEEP   | UID: 0 (root)", Color::BEAVER_TEXT_MUTED, None);
 
-    let stats_str = format!("Asignaciones Heap: {} | Marcos 4K: {}/{}", alloc_count, frames_alloc, frames_total);
+    let stats_str = format!("Heap allocs: {} | RAM: {} MiB libre / {} MiB total | Marcos: {}", alloc_count, ram_free_mib, ram_total_mib, frames_alloc);
     Canvas::draw_string_prop(x + 15, y + 262, &stats_str, Color::BEAVER_TEXT_MUTED, None);
 }
 

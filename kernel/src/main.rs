@@ -43,7 +43,7 @@ use crate::gdt::init_gdt;
 use crate::interrupts::init_idt;
 use crate::interrupts::pic::PICS;
 use crate::drivers::timer::init_pit;
-use crate::memory::init_memory;
+use crate::memory::{init_memory, memmap};
 use crate::storage::init_storage;
 use crate::task::scheduler::SCHEDULER;
 use crate::task::{storage_guard_worker, telemetry_worker};
@@ -53,7 +53,7 @@ use crate::shell::SHELL;
 global_asm!(include_str!("../../boot/boot.s"));
 
 #[no_mangle]
-pub extern "C" fn kernel_main() -> ! {
+pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     // 1. Inicializar hardware básico de salida (UART COM1 y VGA)
     unsafe {
         SERIAL.lock().init();
@@ -115,9 +115,10 @@ pub extern "C" fn kernel_main() -> ! {
     crate::drivers::mouse::init_mouse();
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n");
 
-    // 8. Inicializar Subsistema de Memoria (Marcos Físicos y Heap Dinámico de 4 MiB)
-    kprint!("[INIT] Subsistema de Memoria (Frame Allocator + 4MB Heap)...   ");
-    init_memory();
+    // 8. Parsear mapa de memoria real y inicializar Subsistema de Memoria
+    kprint!("[INIT] Mapa de Memoria (MB1/UEFI) y Bitmap Frame Allocator...  ");
+    let memmap = memmap::parse_and_print(boot_magic, boot_info);
+    init_memory(&memmap);
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n");
 
     // 8.1 Inicializar Local APIC, Temporizador Preemptivo y SMP Multi-Core (INIT-SIPI-SIPI)

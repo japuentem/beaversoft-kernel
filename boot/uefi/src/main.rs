@@ -12,8 +12,12 @@ use core::panic::PanicInfo;
 
 static KERNEL_ELF: &[u8] = include_bytes!("../../../target/x86_64-unknown-none/release/beaversoft-kernel");
 
-pub const UEFI_BOOT_INFO_ADDR: u64 = 0x8000;
+pub const UEFI_BOOT_INFO_ADDR: u64 = 0x9000; // Movido de 0x8000: reservamos 0x8000 para futuro trampolines SMP de 16 bits
 pub const UEFI_BOOT_MAGIC: u32 = 0xBEA0B007;
+
+// Buffer estatico para el mapa de memoria UEFI (se copia aqui antes de exit_boot_services)
+// Ubicado inmediatamente despues de UefiBootInfo en 0x9000 + sizeof(UefiBootInfo)
+pub const UEFI_MEM_MAP_ADDR: u64 = 0x9100; // ~256 bytes despues de la cabecera
 
 #[repr(C)]
 pub struct UefiBootInfo {
@@ -23,6 +27,10 @@ pub struct UefiBootInfo {
     pub fb_width: u32,
     pub fb_height: u32,
     pub fb_pixels_per_scanline: u32,
+    // Mapa de memoria UEFI (anadido en Fase 2)
+    pub mem_map_addr: u64,  // Direccion fisica del primer descriptor EFI_MEMORY_DESCRIPTOR
+    pub mem_map_size: u64,  // Tamano total del mapa en bytes (num_descriptors * desc_size)
+    pub mem_desc_size: u64, // Tamano de cada descriptor (varía por firmware, tipicamente 48 bytes)
 }
 
 #[repr(C)]
@@ -273,7 +281,7 @@ pub extern "win64" fn efi_main(image_handle: *mut (), system_table: *mut EfiSyst
         }
     }
 
-    // 2. Escribir BootInfo estructurado en 0x8000 para que el kernel lo recoja
+    // 2. Escribir BootInfo estructurado en 0x9000 para que el kernel lo recoja
     let boot_info = UEFI_BOOT_INFO_ADDR as *mut UefiBootInfo;
     unsafe {
         (*boot_info).magic = UEFI_BOOT_MAGIC;
@@ -282,6 +290,10 @@ pub extern "win64" fn efi_main(image_handle: *mut (), system_table: *mut EfiSyst
         (*boot_info).fb_width = fb_width;
         (*boot_info).fb_height = fb_height;
         (*boot_info).fb_pixels_per_scanline = fb_scanline;
+        // mem_map_* se rellenan despues de exit_boot_services (ver paso 6b)
+        (*boot_info).mem_map_addr = 0;
+        (*boot_info).mem_map_size = 0;
+        (*boot_info).mem_desc_size = 0;
     }
 
     // 3. Asignar 1 MB en 0x100000 para cargar el Kernel ELF64
@@ -375,6 +387,22 @@ pub extern "win64" fn efi_main(image_handle: *mut (), system_table: *mut EfiSyst
                 ((*bs).exit_boot_services)(image_handle, map_key)
             };
         }
+    }
+
+    // 6b. Copiar mapa de memoria al buffer fisico fijo (UEFI_MEM_MAP_ADDR) y actualizar boot_info
+    // Despues de exit_boot_services ya no podemos llamar servicios UEFI, pero si copiar memoria
+    let copy_size = if mem_map_size > 4096 { 4096 } else { mem_map_size };
+    unsafe {
+        let dst = UEFI_MEM_MAP_ADDR as *mut u8;
+        let src = mem_map_ptr;
+        for i in 0..copy_size {
+            *dst.add(i) = *src.add(i);
+        }
+        // Actualizar boot_info con la ubicacion y tamano del mapa copiado
+        let bi = UEFI_BOOT_INFO_ADDR as *mut UefiBootInfo;
+        (*bi).mem_map_addr  = UEFI_MEM_MAP_ADDR;
+        (*bi).mem_map_size  = copy_size as u64;
+        (*bi).mem_desc_size = desc_size as u64;
     }
 
     // 7. Salto final al Kernel en 64-bit Long Mode
