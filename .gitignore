@@ -21,3 +21,4 @@ librust_out.rlib
 qemu_out.txt
 qemu_in.txt
 serial_uefi.log
+
