@@ -138,11 +138,19 @@ pub fn init_smp() {
     // 4. Configurar el Temporizador Local APIC en modo Periódico
     init_lapic_timer(&smp, 100); // 100 Hz (tick cada 10ms)
 
-    // 5. Detectar y despertar núcleos secundarios (Application Processors - APs)
-    // Despertamos los núcleos secundarios mediante la secuencia estándar Intel INIT-SIPI-SIPI
-    wake_secondary_cores(&mut smp);
+    // 5. [FASE 3 DESHABILITADO] Arranque SMP multinucleo neutralizado
+    // El SIPI apuntaba a 0x8000, direccion que el cargador UEFI usa para UefiBootInfo.
+    // Ademas no existe trampolines de 16 bits, stacks por AP, ni confirmacion atomica.
+    // Cuando se implemente correctamente debe:
+    //   a) Leer la tabla MADT (ACPI) para obtener los APIC IDs reales
+    //   b) Copiar el trampolines de arranque de 16 bits a 0x7000 (antes de UefiBootInfo)
+    //   c) Preparar stack independiente por AP
+    //   d) Esperar confirmacion atomica AP_ONLINE_COUNT antes de continuar
+    // Por ahora BeaverOS funciona en modo uniprocessor (1 core BSP).
+    // NO llamar wake_secondary_cores hasta que lo anterior este listo.
+    // wake_secondary_cores(&mut smp);  // <-- DESHABILITADO: Fase 4-SMP pendiente
 
-    smp.smp_active = true;
+    smp.smp_active = false; // Honesto: SMP no activo hasta implementacion real
 }
 
 /// Configura el temporizador de alta resolución del Local APIC
@@ -160,50 +168,22 @@ fn init_lapic_timer(smp: &SmpManager, _freq_hz: u32) {
     }
 }
 
-/// Emite la secuencia de despertar multinúcleo INIT-SIPI-SIPI
-fn wake_secondary_cores(smp: &mut SmpManager) {
-    // 1. Enviar INIT IPI a todos los procesadores excepto a sí mismo
-    unsafe {
-        smp.write_reg(LAPIC_ICR_HIGH, 0);
-        // INIT, Level Assert, All Excluding Self (0x000C4500)
-        smp.write_reg(LAPIC_ICR_LOW, ICR_DEST_ALL_EXC | ICR_LEVEL_ASSERT | ICR_TYPE_INIT);
-    }
-
-    // Pequeño retardo de espera (10 ms)
-    for _ in 0..100_000 {
-        core::hint::spin_loop();
-    }
-
-    // 2. Enviar primer Startup IPI (SIPI) con vector de página de arranque 0x08 (0x8000)
-    let sipi_command = ICR_DEST_ALL_EXC | ICR_LEVEL_ASSERT | ICR_TYPE_STARTUP | 0x08;
-    unsafe {
-        smp.write_reg(LAPIC_ICR_HIGH, 0);
-        smp.write_reg(LAPIC_ICR_LOW, sipi_command);
-    }
-
-    // Retardo breve (200 µs)
-    for _ in 0..20_000 {
-        core::hint::spin_loop();
-    }
-
-    // 3. Enviar segundo Startup IPI (SIPI) para garantizar despertar en hardware real
-    unsafe {
-        smp.write_reg(LAPIC_ICR_HIGH, 0);
-        smp.write_reg(LAPIC_ICR_LOW, sipi_command);
-    }
-
-    // 4. Enumeración de núcleos online: en QEMU y hardware multinúcleo registramos los núcleos
-    // detectados mediante escaneo de APIC IDs
-    for apic_id in 1..4 {
-        smp.cores.push(CoreInfo {
-            core_id: apic_id,
-            apic_id,
-            is_bsp: false,
-            is_online: true, // Registrado y listo para balanceo de carga
-            tasks_executed: 0,
-        });
-        AP_ONLINE_COUNT.fetch_add(1, Ordering::SeqCst);
-    }
+/// [DESHABILITADO - Fase 4-SMP pendiente]
+/// Emitia la secuencia INIT-SIPI-SIPI para despertar Application Processors.
+/// RIESGOS identificados por auditoria (2026-11-01):
+///   - Apuntaba a 0x8000 donde el cargador UEFI escribe UefiBootInfo -> colision de memoria
+///   - No existe trampolines de 16 bits en 0x8000 -> APs ejecutan datos como codigo
+///   - No verificaba confirmacion atomica de AP online -> marca online sin comprobar
+///   - Enumeracion fija de 3 APs (IDs 1-3) sin leer MADT/ACPI real
+/// La funcion existe pero es NO-OP hasta reimplementacion correcta.
+#[allow(dead_code)]
+fn wake_secondary_cores(_smp: &mut SmpManager) {
+    // NO-OP: Deshabilitado en Fase 3 por auditoria de seguridad.
+    // Reimplementar usando:
+    //   1. MADT (ACPI) para APIC IDs reales
+    //   2. Trampolines 16-bit en direccion libre (< 0x7000, no 0x8000)
+    //   3. Stack dedicado por AP
+    //   4. AP_ONLINE_COUNT atomico con timeout de confirmacion
 }
 
 /// Lectura segura de registro MSR (Model-Specific Register)
