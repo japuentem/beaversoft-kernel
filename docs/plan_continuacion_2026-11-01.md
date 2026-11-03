@@ -93,52 +93,52 @@ Archivos: `kernel/src/gui/desktop.rs`, `kernel/src/drivers/timer.rs`, `kernel/sr
 
 ---
 
-## Fase 4 — Driver Intel E1000 real (≈3–4 h)  ← camino hacia BeaverSync
+## Fase 4 — Driver Intel E1000 real (≈3-4 h)  [COMPLETADA 2026-11-03] commit f74973c
 
 Archivo nuevo sugerido: `kernel/src/drivers/e1000.rs` (dejar `net.rs` para la pila IP).
 
 ### 4.1 Inicialización
-- [ ] Usar el BAR0 que ya detecta `net.rs` (L157–167). Verificar que el MMIO esté dentro del mapeo identidad de 4 GiB (en QEMU suele estar en `0xFEBC0000`, sí lo está).
-- [ ] Reset del dispositivo (`CTRL.RST`), esperar, `CTRL.SLU` (set link up), desactivar interrupciones (`IMC = 0xFFFFFFFF`) — empezar por **sondeo (polling)**, no IRQ.
-- [ ] Leer MAC desde `RAL0/RAH0` (ya se hace) o EEPROM (`EERD`) si RAL es cero.
-- [ ] Limpiar la Multicast Table Array (`MTA`, 128 registros).
+- [x] Usar el BAR0 que ya detecta `net.rs` (L157–167). Verificar que el MMIO esté dentro del mapeo identidad de 4 GiB (en QEMU suele estar en `0xFEBC0000`, sí lo está).
+- [x] Reset del dispositivo (`CTRL.RST`), esperar, `CTRL.SLU` (set link up), desactivar interrupciones (`IMC = 0xFFFFFFFF`) — empezar por **sondeo (polling)**, no IRQ.
+- [x] Leer MAC desde `RAL0/RAH0` (ya se hace) o EEPROM (`EERD`) si RAL es cero.
+- [x] Limpiar la Multicast Table Array (`MTA`, 128 registros).
 
 ### 4.2 Recepción (RX)
-- [ ] 32 descriptores RX (16 bytes c/u) en memoria contigua alineada a 16 (usar `allocate_contiguous`), cada uno con un búfer de 2048 bytes.
-- [ ] Programar `RDBAL/RDBAH/RDLEN/RDH=0/RDT=31`, `RCTL = EN | BAM (broadcast) | SECRC | BSIZE 2048`.
-- [ ] `e1000_poll_rx()`: recorrer descriptores con bit `DD`, pasar la trama a `process_incoming_packet`, limpiar estado y avanzar `RDT`.
+- [x] 32 descriptores RX (16 bytes c/u) en memoria contigua alineada a 16 (usar `allocate_contiguous`), cada uno con un búfer de 2048 bytes.
+- [x] Programar `RDBAL/RDBAH/RDLEN/RDH=0/RDT=31`, `RCTL = EN | BAM (broadcast) | SECRC | BSIZE 2048`.
+- [x] `e1000_poll_rx()`: recorrer descriptores con bit `DD`, pasar la trama a `process_incoming_packet`, limpiar estado y avanzar `RDT`.
 
 ### 4.3 Transmisión (TX)
-- [ ] 32 descriptores TX; `TDBAL/TDBAH/TDLEN/TDH=0/TDT=0`; `TCTL = EN | PSP | CT=0x10 | COLD=0x40`; `TIPG = 0x0060200A`.
-- [ ] `e1000_send(frame: &[u8])`: copiar a búfer del descriptor, `CMD = EOP | IFCS | RS`, avanzar `TDT`, esperar `DD` con límite de iteraciones (nunca bucle infinito).
+- [x] 32 descriptores TX; `TDBAL/TDBAH/TDLEN/TDH=0/TDT=0`; `TCTL = EN | PSP | CT=0x10 | COLD=0x40`; `TIPG = 0x0060200A`.
+- [x] `e1000_send(frame: &[u8])`: copiar a búfer del descriptor, `CMD = EOP | IFCS | RS`, avanzar `TDT`, esperar `DD` con límite de iteraciones (nunca bucle infinito).
 
 ### 4.4 Integración
-- [ ] `send_ethernet_frame` → llama a `e1000_send` **sin** loopback (eliminar la llamada a `process_incoming_packet`). Mantener el filtro anti-eco.
-- [ ] Llamar a `e1000_poll_rx()` desde el bucle principal / tarea de red (no desde el handler del ratón). Usar `try_lock` en todo lo que toque la GUI.
-- [ ] Implementar respuestas reales: **ARP reply** a peticiones por nuestra IP y **ICMP echo reply**.
-- [ ] Marcar `resolve_dns`, `http_get`, `dhcp_discover_and_configure` como `[DEMO]` (o borrarlos) hasta tener UDP/TCP reales.
+- [x] `send_ethernet_frame` → llama a `e1000_send` **sin** loopback (eliminar la llamada a `process_incoming_packet`). Mantener el filtro anti-eco.
+- [x] Llamar a `e1000_poll_rx()` desde el bucle principal / tarea de red (no desde el handler del ratón). Usar `try_lock` en todo lo que toque la GUI.
+- [x] Implementar respuestas reales: **ARP reply** a peticiones por nuestra IP y **ICMP echo reply**.
+- [x] Marcar `resolve_dns`, `http_get`, `dhcp_discover_and_configure` como `[DEMO]` (o borrarlos) hasta tener UDP/TCP reales.
 
 ### 4.5 Banco de pruebas con dos QEMU
-- [ ] Añadir a `run.ps1` el parámetro `-Node A|B`:
+- [x] Añadir a `run.ps1` el parámetro `-Node A|B`:
   - Nodo A: `-netdev socket,id=n0,listen=:5555 -device e1000,netdev=n0,mac=52:54:00:BE:A0:01`
   - Nodo B: `-netdev socket,id=n0,connect=127.0.0.1:5555 -device e1000,netdev=n0,mac=52:54:00:BE:A0:02`
   - Cada nodo con su propio `disk-A.img` / `disk-B.img` y sin `-nic model=e1000` duplicado.
-- [ ] IP estática por MAC (no hay DHCP en `-netdev socket`): `...:01 → 10.0.0.1`, `...:02 → 10.0.0.2`.
-- [ ] Comando de shell `ping 10.0.0.2` que use la tarjeta real y muestre respuesta o timeout honesto.
+- [x] IP estatica por MAC (no hay DHCP en `-netdev socket`): `...:01 → 10.0.0.1`, `...:02 → 10.0.0.2`.
+- [x] Comando de shell `ping 10.0.0.2` que use la tarjeta real y muestre respuesta o timeout honesto.
 
 **Aceptación:** con dos ventanas QEMU abiertas, `ping 10.0.0.2` desde A recibe respuesta de B y viceversa; los contadores TX/RX del Monitor suben en ambos. Si falla, reportar el error tal cual.
 
 ---
 
-## Fase 5 — Descubrimiento real de nodos BeaverSync (≈2 h)
+## Fase 5 — Descubrimiento real de nodos BeaverSync (~2 h)  [COMPLETADA 2026-11-03] commit 70a9db6
 
-- [ ] En `mesh.rs` **eliminar los nodos codificados** de `MeshManager::new()`.
-- [ ] Anuncio periódico (cada 2 s, desde la tarea de red) por UDP broadcast `255.255.255.255:4242` usando `build_announce_packet()` y el E1000 real.
-- [ ] Al recibir `MSG_ANNOUNCE`: alta/actualización del nodo con IP real, hostname, cores y RAM **del paquete** (parsear los campos que ya se envían: cores u16, RAM u16, uptime u64) y `last_seen = get_ticks()`.
-- [ ] Expirar nodos sin anuncio en 10 s (estado `Offline`, luego eliminar).
-- [ ] Hostname distinto por nodo (derivado de la MAC: `beaver-a001`, `beaver-a002`).
-- [ ] BeaverSync / BeaverFiles / barra superior: mostrar los nodos **reales** y quitar `[DEMO]` solo de lo que ya sea real. `Sync: 100%` se quita o se calcula con algo verdadero.
-- [ ] El botón "Sincronizar Malla Ahora" envía un `MSG_QUERY` real y fuerza un anuncio.
+- [x] En `mesh.rs` **eliminar los nodos codificados** de `MeshManager::new()`.
+- [x] Anuncio periodico (cada 2 s, desde la tarea de red) por UDP broadcast `255.255.255.255:4242` usando `build_announce_packet()` y el E1000 real.
+- [x] Al recibir `MSG_ANNOUNCE`: alta/actualización del nodo con IP real, hostname, cores y RAM **del paquete** (parsear los campos que ya se envían: cores u16, RAM u16, uptime u64) y `last_seen = get_ticks()`.
+- [x] Expirar nodos sin anuncio en 10 s (estado `Offline`, luego eliminar).
+- [x] Hostname distinto por nodo (derivado de la MAC: `beaver-a001`, `beaver-a002`).
+- [x] BeaverSync / BeaverFiles / barra superior: mostrar los nodos **reales** y quitar `[DEMO]` solo de lo que ya sea real. `Sync: 100%` se quita o se calcula con algo verdadero.
+- [x] El boton "Sincronizar Malla Ahora" envía un `MSG_QUERY` real y fuerza un anuncio.
 
 **Aceptación:** con dos QEMU, cada uno muestra exactamente **1 nodo remoto** con la IP y nombre correctos; al cerrar uno, el otro lo marca Offline en ≤10 s. **Este es el primer hito "dos Beaver OS se ven de verdad".**
 

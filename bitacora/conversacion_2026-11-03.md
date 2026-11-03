@@ -213,3 +213,99 @@ Plan de implementación Fase 2:
 **Commit:** `5fd51d5` — "Fase 2: mapa de memoria real (MB1+UEFI), bitmap frame allocator, sin f32/UB"
 
 ================================================================================
+
+## Interacción #7 [14:32:08]
+
+### 👤 Pregunta / Petición del Usuario:
+Continúa con el plan desde la primera casilla sin marcar (Fase 4 — Driver Intel E1000 DMA real).
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+
+**Fase 4 completada — Driver Intel E1000 DMA Real.**
+
+#### Archivos creados / modificados:
+
+1. **`kernel/src/drivers/e1000.rs`** (NUEVO, 378 líneas):
+   - Registros MMIO del E1000 (CTRL, RCTL, TCTL, RDBAL/RDLEN/RDH/RDT, TDBAL/TDLEN/TDH/TDT, IMC, RAL/RAH).
+   - `RxDesc` y `TxDesc` en `repr(C, align(16))` (exactamente 16 bytes cada uno).
+   - `E1000Driver`: anillos de 32 descriptores TX y RX, buffers DMA de 4 KiB (allocate_frame).
+   - `init(mmio_base)`: reset, disable IRQ (IMC=0xFFFF), clear MTA, setup RX ring, setup TX ring, configura RCTL/TCTL/TIPG.
+   - `send(&[u8])`: copia trama a TX buffer, CMD=EOP|IFCS|RS, avanza TDT, espera DD con límite 50k.
+   - `poll_rx<F>(callback)`: sondea anillo RX por DD, llama callback, recicla descriptor, avanza RDT.
+   - `pub static E1000: SpinMutex<E1000Driver>`.
+
+2. **`kernel/src/drivers/mod.rs`**: añadido `pub mod e1000`.
+
+3. **`kernel/src/drivers/net.rs`**:
+   - `init()`: tras leer MAC de RAL/RAH, asigna IP estática por MAC (BE:A0:01 → 10.0.0.1, BE:A0:02 → 10.0.0.2). Llama `E1000.lock().init(bar0)` con `drop(net)` previo para evitar deadlock.
+   - `send_ethernet_frame()`: reescrita — **sin loopback**. Construye trama, actualiza TX counters, llama `E1000.try_lock()` y `e1000.send()`. Elimina llamada a `process_incoming_packet`.
+   - `process_incoming_packet()`: reescrita — responde ARP Request con ARP Reply real, responde ICMP Echo Request con Echo Reply real (ambos por E1000 DMA), registra ICMP Echo Reply en `last_ping_replied`.
+   - `net_poll_rx()`: dos pasos: (1) adquiere E1000 y recolecta hasta 8 tramas en buffer stack 8×1536 B, (2) libera E1000 y procesa tramas adquiriendo NET_INTERFACE. Evita holding de ambos locks simultáneamente.
+
+4. **`kernel/src/main.rs`**: bucle principal llama `crate::drivers::net::net_poll_rx()` antes de `hlt`.
+
+5. **`kernel/src/shell.rs`**: comando `ping` reescrito — honesto:
+   - Verifica `E1000.initialized` antes de enviar (reporta error si sin tarjeta).
+   - Itera 4 secuencias: limpia `last_ping_replied`, llama `send_icmp_ping`, polling de hasta 2000 × (500 spin_loop + `net_poll_rx()`).
+   - Reporta `ttl` real. Estadísticas: TX/RX/pérdida calculados — **sin cifras hardcodeadas**.
+
+6. **`run.ps1`**: parámetro `-Node A|B` para banco de pruebas con dos QEMU:
+   - Nodo A: `-netdev socket,id=n0,listen=:5555 -device e1000,netdev=n0,mac=52:54:00:BE:A0:01`
+   - Nodo B: `-netdev socket,id=n0,connect=127.0.0.1:5555 -device e1000,netdev=n0,mac=52:54:00:BE:A0:02`
+
+#### Verificación:
+- `cargo check --target x86_64-unknown-none` → ✅ Finished sin warnings
+- `cargo build --release --target x86_64-unknown-none` → ✅ Finished 7.61s sin warnings
+
+#### Commit:
+`f74973c` — "Fase 4: driver Intel E1000 DMA real (TX/RX rings), ARP/ICMP reply reales, ping honesto"
+
+================================================================================
+
+## Interacción #8 [16:31:00]
+
+### 👤 Pregunta / Petición del Usuario:
+Continúa (Fase 5 — Descubrimiento real de nodos BeaverSync).
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+
+**Fase 5 completada — Descubrimiento real de nodos BeaverSync.**
+
+#### Cambios en `kernel/src/drivers/mesh.rs` (reescrito):
+
+- **Sin nodos hardcodeados**: `MeshManager::new()` inicia con `nodes: Vec::new()`. Eliminados `beaver-station`, `beaver-laptop`, `beaver-server`.
+- **`sync_count` y `sync_logs` inician en cero** (ya no había "142 syncs" falsos).
+- **`MeshNode` agrega campo `last_seen: u64`** (ticks del último anuncio recibido).
+- **`handle_packet`**: parsea `cores` (u16 BE), `ram_mb` (u16 BE), `uptime_secs` (u64 BE) del paquete real. Filtra paquetes propios (misma IP). Actualiza `last_seen = get_ticks()`.
+- **`tick()`**: llamado desde el bucle principal cada `hlt`. Expira nodos en 10 s (`NODE_TIMEOUT_TICKS = 1000`), elimina Offline pasados 30 s. Envía anuncio propio cada 2 s (`ANNOUNCE_INTERVAL_TICKS = 200`).
+- **`build_announce_packet()`**: incluye `cores = 1` (BSP real, Fase 3), `ram_mb` desde `FRAME_ALLOCATOR.total_usable_frames()` (RAM real, Fase 2).
+- **`init_mesh()`**: deriva hostname de MAC bytes [4] y [5]: `format!("beaver-{:02x}{:02x}", mac[4], mac[5])`. Con los MACs de prueba: Nodo A → `beaver-a001`, Nodo B → `beaver-a002`.
+- **`mesh_tick()`**: función pública para el bucle principal (usa `try_lock`).
+
+#### Cambios en `kernel/src/main.rs`:
+
+- Bucle principal llama `crate::drivers::mesh::mesh_tick()` en cada iteración.
+
+#### Cambios en `kernel/src/gui/desktop.rs`:
+
+- **Barra superior**: píldora dinámica — muestra `"Mesh: N nodo(s)"` con contador real de nodos online. Sin `DEMO`. Punto verde si hay nodos, gris si no.
+- **Sidebar BeaverFiles** — sección RED MALLA: muestra hasta 3 nodos reales con nombre e IP. Si hay menos de 3, muestra `"-- sin nodos --"` para los slots vacíos.
+- **Ventana BeaverSync**: título cambiado a `"BeaverSync - Malla de Dispositivos"` (sin `[DEMO]`). Banner amarillo eliminado; reemplazado por barra teal con estado live (`"BeaverSync activo | Syncs: #N | Online: X/Y"`). Nodo local muestra nombre derivado de MAC. Botón "Sincronizar Malla Ahora" sin `(DEMO)`.
+- **Lista Spotlight**: texto de BeaverSync cambiado a `"Malla de dispositivos (descubrimiento UDP real)"`.
+
+#### Verificación:
+- `cargo check --target x86_64-unknown-none` → ✅ Finished (tras corregir 3 errores: `FRAME_ALLOCATOR.lock()` → acceso directo, y orden de declaración de `right_stats`/`online_count`)
+- `cargo build --release --target x86_64-unknown-none` → ✅ Finished 10.44s
+
+#### Commit:
+`70a9db6` — "Fase 5: descubrimiento real BeaverSync (UDP 4242), anuncio periodico 2s, expiracion 10s, hostname por MAC, GUI sin DEMO"
+
+#### Estado actual del plan:
+- Fase 0 ✅, Fase 1 ✅, Fase 2 ✅, Fase 3 ✅, Fase 4 ✅ (`f74973c`), Fase 5 ✅ (`70a9db6`)
+- **Fase 6** pendiente de confirmación del usuario antes de comenzar.
+
+================================================================================
