@@ -341,17 +341,32 @@ pub fn send_icmp_ping(target_ip: Ipv4Addr, sequence: u16) {
     let mut full_payload = ip_hdr;
     full_payload.extend_from_slice(&icmp_pkt);
 
-    // Obtener MAC de destino desde la tabla ARP o usar la del gateway
-    let dest_mac = {
+    // Buscar MAC destino en la tabla ARP; si no está, enviar ARP Request y sondear RX
+    let lookup_mac = |ip: Ipv4Addr| -> Option<[u8; 6]> {
         let net = NET_INTERFACE.lock();
-        let mut found = net.arp_table[0].mac;
         for entry in &net.arp_table {
-            if entry.valid && entry.ip.0 == target_ip.0 {
-                found = entry.mac;
-                break;
+            if entry.valid && entry.ip.0 == ip.0 {
+                return Some(entry.mac);
             }
         }
-        found
+        None
+    };
+
+    let dest_mac = match lookup_mac(target_ip) {
+        Some(mac) => mac,
+        None => {
+            send_arp_request(target_ip);
+            let mut resolved = None;
+            for _ in 0..20_000 {
+                for _ in 0..1_000 { core::hint::spin_loop(); }
+                net_poll_rx();
+                if let Some(m) = lookup_mac(target_ip) {
+                    resolved = Some(m);
+                    break;
+                }
+            }
+            resolved.unwrap_or([0xFF; 6])
+        }
     };
 
     send_ethernet_frame(dest_mac, ETHERTYPE_IPV4, &full_payload);
@@ -359,9 +374,10 @@ pub fn send_icmp_ping(target_ip: Ipv4Addr, sequence: u16) {
 
 /// Procesa paquetes entrantes: actualiza contadores, tabla ARP,
 /// responde ARP requests e ICMP echo requests por hardware real.
-fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) {
+/// Devuelve `true` si se recibio un MSG_QUERY de BeaverSync que requiere responder fuera del lock.
+fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
     if frame.len() < 14 {
-        return;
+        return false;
     }
 
     net.rx_packets += 1;
@@ -427,9 +443,21 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) {
         let dst_ip  = Ipv4Addr::new(payload[16], payload[17], payload[18], payload[19]);
         let ihl     = ((payload[0] & 0x0F) * 4) as usize;
 
-        // Descartar paquetes con nuestra propia IP como origen (sin loopback)
-        if src_ip.0 == net.ip_address.0 {
-            return;
+        // Descartar paquetes con nuestra propia IP o nuestra propia MAC como origen (anti-eco)
+        if src_ip.0 == net.ip_address.0 || src_eth == net.mac_address {
+            return false;
+        }
+
+        // Aprender MAC del remitente IPv4 en la tabla ARP
+        if src_ip.0 != [0, 0, 0, 0] {
+            for entry in net.arp_table.iter_mut() {
+                if !entry.valid || entry.ip.0 == src_ip.0 {
+                    entry.ip = src_ip;
+                    entry.mac = src_eth;
+                    entry.valid = true;
+                    break;
+                }
+            }
         }
 
         if proto == IP_PROTO_ICMP && payload.len() >= ihl + 8 {
@@ -500,11 +528,12 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) {
                 let end = udp_len.min(udp_data.len());
                 let mesh_payload = &udp_data[8..end];
                 if let Some(mut mgr) = crate::drivers::mesh::MESH_MANAGER.try_lock() {
-                    mgr.handle_packet(src_ip, src_port, mesh_payload);
+                    return mgr.handle_packet(src_ip, src_port, mesh_payload);
                 }
             }
         }
     }
+    false
 }
 
 /// Sondea el anillo RX del E1000 y procesa todos los paquetes pendientes.
@@ -543,15 +572,23 @@ pub fn net_poll_rx() {
     }
 
     // Procesar cada trama fuera del lock del E1000
+    let mut need_mesh_announce = false;
     if count > 0 {
         if let Some(mut net) = NET_INTERFACE.try_lock() {
             for i in 0..count {
                 let len = frames[i].1;
                 if len > 0 {
-                    process_incoming_packet(&frames[i].0[..len], &mut net);
+                    if process_incoming_packet(&frames[i].0[..len], &mut net) {
+                        need_mesh_announce = true;
+                    }
                 }
             }
         }
+    }
+
+    // Si recibimos MSG_QUERY, enviar anuncio fuera de NET_INTERFACE lock
+    if need_mesh_announce {
+        crate::drivers::mesh::send_mesh_announce_now();
     }
 }
 

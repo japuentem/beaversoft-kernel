@@ -226,6 +226,11 @@ gdt64_ptr64:
 
 
 .section .bss
+.align 16
+stack_bottom:
+    .skip 65536 /* Pila de arranque de 64 KB (antes de tablas de paginas para evitar corrupcion) */
+stack_top:
+
 .align 4096
 pml4_table:
     .skip 4096
@@ -233,11 +238,6 @@ pdpt_table:
     .skip 4096
 pd_tables:
     .skip 16384 /* 4 tablas PD para cubrir 4 GB (4 x 512 entradas de 2MB) */
-
-.align 16
-stack_bottom:
-    .skip 16384 /* Pila de arranque de 16 KB */
-stack_top:
 
 /* Variables para preservar magic e info pointer de Multiboot antes de rep stosd */
 .section .data

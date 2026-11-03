@@ -163,8 +163,8 @@ fn init_lapic_timer(smp: &SmpManager, _freq_hz: u32) {
         let timer_vector = 48 | 0x20000;
         smp.write_reg(LAPIC_LVT_TIMER, timer_vector);
 
-        // Contador inicial aproximado para 100 Hz
-        smp.write_reg(LAPIC_TIMER_INIT, 100_000);
+        // Contador inicial aproximado para ~100 Hz sin saturar emulacion TCG
+        smp.write_reg(LAPIC_TIMER_INIT, 10_000_000);
     }
 }
 

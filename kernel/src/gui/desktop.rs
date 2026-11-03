@@ -389,17 +389,17 @@ pub fn draw_files_window() {
     }
 
     Canvas::draw_string_prop(x + 12, y + 190, "RED MALLA", Color::BEAVER_TEXT_MUTED, None);
-    Canvas::draw_string_prop(x + 12, y + 190, "RED MALLA", Color::BEAVER_TEXT_MUTED, None);
     // Mostrar nodos reales descubiertos por BeaverSync (Fase 5)
     let mesh_nodes_sb = {
         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
         mgr.get_nodes().iter().take(3)
-            .map(|n| alloc::format!("{} ({})", n.name, n.ip.to_string()))
+            .map(|n| (alloc::format!("{} ({})", n.name, n.ip.to_string()), n.status == "Online"))
             .collect::<alloc::vec::Vec<_>>()
     };
     let sb_offsets = [210usize, 232, 254];
-    for (i, label) in mesh_nodes_sb.iter().enumerate().take(3) {
-        draw_sidebar_icon(x + 12, y + sb_offsets[i], SidebarIconKind::Mesh, Color::BEAVER_TEAL);
+    for (i, (label, is_online)) in mesh_nodes_sb.iter().enumerate().take(3) {
+        let icon_col = if *is_online { Color::BEAVER_TEAL } else { Color::SLATE_400 };
+        draw_sidebar_icon(x + 12, y + sb_offsets[i], SidebarIconKind::Mesh, icon_col);
         Canvas::draw_string_prop(x + 34, y + sb_offsets[i], label, Color::BEAVER_TEXT_MUTED, None);
     }
     for i in mesh_nodes_sb.len()..3 {
@@ -475,12 +475,13 @@ pub fn draw_files_window() {
 
                     draw_device_icon(card_x + 10, card_y + 12, DeviceKind::Pc, Color::BEAVER_TEAL);
 
-                    let title = format!("{}", node.name);
+                    let title = format!("{} [{}]", node.name, node.status);
                     Canvas::draw_string_prop(card_x + 38, card_y + 10, &title, Color::BEAVER_TEXT_DARK, None);
-                    let ip_cores = format!("IP: {} | {} Cores", node.ip.to_string(), node.cores);
+                    let ip_cores = format!("IP: {} | {} Core(s)", node.ip.to_string(), node.cores);
                     Canvas::draw_string_prop(card_x + 38, card_y + 28, &ip_cores, Color::BEAVER_TEXT_MUTED, None);
-                    let ram_shares = format!("RAM: {}MB | Compartido", node.ram_free_mb);
-                    Canvas::draw_string_prop(card_x + 38, card_y + 46, &ram_shares, Color::BEAVER_EMERALD, None);
+                    let ram_shares = format!("RAM: {}MB | Uptime: {}s", node.ram_mb, node.uptime_secs);
+                    let status_col = if node.status == "Online" { Color::BEAVER_EMERALD } else { Color::SLATE_400 };
+                    Canvas::draw_string_prop(card_x + 38, card_y + 46, &ram_shares, status_col, None);
                 }
             }
         }
@@ -710,21 +711,20 @@ pub fn draw_sync_window() {
     Canvas::draw_string_prop(x + 48, y + 96, &alloc::format!("{} (Este Equipo)", local_name), Color::BEAVER_TEXT_DARK, None);
     Canvas::draw_string_prop(x + 48, y + 110, "Estado: Maestro Local | 1 BSP Core | RAM real via allocator", Color::BEAVER_EMERALD, None);
     // Dispositivos Remotos en la Malla
+    if nodes.is_empty() {
+        Canvas::draw_string_prop(x + 20, y + 142, "Esperando anuncios UDP (:4242) de otros nodos Beaver...", Color::BEAVER_TEXT_MUTED, None);
+    }
     for (i, node) in nodes.iter().enumerate().take(3) {
         let dy = y + 130 + i * 38;
         Canvas::fill_rounded_rect(x + 16, dy, left_w.saturating_sub(12), 34, 6, Color::BEAVER_TITANIUM_BAR);
 
-        let kind = match node.name.as_str() {
-            "beaver-laptop" => DeviceKind::Laptop,
-            "beaver-server" => DeviceKind::Server,
-            _ => DeviceKind::Pc,
-        };
-        draw_device_icon(x + 20, dy + 4, kind, Color::BEAVER_TEAL);
+        let icon_col = if node.status == "Online" { Color::BEAVER_TEAL } else { Color::SLATE_400 };
+        draw_device_icon(x + 20, dy + 4, DeviceKind::Pc, icon_col);
 
-        let line1 = format!("{} ({})", node.name, node.device_type);
+        let line1 = format!("{} [{}]", node.name, node.status);
         Canvas::draw_string_prop(x + 48, dy + 4, &line1, Color::BEAVER_TEXT_DARK, None);
-        let line2 = format!("IP: {} | {} Cores | {}MB | Lat: {}ms | Sinc: {}%",
-            node.ip.to_string(), node.cores, node.ram_mb, node.latency_ms, node.sync_percent
+        let line2 = format!("IP: {} | {} Core(s) | {} MB | Uptime: {}s",
+            node.ip.to_string(), node.cores, node.ram_mb, node.uptime_secs
         );
         Canvas::draw_string_prop(x + 48, dy + 19, &line2, Color::BEAVER_TEXT_MUTED, None);
     }
@@ -745,14 +745,14 @@ pub fn draw_sync_window() {
     let ram_str = format!("* Memoria Malla:  {} MB ({}.{} GB)", total_ram, ram_gb, ram_dec);
     Canvas::draw_string_prop(right_x + 12, y + 116, &ram_str, Color::BEAVER_TEXT_DARK, None);
 
-    Canvas::draw_string_prop(right_x + 12, y + 136, "* Auto-Sinc:      /disk/notas.txt", Color::BEAVER_EMERALD, None);
-    Canvas::draw_string_prop(right_x + 12, y + 156, "* Replicacion:    Multi-nodo P2P", Color::BEAVER_TEXT_MUTED, None);
-    Canvas::draw_string_prop(right_x + 12, y + 176, "* Cero Caidas:    Espejo LBA 16 Activo", Color::BEAVER_AMBER_DARK, None);
+    Canvas::draw_string_prop(right_x + 12, y + 136, "* Protocolo:      BEAVMESH UDP :4242", Color::BEAVER_EMERALD, None);
+    Canvas::draw_string_prop(right_x + 12, y + 156, "* Descubrimiento: Anuncio 2s / Timeout 10s", Color::BEAVER_TEXT_MUTED, None);
+    Canvas::draw_string_prop(right_x + 12, y + 176, "* Transporte:     Intel E1000 DMA Real", Color::BEAVER_AMBER_DARK, None);
 
     // Botón Interactivo: "Sincronizar Malla Ahora"
     let sync_btn_y = y + 210;
     Canvas::fill_rounded_rect(right_x + 10, sync_btn_y, right_w.saturating_sub(20), 32, 6, Color::BEAVER_AMBER);
-    Canvas::draw_string_prop(right_x + 20, sync_btn_y + 10, "Sincronizar Malla Ahora (DEMO)", Color::WHITE, None);
+    Canvas::draw_string_prop(right_x + 20, sync_btn_y + 10, "Sincronizar Malla Ahora", Color::WHITE, None);
 
     // 4. Panel Inferior: Telemetría de Sincronización en Tiempo Real
     let feed_y = y + 260;
@@ -1429,9 +1429,11 @@ pub fn handle_gui_char(ch: char) {
                 state.input_buffer.push(c);
                 let mode = state.mode;
                 drop(state);
-                match mode {
-                    GuiViewMode::Desktop => render_terminal_window(),
-                    GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                if !crate::interrupts::has_pending_input() {
+                    match mode {
+                        GuiViewMode::Desktop => render_terminal_window(),
+                        GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                    }
                 }
             }
         }

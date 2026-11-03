@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 4
+# Total de interacciones del día: 10
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -307,5 +307,75 @@ Continúa (Fase 5 — Descubrimiento real de nodos BeaverSync).
 #### Estado actual del plan:
 - Fase 0 ✅, Fase 1 ✅, Fase 2 ✅, Fase 3 ✅, Fase 4 ✅ (`f74973c`), Fase 5 ✅ (`70a9db6`)
 - **Fase 6** pendiente de confirmación del usuario antes de comenzar.
+
+================================================================================
+
+## Interacción #9 [16:40:52]
+
+### 👤 Pregunta / Petición del Usuario:
+del plan docs\plan_continuacion_2026-11-01.md que falta por implementar o mejorar?
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se realizó una auditoría completa de `docs/plan_continuacion_2026-11-01.md` contrastando cada punto del documento contra el código actual en el repositorio:
+
+1. **Detalles críticos por corregir/mejorar en Fases 4 y 5 (antes o durante la prueba en vivo con 2 QEMU):**
+   - **Deadlock en recepción UDP (`net.rs` → `mesh.rs`):** `net_poll_rx()` toma `NET_INTERFACE.try_lock()` y llama a `process_incoming_packet()`, que toma `MESH_MANAGER.try_lock()` y llama a `mgr.handle_packet()`. Dentro de `handle_packet()`, tanto en `MSG_ANNOUNCE` como en `MSG_QUERY` se volvía a pedir el candado `NET_INTERFACE` en el mismo hilo, causando deadlock al primer paquete UDP recibido.
+   - **Resolución ARP faltante antes de `ping` (`net.rs`):** `send_icmp_ping()` buscaba la IP destino en `arp_table`, pero si no estaba enviaba la trama con MAC destino `00:00:00:00:00:00` en lugar de emitir `send_arp_request()`.
+   - **Lecturas DMA sin `read_volatile` en `e1000.rs`:** En `E1000Driver::send()` y `poll_rx()`, `desc.status` se leía mediante una referencia normal `&mut TxDesc / RxDesc`.
+   - **Conflicto de imagen de disco en `run.ps1` (`-Node A|B`):** Ambos nodos compartían `target\disk.img` y `target\uefi_test`.
+   - **Detalles de honestidad en GUI (`desktop.rs`):** En la ventana BeaverSync las tarjetas de nodos aún mostraban `Sinc: 0%`, etiqueta duplicada `RED MALLA` en BeaverFiles, sufijo `(DEMO)` en el botón `"Sincronizar Malla Ahora"`, y `total_cluster_ram_mb()` en `mesh.rs` sumaba `0` para la RAM local.
+2. **Fase 6 completa (9 tareas pendientes que requerían confirmación del usuario).**
+
+================================================================================
+
+## Interacción #10 [17:42:36]
+
+### 👤 Pregunta / Petición del Usuario:
+corrije los 5 puntos de la fase 4 y 5, y prueba las 2 instancias de qemu
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se corrigieron los 5 puntos detectados en la auditoría de las Fases 4 y 5, además de corregir bugs subyacentes descubiertos durante la prueba real con dos instancias de QEMU en modo UEFI:
+
+#### 1. Correcciones de los 5 puntos de Fases 4 y 5:
+1. **Eliminación de deadlock entre `NET_INTERFACE` y `MESH_MANAGER` (`mesh.rs`, `net.rs`):**
+   - `MeshManager::handle_packet()` y `tick_state()` ya no llaman a `NET_INTERFACE.lock()` ni a `send_udp_datagram()` mientras `MESH_MANAGER` está bloqueado.
+   - `process_incoming_packet()` devuelve `bool` (`true` si recibió `MSG_QUERY`) y `net_poll_rx()` invoca `send_mesh_announce_now()` fuera del candado `NET_INTERFACE`.
+   - Filtro anti-eco movido a `process_incoming_packet()` comparando MAC e IP de origen antes de adquirir `MESH_MANAGER`.
+2. **Resolución ARP previa a ICMP Echo Request y aprendizaje ARP (`net.rs`, `shell.rs`):**
+   - `send_icmp_ping()` verifica si la IP destino está en `arp_table`; si no está, emite `send_arp_request(target_ip)` y sondea `net_poll_rx()` para aprender la MAC antes de transmitir el Echo Request.
+   - `process_incoming_packet()` aprende pares IP/MAC entrantes tanto de paquetes ARP como IPv4.
+3. **Accesos DMA volátiles y barreras de memoria en Intel E1000 (`e1000.rs`):**
+   - Todos los accesos a descriptores `RxDesc` y `TxDesc` en `init()`, `send()` y `poll_rx()` usan `core::ptr::read_volatile` / `write_volatile` y `fence(Ordering::SeqCst)`.
+   - `poll_rx()` itera de forma acotada (`0..NUM_RX_DESC`) verificando el bit `E1000_RXD_STAT_DD` sin depender de `RDH`.
+   - Habilitados `E1000_RCTL_UPE | E1000_RCTL_MPE | E1000_RCTL_BAM` en `RCTL`.
+4. **Discos y directorios UEFI independientes por nodo (`run.ps1`):**
+   - `-Node A` usa `target\disk-A.img` y `target\uefi_test_A`; `-Node B` usa `target\disk-B.img` y `target\uefi_test_B`, recompilando `BOOTX64-$Node.EFI` y copiando `KERNEL.ELF`.
+5. **Honestidad visual en GUI BeaverSync y BeaverFiles (`desktop.rs`, `mesh.rs`):**
+   - Eliminada etiqueta duplicada `RED MALLA` en sidebar de BeaverFiles.
+   - Ventana BeaverSync muestra estado real (`[Online]` / `[Offline]`), RAM y `Uptime` reales del nodo remoto, eliminando `Sinc: 0%` ficticio y el sufijo `(DEMO)` del botón `"Sincronizar Malla Ahora"`.
+   - `total_cluster_ram_mb()` incluye la RAM local utilizable reportada por `FRAME_ALLOCATOR`.
+
+#### 2. Bugs adicionales descubiertos y corregidos durante la prueba en vivo con 2 QEMU:
+- **Offset desalineado en `UefiBootInfo` (`vbe.rs`, `memmap.rs`):** `vbe.rs` aún apuntaba a `0x8000` en lugar de `0x9000`, y `memmap.rs` leía `mem_map_addr` en offset `+36` en vez de `+40` (causando `#GP(0)` al arrancar en UEFI). Unificado `UefiBootInfo` con `read_unaligned()`.
+- **Sobrescritura de IP estática en el arranque (`main.rs`):** `main.rs` llamaba a `dhcp_discover_and_configure()` tras `net::init()`, sobrescribiendo `10.0.0.1` / `10.0.0.2` con `10.0.2.15`. Eliminada la llamada automática del arranque.
+- **Cola de entrada asíncrona (`INPUT_QUEUE`) y desacoplamiento de IRQ 0/1 (`interrupts/mod.rs`, `main.rs`):** `timer_interrupt_handler` y `keyboard_interrupt_handler` ahora encolan caracteres en `INPUT_QUEUE` sin bloquear `SERIAL` ni ejecutar comandos/renderizado GUI dentro de la ISR (con `IF=0`), y el bucle principal de la Tarea 0 procesa `process_pending_input()` con interrupciones habilitadas (`IF=1`).
+- **Protección de tablas de páginas frente a pila de arranque (`boot/boot.s`, `apic.rs`):** `stack_bottom` se amplió de 16 KiB a 64 KiB y se ubicó antes de `pml4_table` / `pd_tables` en `.bss` para impedir que el crecimiento de pila alcance la entrada PDE de `0xFEE00000` (LAPIC EOI). Asimismo, `LAPIC_TIMER_INIT` se ajustó a `10_000_000`.
+
+#### 3. Evidencia real de la prueba con 2 instancias de QEMU (`Node A` y `Node B` por socket `:5555`):
+- **Nodo A (`10.0.0.1`, `beaver-a001`):**
+  - `ifconfig`: `inet 10.0.0.1`, `ether 52:54:00:be:a0:01`
+  - `ping 10.0.0.2`: `4 paquetes transmitidos, 4 recibidos, 0% perdida de paquetes`
+  - `arp`: `10.0.0.2 ether 52:54:00:be:a0:02 * eth0`
+  - `mesh` (con Nodo B activo): `beaver-a002 | 10.0.0.2 | 1 | 487 MB | 8s | Online | disk,sys`
+  - `mesh` (13s después de cerrar Nodo B): `beaver-a002 | 10.0.0.2 | 1 | 487 MB | 8s | Offline | disk,sys`
+  - `netstat`: `Paquetes TX Enviados: 18 (1392 bytes) | Paquetes RX Leidos: 13 (992 bytes)`
+- **Nodo B (`10.0.0.2`, `beaver-a002`):**
+  - `ifconfig`: `inet 10.0.0.2`, `ether 52:54:00:be:a0:02`
+  - `ping 10.0.0.1`: `4 paquetes transmitidos, 4 recibidos, 0% perdida de paquetes`
+  - `mesh`: `beaver-a001 | 10.0.0.1 | 1 | 487 MB | 8s | Online | disk,sys`
 
 ================================================================================

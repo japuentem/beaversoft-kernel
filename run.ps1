@@ -70,9 +70,15 @@ if (-not (Test-Path $KernelBin)) {
 }
 
 Write-Host "[OK] Kernel compilado exitosamente: $KernelBin" -ForegroundColor Green
-$DiskImg = "target\disk.img"
+$DiskImg = if ($Node -eq 'A') {
+    "target\disk-A.img"
+} elseif ($Node -eq 'B') {
+    "target\disk-B.img"
+} else {
+    "target\disk.img"
+}
 if (-not (Test-Path $DiskImg)) {
-    Write-Host "[INFO] Creando imagen de disco virtual ATA (10 MB)..." -ForegroundColor DarkGray
+    Write-Host "[INFO] Creando imagen de disco virtual ATA ($DiskImg, 10 MB)..." -ForegroundColor DarkGray
     $fs = [System.IO.File]::Create($DiskImg)
     $fs.SetLength(10 * 1024 * 1024)
     $fs.Close()
@@ -81,20 +87,30 @@ if (-not (Test-Path $DiskImg)) {
 if ($Uefi) {
     Write-Host "[UEFI] Modo UEFI activado. Construyendo cargador BOOTX64.EFI..." -ForegroundColor Yellow
     $LLD = "C:\Users\japue\.rustup\toolchains\nightly-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\bin\rust-lld.exe"
-    & rustc +nightly --target x86_64-pc-windows-msvc -C panic=abort -O --emit=obj "boot\uefi\src\main.rs" -o "target\bootx64.obj"
-    & $LLD -flavor link /NODEFAULTLIB /ENTRY:efi_main /SUBSYSTEM:EFI_APPLICATION "target\bootx64.obj" /OUT:"target\BOOTX64.EFI"
+    $BootObj = if ($Node -ne '') { "target\bootx64-$Node.obj" } else { "target\bootx64.obj" }
+    $BootEfi = if ($Node -ne '') { "target\BOOTX64-$Node.EFI" } else { "target\BOOTX64.EFI" }
+    & rustc +nightly --target x86_64-pc-windows-msvc -C panic=abort -O --emit=obj "boot\uefi\src\main.rs" -o $BootObj
+    & $LLD -flavor link /NODEFAULTLIB /ENTRY:efi_main /SUBSYSTEM:EFI_APPLICATION $BootObj /OUT:$BootEfi
 
-    $UefiDir = "target\uefi_test\EFI\BOOT"
+    $UefiRoot = if ($Node -eq 'A') {
+        "target\uefi_test_A"
+    } elseif ($Node -eq 'B') {
+        "target\uefi_test_B"
+    } else {
+        "target\uefi_test"
+    }
+    $UefiDir = "$UefiRoot\EFI\BOOT"
     if (-not (Test-Path $UefiDir)) {
         New-Item -ItemType Directory -Path $UefiDir -Force | Out-Null
     }
-    Copy-Item "target\BOOTX64.EFI" -Destination "$UefiDir\BOOTX64.EFI" -Force
+    Copy-Item $BootEfi -Destination "$UefiDir\BOOTX64.EFI" -Force
+    Copy-Item $KernelBin -Destination "$UefiRoot\KERNEL.ELF" -Force
 
     $OvmfFirmware = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
     $QemuArgs = @(
         "-drive", "if=pflash,format=raw,readonly=on,file=$OvmfFirmware",
         "-drive", "file=$DiskImg,format=raw,index=0,media=disk",
-        "-drive", "file=fat:rw:target\uefi_test,format=raw,index=1,media=disk",
+        "-drive", "file=fat:rw:$UefiRoot,format=raw,index=1,media=disk",
         "-nic", "model=e1000",
         "-smp", "4",
         "-m", "512M",

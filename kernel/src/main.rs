@@ -145,10 +145,9 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     crate::drivers::audio::init();
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n");
 
-    // 9.4 Inicializar Controlador de Red e Internet (Intel E1000 Gigabit & DHCP)
+    // 9.4 Inicializar Controlador de Red e Internet (Intel E1000 Gigabit)
     kprint!("[INIT] Subsistema de Red e Internet (Intel E1000 / DHCP)...    ");
     crate::drivers::net::init();
-    let _ = crate::drivers::net::dhcp_discover_and_configure();
     crate::drivers::mesh::init_mesh();
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n");
 
@@ -187,11 +186,8 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     }
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] 3 Hilos Activos\n");
 
-    // 11. Habilitar Interrupciones de hardware en la CPU (STI)
-    kprint!("[INIT] Habilitando interrupciones de hardware en CPU (STI)...   ");
-    unsafe {
-        asm!("sti");
-    }
+    // 11. Interrupciones se habilitarán tras completar pruebas de arranque e interfaz inicial
+    kprint!("[INIT] Preparando interrupciones de hardware en CPU (STI)...    ");
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n\n");
 
     // 12. Validación dinámica automática de asignación en Heap (Box, Vec, String)
@@ -320,8 +316,13 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
         crate::gui::desktop::render_desktop();
     }
 
-    // 14. Bucle principal de la Tarea 0: sondeo de red + tick de malla + espera de interrupciones
+    // 14. Habilitar interrupciones (STI) y entrar al bucle principal de la Tarea 0
+    unsafe {
+        asm!("sti");
+    }
     loop {
+        // Procesar entrada pendiente de teclado PS/2 y puerto serie COM1 en contexto de Tarea 0 (IF=1)
+        crate::interrupts::process_pending_input();
         // Sondear anillo RX del E1000 para recibir tramas (ARP, ICMP, UDP/BeaverSync)
         crate::drivers::net::net_poll_rx();
         // Mantenimiento de la malla: anuncio periodico cada 2 s + expiracion de nodos en 10 s

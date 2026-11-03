@@ -35,7 +35,7 @@ pub const VBE_DISPI_NOCLEARMEM: u16  = 0x80;
 
 pub const DEFAULT_LFB_PHYSICAL_ADDR: u64 = 0xFD000000;
 
-pub const UEFI_BOOT_INFO_ADDR: u64 = 0x8000;
+pub const UEFI_BOOT_INFO_ADDR: u64 = 0x9000;
 pub const UEFI_BOOT_MAGIC: u32 = 0xBEA0B007;
 
 #[repr(C)]
@@ -47,6 +47,9 @@ pub struct UefiBootInfo {
     pub fb_width: u32,
     pub fb_height: u32,
     pub fb_pixels_per_scanline: u32,
+    pub mem_map_addr: u64,
+    pub mem_map_size: u64,
+    pub mem_desc_size: u64,
 }
 
 impl UefiBootInfo {

@@ -1606,12 +1606,11 @@ impl Shell {
                     crate::drivers::net::send_icmp_ping(target_ip, seq);
                     tx_count += 1;
 
-                    // Esperar respuesta: hasta ~2000 rondas de polling
-                    // Cada ronda: 500 spin_loop + net_poll_rx (no bloqueo infinito)
+                    // Esperar respuesta con ventana suficiente para socket IPC + PIT 100Hz remoto
                     let mut replied = false;
                     let mut ttl_val: u8 = 0;
-                    for _attempt in 0..2000 {
-                        for _ in 0..500 { core::hint::spin_loop(); }
+                    for _attempt in 0..40_000 {
+                        for _ in 0..1_000 { core::hint::spin_loop(); }
                         crate::drivers::net::net_poll_rx();
                         let n = crate::drivers::net::NET_INTERFACE.lock();
                         if n.last_ping_replied {
@@ -2066,46 +2065,49 @@ impl Shell {
                 match subcmd {
                     "announce" | "broadcast" => {
                         kprintln!("[MESH] Emitiendo anuncio de presencia UDP Broadcast a 255.255.255.255:4242...");
-                        crate::drivers::mesh::MESH_MANAGER.lock().send_announce();
+                        crate::drivers::mesh::send_mesh_announce_now();
                         kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Datagrama BEAVMESH transmitido exitosamente.\n");
                     }
                     "query" | "discover" => {
                         kprintln!("[MESH] Consultando nodos en la subred local (UDP :4242)...");
-                        crate::drivers::mesh::MESH_MANAGER.lock().query_network();
+                        crate::drivers::mesh::trigger_mesh_sync();
                         kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Consulta global emitida.\n");
                     }
                     "cluster" | "skynet" | "genisys" => {
                         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
                         let total_cores = mgr.total_cluster_cores();
                         let total_ram = mgr.total_cluster_ram_mb();
-                        kprintln!("================== CLUSTER DE MALLA BEAVER OS (GENISYS) ==================");
-                        kprintln!("  * Arquitectura:            Red Peer-to-Peer Descentralizada (Multi-Dispositivo)");
+                        let online_n = mgr.online_count();
+                        kprintln!("================== CLUSTER DE MALLA BEAVER OS (BEAVMESH) ==================");
+                        kprintln!("  * Arquitectura:            Red Peer-to-Peer Descentralizada (UDP :4242)");
                         kprintln!("  * Cores Totales Agregados: {} nucleos x86_64", total_cores);
-                        kprintln!("  * Memoria Total en Malla:  {} MB ({:.1} GB)", total_ram, (total_ram as f32) / 1024.0);
-                        kprintln!("  * Equipos Conectados:      {} dispositivos activos", mgr.get_nodes().len() + 1);
-                        kprintln!("  * Sincronizacion Global:   100% ACTIVA (LBA 256 Espejado en P2P)");
-                        kprintln!("==========================================================================");
+                        kprintln!("  * Memoria Total en Malla:  {} MB", total_ram);
+                        kprintln!("  * Nodos Remotos Online:    {} ({} registrados)", online_n, mgr.get_nodes().len());
+                        kprintln!("===========================================================================");
                     }
                     "sync" => {
-                        crate::drivers::mesh::MESH_MANAGER.lock().trigger_sync();
+                        crate::drivers::mesh::trigger_mesh_sync();
                         crate::drivers::audio::click_feedback();
-                        kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Sincronizacion forzada completada en todos los dispositivos de la malla.\n");
+                        kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Query + Anuncio emitidos en la malla BeaverSync.\n");
                     }
                     _ => {
-                        kprintln!("================== RED DISTRIBUIDA BEAVER MESH (:4242) ==================");
-                        kprintln!("Nombre Local: beaver-node0 | Protocolo: BEAVMESH v1 | VFS Montado: /net");
-                        kprintln!("-------------------------------------------------------------------------");
-                        kprintln!("{:<16} {:<15} {:<6} {:<10} {:<6} {:<8} {:<10}", "Nodo", "IP", "Cores", "RAM Libre", "Ping", "Estado", "Compartido");
-                        kprintln!("-------------------------------------------------------------------------");
                         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
+                        kprintln!("================== RED DISTRIBUIDA BEAVER MESH (:4242) ==================");
+                        kprintln!("Nombre Local: {} | Protocolo: BEAVMESH v1 | VFS Montado: /net", mgr.local_name);
+                        kprintln!("-------------------------------------------------------------------------");
+                        kprintln!("{:<16} {:<15} {:<6} {:<10} {:<8} {:<8} {:<10}", "Nodo", "IP", "Cores", "RAM", "Uptime", "Estado", "Compartido");
+                        kprintln!("-------------------------------------------------------------------------");
+                        if mgr.get_nodes().is_empty() {
+                            kprintln!("  (sin nodos remotos descubiertos aun)");
+                        }
                         for node in mgr.get_nodes() {
                             let shares_str = node.shares.join(",");
-                            kprintln!("{:<16} {:<15} {:<6} {:<10} {:<6} {:<8} {:<10}",
+                            kprintln!("{:<16} {:<15} {:<6} {:<10} {:<8} {:<8} {:<10}",
                                 node.name,
                                 node.ip.to_string(),
                                 node.cores,
-                                format!("{}/{}M", node.ram_free_mb, node.ram_mb),
-                                format!("{}ms", node.latency_ms),
+                                format!("{} MB", node.ram_mb),
+                                format!("{}s", node.uptime_secs),
                                 node.status,
                                 shares_str
                             );
@@ -2118,12 +2120,11 @@ impl Shell {
 
             "sync" | "meshsync" | "gensync" => {
                 kprintln!("=================== BEAVERSYNC UNIVERSAL MESH ===================");
-                kprintln!("Sincronizando estado y archivos de usuario en toda la red...");
-                crate::drivers::mesh::MESH_MANAGER.lock().trigger_sync();
+                kprintln!("Emitiendo MSG_QUERY + MSG_ANNOUNCE por UDP :4242...");
+                crate::drivers::mesh::trigger_mesh_sync();
                 crate::drivers::audio::click_feedback();
-                kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Sincronizacion completada al 100% con todos los nodos conectados.\n");
-                kprintln!("  * /disk/notas.txt espejado en todos los dispositivos.");
-                kprintln!("  * Carga distribuida balanceada entre 32 cores.");
+                let online_n = crate::drivers::mesh::MESH_MANAGER.lock().online_count();
+                kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Sincronizacion de descubrimiento enviada. Nodos remotos online: {}\n", online_n);
                 kprintln!("=================================================================");
             }
 

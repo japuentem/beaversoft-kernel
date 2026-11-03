@@ -74,6 +74,13 @@ impl MeshManager {
         }
     }
 
+    fn push_log(&mut self, msg: String) {
+        if self.sync_logs.len() >= 10 {
+            self.sync_logs.remove(0);
+        }
+        self.sync_logs.push(msg);
+    }
+
     // -----------------------------------------------------------------------
     // Informacion local
     // -----------------------------------------------------------------------
@@ -90,12 +97,13 @@ impl MeshManager {
 
     /// Calcula la memoria RAM total distribuida disponible en toda la red
     pub fn total_cluster_ram_mb(&self) -> u32 {
-        // La RAM local real proviene del frame allocator; usamos 0 para no falsear
+        let local_frames = crate::memory::frame_allocator::FRAME_ALLOCATOR.total_usable_frames();
+        let local_ram = ((local_frames * 4096) / (1024 * 1024)) as u32;
         let remote_ram: u32 = self.nodes.iter()
             .filter(|n| n.status == "Online")
             .map(|n| n.ram_mb as u32)
             .sum();
-        remote_ram
+        local_ram + remote_ram
     }
 
     // -----------------------------------------------------------------------
@@ -115,10 +123,9 @@ impl MeshManager {
         pkt.push(name_bytes.len() as u8);
         pkt.extend_from_slice(name_bytes);
 
-        // Hardware real: BSP 1 core, RAM reportada por frame allocator (usamos 0 si no disponible)
+        // Hardware real: BSP 1 core, RAM reportada por frame allocator
         let cores: u16 = 1;
         let ram_mb: u16 = {
-            // Leer RAM usable del frame allocator (acceso directo, no lock externo)
             let total = crate::memory::frame_allocator::FRAME_ALLOCATOR.total_usable_frames();
             let mb = (total * 4096) / (1024 * 1024);
             mb as u16
@@ -130,63 +137,67 @@ impl MeshManager {
         pkt
     }
 
-    /// Emite un datagrama UDP Broadcast (255.255.255.255:4242) anunciando este nodo
-    pub fn send_announce(&mut self) {
-        self.announce_seq = self.announce_seq.wrapping_add(1);
-        self.last_announce = get_ticks();
-        let pkt = self.build_announce_packet();
-        send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &pkt);
-    }
-
-    /// Emite una consulta global (MSG_QUERY) pidiendo que todos se identifiquen
-    pub fn query_network(&mut self) {
+    /// Construye el paquete de consulta global (MSG_QUERY)
+    pub fn build_query_packet(&self) -> Vec<u8> {
         let mut pkt = Vec::with_capacity(16);
         pkt.extend_from_slice(MESH_MAGIC);
         pkt.push(MSG_QUERY);
         pkt.push(1);
+        pkt
+    }
+
+    /// Prepara un anuncio incrementando secuencia y devolviendo el datagrama
+    pub fn prepare_announce(&mut self) -> Vec<u8> {
+        self.announce_seq = self.announce_seq.wrapping_add(1);
+        self.last_announce = get_ticks();
+        self.build_announce_packet()
+    }
+
+    /// Emite un datagrama UDP Broadcast (255.255.255.255:4242) anunciando este nodo.
+    /// NOTA: no llamar mientras NET_INTERFACE este bloqueado.
+    pub fn send_announce(&mut self) {
+        let pkt = self.prepare_announce();
+        send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &pkt);
+    }
+
+    /// Emite una consulta global (MSG_QUERY) pidiendo que todos se identifiquen.
+    /// NOTA: no llamar mientras NET_INTERFACE este bloqueado.
+    pub fn query_network(&mut self) {
+        let pkt = self.build_query_packet();
         send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &pkt);
     }
 
     // -----------------------------------------------------------------------
-    // Recepcion de paquetes
+    // Recepcion de paquetes (sin tocar NET_INTERFACE para evitar deadlock)
     // -----------------------------------------------------------------------
 
-    /// Procesa datagramas entrantes en el puerto 4242
-    pub fn handle_packet(&mut self, src_ip: Ipv4Addr, _src_port: u16, payload: &[u8]) {
+    /// Procesa datagramas entrantes en el puerto 4242.
+    /// Devuelve `true` si recibio un `MSG_QUERY` y el llamador debe enviar un anuncio
+    /// una vez liberado el lock de `NET_INTERFACE`.
+    pub fn handle_packet(&mut self, src_ip: Ipv4Addr, _src_port: u16, payload: &[u8]) -> bool {
         if payload.len() < 10 || &payload[0..8] != MESH_MAGIC {
-            return;
+            return false;
         }
 
         let msg_type = payload[8];
         match msg_type {
             MSG_ANNOUNCE | MSG_RESPONSE => {
-                // Formato de anuncio:
-                // [0..8]  magic
-                // [8]     tipo
-                // [9]     version
-                // [10..14] seq (u32 BE)
-                // [14]    len_name
-                // [15..15+len_name] name
-                // [15+N..17+N] cores (u16 BE)
-                // [17+N..19+N] ram_mb (u16 BE)
-                // [19+N..27+N] uptime (u64 BE)
                 if payload.len() < 15 {
-                    return;
+                    return false;
                 }
                 let name_len = payload[14] as usize;
                 if payload.len() < 15 + name_len {
-                    return;
+                    return false;
                 }
                 let name_bytes = &payload[15..15 + name_len];
                 let name = match core::str::from_utf8(name_bytes) {
                     Ok(s) => String::from(s),
-                    Err(_) => return,
+                    Err(_) => return false,
                 };
 
-                // Ignorar anuncios propios (misma IP que nosotros)
-                let my_ip = crate::drivers::net::NET_INTERFACE.lock().ip_address;
-                if src_ip.0 == my_ip.0 {
-                    return;
+                // Ignorar anuncios con nuestro propio nombre local
+                if name == self.local_name {
+                    return false;
                 }
 
                 // Parsear cores, ram_mb, uptime si el paquete es suficientemente largo
@@ -216,19 +227,31 @@ impl MeshManager {
 
                 // Actualizar nodo existente o insertar nuevo
                 if let Some(existing) = self.nodes.iter_mut().find(|n| n.ip.0 == src_ip.0) {
-                    existing.name         = name;
+                    let was_offline = existing.status != "Online";
+                    existing.name         = name.clone();
                     existing.cores        = cores;
                     existing.ram_mb       = ram_mb;
+                    existing.ram_free_mb  = ram_mb;
                     existing.uptime_secs  = uptime_secs;
                     existing.status       = "Online";
                     existing.last_seen    = now;
+                    if was_offline {
+                        self.push_log(format!(
+                            "[MESH] Nodo {} ({}) reconectado ({} MB RAM).",
+                            name, src_ip.to_string(), ram_mb
+                        ));
+                    }
                 } else {
+                    self.push_log(format!(
+                        "[MESH] Nuevo nodo descubierto: {} en {} ({} core, {} MB).",
+                        name, src_ip.to_string(), cores, ram_mb
+                    ));
                     self.nodes.push(MeshNode {
                         name,
                         ip: src_ip,
                         cores,
                         ram_mb,
-                        ram_free_mb: 0,
+                        ram_free_mb: ram_mb,
                         uptime_secs,
                         os_version: "Beaver OS v0.8.0",
                         latency_ms: 1,
@@ -240,39 +263,50 @@ impl MeshManager {
                         last_seen: now,
                     });
                 }
+                false
             }
             MSG_QUERY => {
-                // Alguien pregunta — responder con nuestro anuncio
-                self.send_announce();
+                // Indicar al llamador que envie nuestro anuncio fuera del lock de red
+                true
             }
-            _ => {}
+            _ => false,
         }
     }
 
     // -----------------------------------------------------------------------
-    // Mantenimiento periodico
+    // Mantenimiento periodico (sin enviar paquetes dentro del lock)
     // -----------------------------------------------------------------------
 
-    /// Llama desde el bucle principal del kernel (cada tick).
-    /// 1. Expira nodos sin anuncio en 10 s.
-    /// 2. Envia anuncio propio cada 2 s.
-    pub fn tick(&mut self) {
+    /// Actualiza expiracion de nodos (10 s → Offline, 30 s → eliminar) y
+    /// devuelve `Some(pkt)` si corresponde emitir el anuncio periodico (cada 2 s).
+    pub fn tick_state(&mut self) -> Option<Vec<u8>> {
         let now = get_ticks();
 
-        // Expirar nodos viejos
+        // Expirar nodos sin anuncio en 10 s
+        let mut expired_names: Vec<(String, Ipv4Addr)> = Vec::new();
         for node in self.nodes.iter_mut() {
             if node.status == "Online" && now.saturating_sub(node.last_seen) > NODE_TIMEOUT_TICKS {
                 node.status = "Offline";
+                expired_names.push((node.name.clone(), node.ip));
             }
         }
-        // Eliminar nodos Offline que llevan mas de 30 s (sin anuncio para ser conservadores)
+        for (ename, eip) in expired_names {
+            self.push_log(format!(
+                "[MESH] Nodo {} ({}) sin respuesta (>10s) -> Offline.",
+                ename, eip.to_string()
+            ));
+        }
+
+        // Eliminar nodos Offline que llevan mas de 30 s
         self.nodes.retain(|n| {
             n.status == "Online" || now.saturating_sub(n.last_seen) < NODE_TIMEOUT_TICKS * 3
         });
 
-        // Enviar anuncio cada 2 s
-        if now.saturating_sub(self.last_announce) >= ANNOUNCE_INTERVAL_TICKS {
-            self.send_announce();
+        // Verificar si toca enviar anuncio cada 2 s
+        if self.last_announce == 0 || now.saturating_sub(self.last_announce) >= ANNOUNCE_INTERVAL_TICKS {
+            Some(self.prepare_announce())
+        } else {
+            None
         }
     }
 
@@ -280,19 +314,24 @@ impl MeshManager {
     // Sincronizacion manual (boton GUI)
     // -----------------------------------------------------------------------
 
-    /// Dispara una query + anuncio inmediato (boton "Sincronizar Malla Ahora")
-    pub fn trigger_sync(&mut self) {
+    /// Registra la sincronizacion manual y prepara los paquetes (query, announce)
+    pub fn prepare_sync_packets(&mut self) -> (Vec<u8>, Vec<u8>) {
         self.sync_count += 1;
-        self.query_network();
-        self.send_announce();
-        if self.sync_logs.len() > 10 {
-            self.sync_logs.remove(0);
-        }
+        let query_pkt = self.build_query_packet();
+        let announce_pkt = self.prepare_announce();
         let n = self.nodes.iter().filter(|x| x.status == "Online").count();
-        self.sync_logs.push(format!(
-            "[SYNC #{}] Query enviada. Nodos online: {}.",
+        self.push_log(format!(
+            "[SYNC #{}] MSG_QUERY + MSG_ANNOUNCE enviados. Nodos online: {}.",
             self.sync_count, n
         ));
+        (query_pkt, announce_pkt)
+    }
+
+    /// Dispara una query + anuncio inmediato (para llamadas desde shell cuando NET_INTERFACE esta libre)
+    pub fn trigger_sync(&mut self) {
+        let (q, a) = self.prepare_sync_packets();
+        send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &q);
+        send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &a);
     }
 
     // -----------------------------------------------------------------------
@@ -334,7 +373,7 @@ impl MeshManager {
 }
 
 // ---------------------------------------------------------------------------
-// Instancia global y helpers de modulo
+// Instancia global y helpers de modulo (desacoplados del lock para evitar deadlock)
 // ---------------------------------------------------------------------------
 
 pub static MESH_MANAGER: SpinLock<MeshManager> = SpinLock::new(MeshManager {
@@ -353,22 +392,40 @@ pub fn init_mesh() {
     let hostname = format!("beaver-{:02x}{:02x}", mac[4], mac[5]);
     let mut mgr = MESH_MANAGER.lock();
     *mgr = MeshManager::new();
-    mgr.local_name = hostname;
+    mgr.local_name = hostname.clone();
+    mgr.push_log(format!("[MESH] Nodo local inicializado como '{}' (UDP :4242).", hostname));
 }
 
-/// Dispara la sincronizacion de la malla desacoplando el lock de la transmision de red
-pub fn trigger_mesh_sync() {
-    let pkt = {
-        let mut mgr = MESH_MANAGER.lock();
-        mgr.trigger_sync();
-        mgr.build_announce_packet()
+/// Envia un anuncio inmediato desacoplando MESH_MANAGER de NET_INTERFACE
+pub fn send_mesh_announce_now() {
+    let pkt = if let Some(mut mgr) = MESH_MANAGER.try_lock() {
+        Some(mgr.prepare_announce())
+    } else {
+        None
     };
-    send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &pkt);
+    if let Some(p) = pkt {
+        send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &p);
+    }
+}
+
+/// Dispara la sincronizacion de la malla (query + announce) desacoplando el lock de la red
+pub fn trigger_mesh_sync() {
+    let (query_pkt, announce_pkt) = {
+        let mut mgr = MESH_MANAGER.lock();
+        mgr.prepare_sync_packets()
+    };
+    send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &query_pkt);
+    send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &announce_pkt);
 }
 
 /// Llamar desde el bucle principal del kernel para mantener la malla viva
 pub fn mesh_tick() {
-    if let Some(mut mgr) = MESH_MANAGER.try_lock() {
-        mgr.tick();
+    let pkt = if let Some(mut mgr) = MESH_MANAGER.try_lock() {
+        mgr.tick_state()
+    } else {
+        None
+    };
+    if let Some(p) = pkt {
+        send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &p);
     }
 }

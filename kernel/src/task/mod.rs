@@ -135,10 +135,11 @@ pub fn telemetry_worker() {
                 2 => b'-',
                 _ => b'\\',
             };
-            let mut vga = VGA_WRITER.lock();
-            vga.write_str_at(0, 48, "[TH1: ", VgaColor::Yellow, VgaColor::Black);
-            vga.write_char_at(0, 54, spinner, VgaColor::Yellow, VgaColor::Black);
-            vga.write_char_at(0, 55, b']', VgaColor::Yellow, VgaColor::Black);
+            if let Some(mut vga) = VGA_WRITER.try_lock() {
+                vga.write_str_at(0, 48, "[TH1: ", VgaColor::Yellow, VgaColor::Black);
+                vga.write_char_at(0, 54, spinner, VgaColor::Yellow, VgaColor::Black);
+                vga.write_char_at(0, 55, b']', VgaColor::Yellow, VgaColor::Black);
+            }
         }
 
         // Dormir durante 100 ticks (1 segundo) liberando la CPU para otras tareas
@@ -152,8 +153,9 @@ pub fn storage_guard_worker() {
     loop {
         // Indicador de guardia en esquina superior (fila 0, col 34) sin alterar el cursor de hardware
         {
-            let mut vga = VGA_WRITER.lock();
-            vga.write_str_at(0, 34, "[GUARD: OK]", VgaColor::LightGreen, VgaColor::Black);
+            if let Some(mut vga) = VGA_WRITER.try_lock() {
+                vga.write_str_at(0, 34, "[GUARD: OK]", VgaColor::LightGreen, VgaColor::Black);
+            }
         }
 
         // Dormir durante 300 ticks (3 segundos)

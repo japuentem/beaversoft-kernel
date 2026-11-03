@@ -237,31 +237,43 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
     // sin alterar la posición ni visibilidad del cursor de hardware
     if ticks % 100 == 0 {
         let seconds = ticks / 100;
-        let mut vga = VGA_WRITER.lock();
-        vga.write_str_at(0, 62, "[ UPTIME: ", VgaColor::LightCyan, VgaColor::Blue);
-        
-        let mut num = seconds;
-        let mut buf = [b'0'; 5];
-        let mut idx = 5;
-        if num == 0 {
-            idx -= 1;
-        } else {
-            while num > 0 && idx > 0 {
+        if let Some(mut vga) = VGA_WRITER.try_lock() {
+            vga.write_str_at(0, 62, "[ UPTIME: ", VgaColor::LightCyan, VgaColor::Blue);
+            
+            let mut num = seconds;
+            let mut buf = [b'0'; 5];
+            let mut idx = 5;
+            if num == 0 {
                 idx -= 1;
-                buf[idx] = b'0' + (num % 10) as u8;
-                num /= 10;
+            } else {
+                while num > 0 && idx > 0 {
+                    idx -= 1;
+                    buf[idx] = b'0' + (num % 10) as u8;
+                    num /= 10;
+                }
             }
+            for (offset, i) in (idx..5).enumerate() {
+                vga.write_char_at(0, 72 + offset, buf[i], VgaColor::LightCyan, VgaColor::Blue);
+            }
+            let total_digits = 5 - idx;
+            vga.write_str_at(0, 72 + total_digits, "s ]", VgaColor::LightCyan, VgaColor::Blue);
         }
-        for (offset, i) in (idx..5).enumerate() {
-            vga.write_char_at(0, 72 + offset, buf[i], VgaColor::LightCyan, VgaColor::Blue);
-        }
-        let total_digits = 5 - idx;
-        vga.write_str_at(0, 72 + total_digits, "s ]", VgaColor::LightCyan, VgaColor::Blue);
     }
 
     // Polling de COM1 para soporte de shell interactivo por puerto serie (QEMU stdio)
+    // IMPORTANTE: liberar el lock de SERIAL antes de llamar a dispatch_input_char
     static mut SERIAL_ESC: u8 = 0;
-    while let Some(b) = crate::serial::SERIAL.lock().read_byte() {
+    loop {
+        let maybe_b = if let Some(serial) = crate::serial::SERIAL.try_lock() {
+            serial.read_byte()
+        } else {
+            None
+        };
+        let b = match maybe_b {
+            Some(byte) => byte,
+            None => break,
+        };
+
         let esc = unsafe { SERIAL_ESC };
         if esc == 0 {
             if b == 0x1B {
@@ -278,10 +290,10 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
         } else if esc == 2 {
             unsafe { SERIAL_ESC = 0; }
             if b == b'A' {
-                dispatch_input_char(crate::drivers::keyboard::KEY_UP_ARROW);
+                push_input_char(crate::drivers::keyboard::KEY_UP_ARROW);
                 continue;
             } else if b == b'B' {
-                dispatch_input_char(crate::drivers::keyboard::KEY_DOWN_ARROW);
+                push_input_char(crate::drivers::keyboard::KEY_DOWN_ARROW);
                 continue;
             }
         }
@@ -292,7 +304,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
             c if c >= 0x20 && c <= 0x7E => c as char,
             _ => continue,
         };
-        dispatch_input_char(ch);
+        push_input_char(ch);
     }
 
     unsafe {
@@ -302,6 +314,74 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
     // Conmutación preemptiva cada 5 ticks (quantum de 50ms)
     if ticks % 5 == 0 {
         crate::task::scheduler::schedule_tick();
+    }
+}
+
+struct InputQueue {
+    buf: [char; 256],
+    head: usize,
+    tail: usize,
+}
+
+impl InputQueue {
+    const fn new() -> Self {
+        Self {
+            buf: ['\0'; 256],
+            head: 0,
+            tail: 0,
+        }
+    }
+
+    fn push(&mut self, ch: char) {
+        let next = (self.tail + 1) % 256;
+        if next != self.head {
+            self.buf[self.tail] = ch;
+            self.tail = next;
+        }
+    }
+
+    fn pop(&mut self) -> Option<char> {
+        if self.head == self.tail {
+            None
+        } else {
+            let ch = self.buf[self.head];
+            self.head = (self.head + 1) % 256;
+            Some(ch)
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.head == self.tail
+    }
+}
+
+static INPUT_QUEUE: crate::sync::SpinMutex<InputQueue> = crate::sync::SpinMutex::new(InputQueue::new());
+
+pub fn push_input_char(ch: char) {
+    if let Some(mut q) = INPUT_QUEUE.try_lock() {
+        q.push(ch);
+    }
+}
+
+pub fn has_pending_input() -> bool {
+    if let Some(q) = INPUT_QUEUE.try_lock() {
+        !q.is_empty()
+    } else {
+        false
+    }
+}
+
+pub fn process_pending_input() {
+    loop {
+        let maybe_ch = if let Some(mut q) = INPUT_QUEUE.try_lock() {
+            q.pop()
+        } else {
+            None
+        };
+        match maybe_ch {
+            Some(ch) => dispatch_input_char(ch),
+            None => break,
+        }
     }
 }
 
@@ -321,7 +401,7 @@ pub fn dispatch_input_char(ch: char) {
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame) {
     if let Some(ch) = keyboard::on_keyboard_interrupt() {
-        dispatch_input_char(ch);
+        push_input_char(ch);
     }
 
     unsafe {

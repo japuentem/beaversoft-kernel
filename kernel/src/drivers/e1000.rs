@@ -220,10 +220,15 @@ impl E1000Driver {
             };
             self.rx_bufs[i] = buf_addr as *mut u8;
             unsafe {
-                let desc = &mut *self.rx_descs.add(i);
-                *desc = RxDesc::zero();
-                desc.addr = buf_addr as u64;
-                desc.status = 0;
+                let desc_ptr = self.rx_descs.add(i);
+                desc_ptr.write_volatile(RxDesc {
+                    addr: buf_addr as u64,
+                    length: 0,
+                    csum: 0,
+                    status: 0,
+                    errors: 0,
+                    special: 0,
+                });
             }
         }
         self.rx_tail = NUM_RX_DESC - 1;
@@ -234,9 +239,9 @@ impl E1000Driver {
             self.write_reg(E1000_REG_RDLEN, (NUM_RX_DESC * 16) as u32);
             self.write_reg(E1000_REG_RDH, 0);
             self.write_reg(E1000_REG_RDT, self.rx_tail as u32);
-            // RCTL: habilitar | broadcast | strip CRC | buffer 2048
+            // RCTL: habilitar | unicast/multicast/broadcast | strip CRC | buffer 2048
             self.write_reg(E1000_REG_RCTL,
-                E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_SECRC | E1000_RCTL_BSIZE);
+                E1000_RCTL_EN | E1000_RCTL_UPE | E1000_RCTL_MPE | E1000_RCTL_BAM | E1000_RCTL_SECRC | E1000_RCTL_BSIZE);
         }
 
         // 3. Configurar anillo TX
@@ -254,10 +259,16 @@ impl E1000Driver {
             };
             self.tx_bufs[i] = buf_addr as *mut u8;
             unsafe {
-                let desc = &mut *self.tx_descs.add(i);
-                *desc = TxDesc::zero();
-                desc.addr = buf_addr as u64;
-                desc.status = E1000_TXD_STAT_DD; // Marcar como libre inicialmente
+                let desc_ptr = self.tx_descs.add(i);
+                desc_ptr.write_volatile(TxDesc {
+                    addr: buf_addr as u64,
+                    length: 0,
+                    cso: 0,
+                    cmd: 0,
+                    status: E1000_TXD_STAT_DD, // Marcar como libre inicialmente
+                    css: 0,
+                    special: 0,
+                });
             }
         }
         self.tx_tail = 0;
@@ -292,10 +303,11 @@ impl E1000Driver {
         }
 
         let tail = self.tx_tail;
-        let desc = unsafe { &mut *self.tx_descs.add(tail) };
+        let desc_ptr = unsafe { self.tx_descs.add(tail) };
 
         // Verificar que el descriptor esta libre (DD=1 significa que el HW termino)
-        if desc.status & E1000_TXD_STAT_DD == 0 {
+        let cur_status = unsafe { core::ptr::addr_of!((*desc_ptr).status).read_volatile() };
+        if cur_status & E1000_TXD_STAT_DD == 0 {
             // Buffer ocupado — la cola TX esta llena; descartar este paquete
             return false;
         }
@@ -303,12 +315,13 @@ impl E1000Driver {
         // Copiar trama al buffer DMA
         unsafe {
             core::ptr::copy_nonoverlapping(frame.as_ptr(), self.tx_bufs[tail], frame.len());
+            core::ptr::addr_of_mut!((*desc_ptr).length).write_volatile(frame.len() as u16);
+            core::ptr::addr_of_mut!((*desc_ptr).cmd).write_volatile(
+                E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS
+            );
+            core::ptr::addr_of_mut!((*desc_ptr).status).write_volatile(0);
         }
-
-        // Configurar descriptor
-        desc.length = frame.len() as u16;
-        desc.cmd    = E1000_TXD_CMD_EOP | E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
-        desc.status = 0; // Limpiar DD para que el HW sepa que esta pendiente
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
 
         // Avanzar TX tail para notificar al hardware
         self.tx_tail = (tail + 1) % NUM_TX_DESC;
@@ -316,10 +329,11 @@ impl E1000Driver {
             self.write_reg(E1000_REG_TDT, self.tx_tail as u32);
         }
 
-        // Esperar confirmacion DD (con limite para no bloquear indefinidamente)
+        // Esperar confirmacion DD con lectura volatile (limite de iteraciones)
         for _ in 0..50_000 {
             core::hint::spin_loop();
-            if desc.status & E1000_TXD_STAT_DD != 0 {
+            let st = unsafe { core::ptr::addr_of!((*desc_ptr).status).read_volatile() };
+            if st & E1000_TXD_STAT_DD != 0 {
                 return true;
             }
         }
@@ -341,29 +355,29 @@ impl E1000Driver {
     {
         if !self.initialized { return; }
 
-        loop {
-            let head = unsafe { self.read_reg(E1000_REG_RDH) } as usize;
+        for _ in 0..NUM_RX_DESC {
             let next = (self.rx_tail + 1) % NUM_RX_DESC;
-            if next == head {
-                break; // Cola vacia: head == siguiente a nuestro tail
+            let desc_ptr = unsafe { self.rx_descs.add(next) };
+            let status = unsafe { core::ptr::addr_of!((*desc_ptr).status).read_volatile() };
+            if status & E1000_RXD_STAT_DD == 0 {
+                break; // El hardware aun no escribio en el siguiente descriptor
             }
 
-            let desc = unsafe { &mut *self.rx_descs.add(next) };
-            if desc.status & E1000_RXD_STAT_DD == 0 {
-                break; // El hardware aun no escribio aqui
-            }
-
-            if desc.status & E1000_RXD_STAT_EOP != 0 && desc.length > 0 {
-                let len = desc.length as usize;
+            let length = unsafe { core::ptr::addr_of!((*desc_ptr).length).read_volatile() };
+            if status & E1000_RXD_STAT_EOP != 0 && length > 0 {
+                let len = (length as usize).min(RX_BUF_SIZE);
                 let buf = unsafe {
-                    core::slice::from_raw_parts(self.rx_bufs[next], len.min(RX_BUF_SIZE))
+                    core::slice::from_raw_parts(self.rx_bufs[next], len)
                 };
                 callback(buf);
             }
 
-            // Reciclar descriptor: limpiar status y devolver al hardware
-            desc.status = 0;
-            desc.length = 0;
+            // Reciclar descriptor: limpiar status/length con write_volatile y devolver al HW
+            unsafe {
+                core::ptr::addr_of_mut!((*desc_ptr).status).write_volatile(0);
+                core::ptr::addr_of_mut!((*desc_ptr).length).write_volatile(0);
+            }
+            core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
 
             self.rx_tail = next;
             unsafe {

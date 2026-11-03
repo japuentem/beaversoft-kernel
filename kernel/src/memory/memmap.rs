@@ -114,9 +114,9 @@ pub unsafe fn parse_multiboot1(info_ptr: u64) -> MemMap {
         if size == 0 { break; }
 
         // base_addr está en offset 4, length en offset 12, type en offset 20
-        let base_addr  = *((entry_base as usize + 4)  as *const u64);
-        let length     = *((entry_base as usize + 12) as *const u64);
-        let entry_type = *((entry_base as usize + 20) as *const u32);
+        let base_addr  = ((entry_base as usize + 4)  as *const u64).read_unaligned();
+        let length     = ((entry_base as usize + 12) as *const u64).read_unaligned();
+        let entry_type = ((entry_base as usize + 20) as *const u32).read_unaligned();
 
         map.push(MemRegion {
             start:  base_addr,
@@ -164,9 +164,9 @@ pub unsafe fn parse_uefi(map_addr: u64, map_size: u64, desc_size: u64) -> MemMap
     for i in 0..num_descs {
         let desc_base = (map_addr + i as u64 * desc_size) as *const u8;
 
-        let mem_type  = *(desc_base as *const u32);             // offset 0
-        let phys_start = *((desc_base as usize + 8) as *const u64);  // offset 8
-        let num_pages  = *((desc_base as usize + 24) as *const u64); // offset 24
+        let mem_type   = (desc_base as *const u32).read_unaligned();             // offset 0
+        let phys_start = ((desc_base as usize + 8) as *const u64).read_unaligned();  // offset 8
+        let num_pages  = ((desc_base as usize + 24) as *const u64).read_unaligned(); // offset 24
 
         let usable = matches!(mem_type, 3 | 4 | 7 | 14);
 
@@ -187,15 +187,9 @@ pub fn parse_and_print(boot_magic: u64, boot_info: u64) -> MemMap {
         if boot_magic == BOOT_MAGIC_MB1 {
             parse_multiboot1(boot_info)
         } else if boot_magic == BOOT_MAGIC_UEFI {
-            // boot_info apunta a UefiBootInfo en 0x9000
-            // Leemos los campos mem_map_* que empiezan en offset 32 (despues de magic+5 campos)
-            // Layout: magic(u32)+pad(4)+fb_base(8)+fb_size(8)+w(4)+h(4)+scanline(4)+pad(4)+mem_map_addr(8)+mem_map_size(8)+mem_desc_size(8)
-            // Calculamos offsets manualmente para no depender de repr(C) del UEFI loader
-            let base = boot_info as *const u8;
-            let mem_map_addr  = *((base as usize + 36) as *const u64);
-            let mem_map_size  = *((base as usize + 44) as *const u64);
-            let mem_desc_size = *((base as usize + 52) as *const u64);
-            parse_uefi(mem_map_addr, mem_map_size, mem_desc_size)
+            // boot_info apunta a UefiBootInfo en 0x9000 (repr(C))
+            let info = (boot_info as *const crate::drivers::vbe::UefiBootInfo).read_unaligned();
+            parse_uefi(info.mem_map_addr, info.mem_map_size, info.mem_desc_size)
         } else {
             // Arranque desconocido o Multiboot 2 (no implementado aun)
             MemMap::empty()
