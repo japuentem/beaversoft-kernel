@@ -102,15 +102,83 @@ pub fn read_rtc_datetime() -> RtcDateTime {
     }
 
     year += 2000;
-    if year < 2026 || year > 2099 {
-        year = 2026;
-    }
     if month == 0 || month > 12 {
-        month = 10;
+        month = 1;
     }
     if day == 0 || day > 31 {
-        day = 31;
+        day = 1;
     }
 
     RtcDateTime { second: sec, minute: min, hour, day, month, year }
+}
+
+/// Desfase de zona horaria local respecto a UTC (México Centro: UTC-6).
+/// El RTC de QEMU (y de la mayoría de equipos con firmware UEFI) entrega la hora en UTC.
+pub const TZ_OFFSET_HOURS: i8 = -6;
+
+/// Número de días del mes indicado (considera años bisiestos gregorianos)
+pub fn days_in_month(month: u8, year: u16) -> u8 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+/// Día de la semana (algoritmo de Tomohiko Sakamoto, aritmética entera).
+/// Devuelve 0 = Domingo, 1 = Lunes, ..., 6 = Sábado.
+pub fn day_of_week(year: u16, month: u8, day: u8) -> u8 {
+    const T: [u16; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let mut y = year as u32;
+    if month < 3 {
+        y -= 1;
+    }
+    let m = (month.clamp(1, 12) - 1) as usize;
+    ((y + y / 4 - y / 100 + y / 400 + T[m] as u32 + day as u32) % 7) as u8
+}
+
+/// Fecha y hora local: lee el RTC (UTC) y aplica `TZ_OFFSET_HOURS` con acarreo de día/mes/año
+pub fn local_datetime() -> RtcDateTime {
+    let mut dt = read_rtc_datetime();
+    let mut hour = dt.hour as i16 + TZ_OFFSET_HOURS as i16;
+
+    if hour < 0 {
+        hour += 24;
+        // Retroceder un día
+        if dt.day > 1 {
+            dt.day -= 1;
+        } else {
+            if dt.month > 1 {
+                dt.month -= 1;
+            } else {
+                dt.month = 12;
+                dt.year -= 1;
+            }
+            dt.day = days_in_month(dt.month, dt.year);
+        }
+    } else if hour >= 24 {
+        hour -= 24;
+        // Avanzar un día
+        if dt.day < days_in_month(dt.month, dt.year) {
+            dt.day += 1;
+        } else {
+            dt.day = 1;
+            if dt.month < 12 {
+                dt.month += 1;
+            } else {
+                dt.month = 1;
+                dt.year += 1;
+            }
+        }
+    }
+
+    dt.hour = hour as u8;
+    dt
 }

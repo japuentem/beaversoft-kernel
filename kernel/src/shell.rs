@@ -1593,7 +1593,8 @@ impl Shell {
 
             "dhcp" => {
                 if !args.is_empty() && args[0] == "renew" {
-                    kprintln!("[DHCP] Iniciando negociación broadcast DHCP DISCOVER (RFC 2131)...");
+                    kprintln!("[DEMO][DHCP] Respuesta simulada - driver E1000 DMA aun no implementado");
+                    kprintln!("[DHCP] Iniciando negociacion broadcast DHCP DISCOVER (RFC 2131)...");
                     match crate::drivers::net::dhcp_discover_and_configure() {
                         Ok(lease) => {
                             kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[DHCP CONCESION RENOVADA EXITOSAMENTE]\n");
@@ -1632,6 +1633,7 @@ impl Shell {
                 let domain = args[0];
                 match crate::drivers::net::resolve_dns(domain) {
                     Ok(ip) => {
+                        kprintln!("[DEMO] Respuesta simulada - DNS real no implementado (driver E1000 DMA pendiente)");
                         kprintln!("Servidor DNS: 10.0.2.3#53");
                         kprintln!("Nombre:       {}", domain);
                         kprintln!("Direccion:    {}", ip.to_string());
@@ -1647,6 +1649,7 @@ impl Shell {
                 }
                 let url = args[0];
                 if url.starts_with("https://") {
+                    kprintln!("[DEMO][CURL] Respuesta simulada - TLS/E1000 DMA no implementado");
                     kprintln!("[CURL] Estableciendo canal seguro TLS 1.3 / HTTPS hacia {}...", url);
                     match crate::crypto::https_get(url) {
                         Ok(resp) => {
@@ -1659,6 +1662,7 @@ impl Shell {
                         Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[TLS ERROR] {}\n", e),
                     }
                 } else {
+                    kprintln!("[DEMO][CURL] Respuesta simulada - driver E1000 DMA no implementado");
                     kprintln!("[CURL] Conectando a {}...", url);
                     match crate::drivers::net::http_get(url) {
                         Ok(resp) => {
@@ -1675,19 +1679,21 @@ impl Shell {
 
             "smp" | "cores" => {
                 let smp = crate::apic::SMP.lock();
-                kprintln!("======================= TOPOLOGIA SMP MULTI-CORE =======================");
+                kprintln!("======================= TOPOLOGIA SMP ======================");
+                kprintln!("  [DEMO] SMP multinucleo deshabilitado - arranque uniprocessor");
                 kprintln!("  Local APIC Base:     {:#010x} (MSR 0x1B)", smp.lapic_base);
                 kprintln!("  Temporizador LAPIC:  Activo en modo Periodico (Vector 48 @ 100 Hz)");
                 kprintln!("  Bootstrap Core (BSP):APIC ID #{}", smp.bsp_apic_id);
-                kprintln!("  Nucleos Detectados:  {} nucleos fisicos/virtuales", smp.cores.len());
-                kprintln!("-------------------------------------------------------------------------");
+                kprintln!("  Nucleos Activos:     {} (solo BSP - SMP pendiente de implementacion)", smp.cores.len());
+                kprintln!("-------------------------------------------------------------");
                 for core in &smp.cores {
                     let role = if core.is_bsp { "[BSP Master]" } else { "[AP Worker]" };
-                    let status = if core.is_online { "ONLINE (INIT-SIPI-SIPI OK)" } else { "OFFLINE" };
+                    let status = if core.is_online { "ONLINE" } else { "OFFLINE" };
                     kprintln!("  Core #{} (APIC ID #{}): {:<14} | Estado: {}", core.core_id, core.apic_id, role, status);
                 }
-                kprintln!("  Planificador:        Time-Slicing Preemptivo con Quantum Equitativo");
-                kprintln!("=========================================================================");
+                kprintln!("  Planificador:        Time-Slicing cooperativo (1 core)");
+                kprintln!("  Pendiente:           MADT/ACPI + trampolines 16-bit + stacks AP");
+                kprintln!("=============================================================");
             }
 
             "sockets" | "sock" => {

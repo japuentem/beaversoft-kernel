@@ -96,25 +96,39 @@ pub fn render_desktop() {
     draw_sidebar_icon(396, 6, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
     Canvas::draw_string_prop(416, 6, "Buscar", topbar_text, None);
 
-    // Píldoras de estado con bordes redondeados y tipografía proporcional
-    Canvas::fill_rounded_rect(485, 4, 110, 20, 10, pill_bg);
+    // Píldora de estado de la malla. [DEMO]: los nodos de mesh.rs aún están codificados
+    // (ver docs/plan_continuacion_2026-11-01.md, Fase 5). Se quitará la etiqueta cuando el descubrimiento sea real.
+    let mesh_text = "Mesh: 4 Nodos  |  Sync: 100%";
+    let demo_w = Canvas::string_width_prop("DEMO");
+    let mesh_w = Canvas::string_width_prop(mesh_text);
+    let mesh_pill_w = (demo_w + mesh_w + 30).min(210);
+    Canvas::fill_rounded_rect(485, 4, mesh_pill_w, 20, 10, pill_bg);
     Canvas::fill_circle(495, 14, 3, Color::BEAVER_TEAL_BRIGHT);
-    Canvas::draw_string_prop(503, 6, "Mesh: 4 Nodos", topbar_text, None);
+    Canvas::draw_string_prop(503, 6, "DEMO", Color::BEAVER_AMBER, None);
+    Canvas::draw_string_prop(503 + demo_w + 8, 6, mesh_text, topbar_text, None);
 
-    Canvas::fill_rounded_rect(602, 4, 95, 20, 10, pill_bg);
-    Canvas::fill_circle(612, 14, 3, Color::BEAVER_EMERALD);
-    Canvas::draw_string_prop(620, 6, "Sync: 100%", topbar_text, None);
-
-    // Botón Conmutador de Tema (Día / Noche)
+    // Botón Conmutador de Tema (Día / Noche) con icono dibujado (la fuente VGA 8x16 no tiene emojis)
     Canvas::fill_rounded_rect(704, 4, 85, 20, 10, pill_bg);
-    let theme_label = match theme {
-        DesktopTheme::DarkCosmic => "🌙 Noche",
-        DesktopTheme::LightNordic => "☀️ Dia",
-    };
-    Canvas::draw_string_prop(714, 6, theme_label, Color::BEAVER_AMBER, None);
+    match theme {
+        DesktopTheme::DarkCosmic => {
+            // Luna creciente: círculo ámbar recortado por un círculo del color de la píldora
+            Canvas::fill_circle(717, 14, 6, Color::BEAVER_AMBER);
+            Canvas::fill_circle(720, 12, 5, pill_bg);
+            Canvas::draw_string_prop(730, 6, "Noche", Color::BEAVER_AMBER, None);
+        }
+        DesktopTheme::LightNordic => {
+            // Sol: disco central con 4 rayos
+            Canvas::fill_circle(717, 14, 4, Color::BEAVER_AMBER);
+            Canvas::draw_line_h(709, 14, 3, Color::BEAVER_AMBER);
+            Canvas::draw_line_h(723, 14, 3, Color::BEAVER_AMBER);
+            Canvas::draw_line_v(717, 6, 3, Color::BEAVER_AMBER);
+            Canvas::draw_line_v(717, 20, 3, Color::BEAVER_AMBER);
+            Canvas::draw_string_prop(730, 6, "Dia", Color::BEAVER_AMBER_DARK, None);
+        }
+    }
 
-    // Fecha, Reloj y Usuario obtenidos del chip CMOS RTC
-    let rtc = crate::drivers::timer::read_rtc_datetime();
+    // Fecha y hora LOCAL (RTC en UTC + desfase TZ_OFFSET_HOURS), usuario y tiempo de actividad
+    let rtc = crate::drivers::timer::local_datetime();
     let (_, _, curr_user) = SCHEDULER.lock().current_credentials();
     let uptime = get_uptime_seconds();
     let status_right = format!("{:02}/{:02} {:02}:{:02} | {} ({}s)", rtc.day, rtc.month, rtc.hour, rtc.minute, curr_user, uptime);
@@ -367,13 +381,13 @@ pub fn draw_files_window() {
 
     Canvas::draw_string_prop(x + 12, y + 190, "RED MALLA", Color::BEAVER_TEXT_MUTED, None);
     draw_sidebar_icon(x + 12, y + 210, SidebarIconKind::Mesh, Color::BEAVER_TEAL);
-    Canvas::draw_string_prop(x + 34, y + 210, "station (:15)", Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop(x + 34, y + 210, "[DEMO] station (:15)", Color::BEAVER_TEXT_MUTED, None);
 
     draw_sidebar_icon(x + 12, y + 232, SidebarIconKind::Mesh, Color::BEAVER_TEAL);
-    Canvas::draw_string_prop(x + 34, y + 232, "laptop  (:18)", Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop(x + 34, y + 232, "[DEMO] laptop  (:18)", Color::BEAVER_TEXT_MUTED, None);
 
     draw_sidebar_icon(x + 12, y + 254, SidebarIconKind::Mesh, Color::BEAVER_TEAL);
-    Canvas::draw_string_prop(x + 34, y + 254, "server  (:20)", Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop(x + 34, y + 254, "[DEMO] server  (:20)", Color::BEAVER_TEXT_MUTED, None);
 
     // 2. Panel Principal Derecho (Lienzo Blanco / Lord OS)
     let main_x = x + sb_w + 10;
@@ -649,7 +663,7 @@ pub fn draw_sync_window() {
         }
     };
 
-    Canvas::draw_window(x, y, w, h, "BeaverSync - Sincronizacion Universal de Dispositivos (Malla Genisys)", is_active);
+    Canvas::draw_window(x, y, w, h, "[DEMO] BeaverSync - Malla de Dispositivos (nodos simulados)", is_active);
 
     let (nodes, total_cores, total_ram, sync_count, logs) = {
         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
@@ -657,9 +671,10 @@ pub fn draw_sync_window() {
     };
 
     // 1. Barra Superior del Panel de Sincronización
-    Canvas::fill_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0xECFDF5);
-    Canvas::draw_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0xA7F3D0);
-    Canvas::draw_string_prop(x + 18, y + 41, "ESTADO: 100% SINCRONIZADO EN TIEMPO REAL (P2P MESH)", Color::BEAVER_EMERALD, None);
+    // [DEMO]: hasta la Fase 5 del plan (driver E1000 real + descubrimiento UDP) los nodos están codificados en mesh.rs
+    Canvas::fill_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0xFEF3C7);
+    Canvas::draw_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0xFCD34D);
+    Canvas::draw_string_prop(x + 18, y + 41, "DEMO: nodos simulados - la red aun no transmite por la tarjeta E1000", Color::BEAVER_AMBER_DARK, None);
     let right_stats = format!("Syncs: #{} | Nodos: {}", sync_count, nodes.len() + 1);
     Canvas::draw_string_prop(x + w.saturating_sub(210), y + 41, &right_stats, Color::BEAVER_AMBER_DARK, None);
 
@@ -719,7 +734,7 @@ pub fn draw_sync_window() {
     // Botón Interactivo: "Sincronizar Malla Ahora"
     let sync_btn_y = y + 210;
     Canvas::fill_rounded_rect(right_x + 10, sync_btn_y, right_w.saturating_sub(20), 32, 6, Color::BEAVER_AMBER);
-    Canvas::draw_string_prop(right_x + 20, sync_btn_y + 10, "⚡ Sincronizar Malla Ahora", Color::WHITE, None);
+    Canvas::draw_string_prop(right_x + 20, sync_btn_y + 10, "Sincronizar Malla Ahora (DEMO)", Color::WHITE, None);
 
     // 4. Panel Inferior: Telemetría de Sincronización en Tiempo Real
     let feed_y = y + 260;
@@ -798,8 +813,8 @@ pub fn draw_photos_window() {
     let main_x = x + sb_w + 12;
     let main_w = w.saturating_sub(sb_w + 20);
 
-    Canvas::draw_string_prop(main_x, y + 42, "Todas las Fotos  *  Octubre 2026", Color::BEAVER_TEXT_DARK, None);
-    Canvas::draw_string_prop(main_x + main_w.saturating_sub(130), y + 42, "Zoom: [-] ──●── [+]", Color::BEAVER_TEXT_MUTED, None);
+    Canvas::draw_string_prop(main_x, y + 42, "Galeria de ejemplo (miniaturas generadas por codigo)", Color::BEAVER_TEXT_DARK, None);
+    // Nota: el control de zoom decorativo se retiró (no tenía funcionalidad). Se añadirá cuando exista visor real de BMP.
 
     Canvas::draw_line_h(main_x, y + 62, main_w, Color::BEAVER_BORDER_LIGHT);
 
@@ -890,7 +905,7 @@ pub fn handle_photos_click(mx: usize, my: usize, wx: usize, wy: usize) {
                 crate::drivers::audio::click_feedback();
                 if let Some(mut state) = GUI_TERMINAL.try_lock() {
                     let photo_names = ["Event Horizon", "Northern Lights", "Silicon Dawn", "Beaver River", "Supernova 2026", "Starfield Cluster"];
-                    state.lines.push(format!("[FOTOS] Abriendo imagen: /disk/fotos/{}.bmp [1920x1080 TrueColor]", photo_names[i]));
+                    state.lines.push(format!("[FOTOS][DEMO] '{}' es una miniatura generada por codigo; no existe archivo en disco.", photo_names[i]));
                 }
                 render_desktop();
                 return;
@@ -922,18 +937,7 @@ fn month_name(month: u8) -> &'static str {
 }
 
 fn days_in_month(month: u8, year: u16) -> u8 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 30,
-    }
+    crate::drivers::timer::days_in_month(month, year)
 }
 
 pub fn draw_calendar_window() {
@@ -948,8 +952,8 @@ pub fn draw_calendar_window() {
 
     Canvas::draw_window(x, y, w, h, "BeaverCalendar - Agenda y Calendario RTC", is_active);
 
-    // Leer fecha y hora en vivo del chip RTC
-    let rtc = crate::drivers::timer::read_rtc_datetime();
+    // Leer fecha y hora LOCAL (RTC en UTC + desfase de zona horaria)
+    let rtc = crate::drivers::timer::local_datetime();
 
     // 1. Cabecera del Calendario
     let cal_title = format!("{} {}", month_name(rtc.month), rtc.year);
@@ -974,8 +978,10 @@ pub fn draw_calendar_window() {
         Canvas::draw_string_prop(dx + cell_w / 2 - 10, y + 74, dname, col, None);
     }
 
-    // 3. Cuadrícula de Días del Mes (1 al 31)
-    let start_col = 3; // Jueves (1 de Octubre 2026)
+    // 3. Cuadrícula de Días del Mes. Columna inicial calculada con el algoritmo de Sakamoto
+    //    day_of_week: 0=Domingo..6=Sábado  ->  columna con Lunes=0..Domingo=6
+    let dow_first = crate::drivers::timer::day_of_week(rtc.year, rtc.month, 1) as usize;
+    let start_col = (dow_first + 6) % 7;
     let total_days = days_in_month(rtc.month, rtc.year);
     let today = rtc.day;
 
@@ -1008,7 +1014,7 @@ pub fn draw_calendar_window() {
     Canvas::fill_rounded_rect(x + 15, events_y, w.saturating_sub(30), h.saturating_sub(262), 8, Color::WHITE);
     Canvas::draw_rounded_rect(x + 15, events_y, w.saturating_sub(30), h.saturating_sub(262), 8, Color::BEAVER_BORDER_LIGHT);
 
-    Canvas::draw_string_prop(x + 25, events_y + 8, "EVENTOS Y TAREAS PROGRAMADAS:", Color::BEAVER_TEAL, None);
+    Canvas::draw_string_prop(x + 25, events_y + 8, "[DEMO] AGENDA DE EJEMPLO (no hay tareas programadas reales):", Color::BEAVER_AMBER_DARK, None);
 
     Canvas::fill_circle(x + 32, events_y + 32, 4, Color::BEAVER_EMERALD);
     Canvas::draw_string_prop(x + 44, events_y + 26, "09:00 - Sincronizacion Automatica Malla P2P (/net)", Color::BEAVER_TEXT_DARK, None);
@@ -1052,19 +1058,19 @@ pub fn draw_spotlight_overlay(screen_w: usize, _screen_h: usize) {
     Canvas::fill_rounded_rect(modal_x, modal_y, modal_w, modal_h, 14, 0x0B1222);
     Canvas::draw_rounded_rect(modal_x, modal_y, modal_w, modal_h, 14, 0x475569);
 
-    // Barra de búsqueda con icono de lupa
+    // Cabecera: accesos rápidos (aún no hay entrada de texto ni búsqueda real)
     Canvas::fill_rounded_rect(modal_x + 14, modal_y + 14, modal_w - 28, 36, 8, 0x1E293B);
     draw_sidebar_icon(modal_x + 22, modal_y + 24, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
-    Canvas::draw_string_prop(modal_x + 46, modal_y + 24, "Buscar en Beaver OS (Archivos, Malla, Apps)...", Color::WHITE, None);
+    Canvas::draw_string_prop(modal_x + 46, modal_y + 24, "Accesos rapidos (busqueda por texto: pendiente)", Color::WHITE, None);
 
     Canvas::draw_line_h(modal_x + 14, modal_y + 58, modal_w - 28, Color::SLATE_700);
 
-    // Resultados instantáneos
+    // Lista fija de aplicaciones
     let results = [
-        ("BeaverPhotos", "Galeria de imagenes y visores de alta definicion", WindowId::Photos),
-        ("BeaverCalendar", "Agenda y calendario en tiempo real con chip RTC", WindowId::Calendar),
+        ("BeaverPhotos", "Galeria de ejemplo con miniaturas generadas", WindowId::Photos),
+        ("BeaverCalendar", "Calendario mensual con hora local del RTC", WindowId::Calendar),
         ("BeaverFiles", "Explorador VFS (/disk, /net, /home, /sys)", WindowId::Files),
-        ("BeaverSync", "Malla Genisys P2P de sincronizacion y computo", WindowId::Sync),
+        ("BeaverSync", "[DEMO] Malla de dispositivos (nodos simulados)", WindowId::Sync),
     ];
 
     for (i, (title, desc, _win_id)) in results.iter().enumerate() {
