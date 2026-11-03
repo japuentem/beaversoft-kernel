@@ -96,16 +96,22 @@ pub fn render_desktop() {
     draw_sidebar_icon(396, 6, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
     Canvas::draw_string_prop(416, 6, "Buscar", topbar_text, None);
 
-    // Píldora de estado de la malla. [DEMO]: los nodos de mesh.rs aún están codificados
-    // (ver docs/plan_continuacion_2026-11-01.md, Fase 5). Se quitará la etiqueta cuando el descubrimiento sea real.
-    let mesh_text = "Mesh: 4 Nodos  |  Sync: 100%";
-    let demo_w = Canvas::string_width_prop("DEMO");
-    let mesh_w = Canvas::string_width_prop(mesh_text);
-    let mesh_pill_w = (demo_w + mesh_w + 30).min(210);
+    // Pildora de estado de la malla: nodos descubiertos por BeaverSync (Fase 5)
+    let online_nodes = {
+        let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
+        mgr.online_count()
+    };
+    let mesh_pill_text = if online_nodes > 0 {
+        alloc::format!("Mesh: {} nodo(s)", online_nodes)
+    } else {
+        alloc::string::String::from("Mesh: sin nodos")
+    };
+    let mesh_w = Canvas::string_width_prop(&mesh_pill_text);
+    let mesh_pill_w = (mesh_w + 22).min(210);
     Canvas::fill_rounded_rect(485, 4, mesh_pill_w, 20, 10, pill_bg);
-    Canvas::fill_circle(495, 14, 3, Color::BEAVER_TEAL_BRIGHT);
-    Canvas::draw_string_prop(503, 6, "DEMO", Color::BEAVER_AMBER, None);
-    Canvas::draw_string_prop(503 + demo_w + 8, 6, mesh_text, topbar_text, None);
+    let dot_color = if online_nodes > 0 { Color::BEAVER_TEAL_BRIGHT } else { Color::SLATE_400 };
+    Canvas::fill_circle(495, 14, 3, dot_color);
+    Canvas::draw_string_prop(503, 6, &mesh_pill_text, topbar_text, None);
 
     // Botón Conmutador de Tema (Día / Noche) con icono dibujado (la fuente VGA 8x16 no tiene emojis)
     Canvas::fill_rounded_rect(704, 4, 85, 20, 10, pill_bg);
@@ -383,14 +389,23 @@ pub fn draw_files_window() {
     }
 
     Canvas::draw_string_prop(x + 12, y + 190, "RED MALLA", Color::BEAVER_TEXT_MUTED, None);
-    draw_sidebar_icon(x + 12, y + 210, SidebarIconKind::Mesh, Color::BEAVER_TEAL);
-    Canvas::draw_string_prop(x + 34, y + 210, "[DEMO] station (:15)", Color::BEAVER_TEXT_MUTED, None);
-
-    draw_sidebar_icon(x + 12, y + 232, SidebarIconKind::Mesh, Color::BEAVER_TEAL);
-    Canvas::draw_string_prop(x + 34, y + 232, "[DEMO] laptop  (:18)", Color::BEAVER_TEXT_MUTED, None);
-
-    draw_sidebar_icon(x + 12, y + 254, SidebarIconKind::Mesh, Color::BEAVER_TEAL);
-    Canvas::draw_string_prop(x + 34, y + 254, "[DEMO] server  (:20)", Color::BEAVER_TEXT_MUTED, None);
+    Canvas::draw_string_prop(x + 12, y + 190, "RED MALLA", Color::BEAVER_TEXT_MUTED, None);
+    // Mostrar nodos reales descubiertos por BeaverSync (Fase 5)
+    let mesh_nodes_sb = {
+        let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
+        mgr.get_nodes().iter().take(3)
+            .map(|n| alloc::format!("{} ({})", n.name, n.ip.to_string()))
+            .collect::<alloc::vec::Vec<_>>()
+    };
+    let sb_offsets = [210usize, 232, 254];
+    for (i, label) in mesh_nodes_sb.iter().enumerate().take(3) {
+        draw_sidebar_icon(x + 12, y + sb_offsets[i], SidebarIconKind::Mesh, Color::BEAVER_TEAL);
+        Canvas::draw_string_prop(x + 34, y + sb_offsets[i], label, Color::BEAVER_TEXT_MUTED, None);
+    }
+    for i in mesh_nodes_sb.len()..3 {
+        draw_sidebar_icon(x + 12, y + sb_offsets[i], SidebarIconKind::Mesh, Color::SLATE_400);
+        Canvas::draw_string_prop(x + 34, y + sb_offsets[i], "-- sin nodos --", Color::SLATE_400, None);
+    }
 
     // 2. Panel Principal Derecho (Lienzo Blanco / Lord OS)
     let main_x = x + sb_w + 10;
@@ -666,7 +681,7 @@ pub fn draw_sync_window() {
         }
     };
 
-    Canvas::draw_window(x, y, w, h, "[DEMO] BeaverSync - Malla de Dispositivos (nodos simulados)", is_active);
+    Canvas::draw_window(x, y, w, h, "BeaverSync - Malla de Dispositivos", is_active);
 
     let (nodes, total_cores, total_ram, sync_count, logs) = {
         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
@@ -675,12 +690,12 @@ pub fn draw_sync_window() {
 
     // 1. Barra Superior del Panel de Sincronización
     // [DEMO]: hasta la Fase 5 del plan (driver E1000 real + descubrimiento UDP) los nodos están codificados en mesh.rs
-    Canvas::fill_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0xFEF3C7);
-    Canvas::draw_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0xFCD34D);
-    Canvas::draw_string_prop(x + 18, y + 41, "DEMO: nodos simulados - la red aun no transmite por la tarjeta E1000", Color::BEAVER_AMBER_DARK, None);
-    let right_stats = format!("Syncs: #{} | Nodos: {}", sync_count, nodes.len() + 1);
-    Canvas::draw_string_prop(x + w.saturating_sub(210), y + 41, &right_stats, Color::BEAVER_AMBER_DARK, None);
-
+    Canvas::fill_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0x0F3A3A);
+    Canvas::draw_rounded_rect(x + 10, y + 36, w - 20, 26, 6, 0x0F766E);
+    // Fase 5: descubrimiento real. Estado live de la malla.
+    let online_count = nodes.iter().filter(|n| n.status == "Online").count();
+    let right_stats = alloc::format!("Syncs: #{} | Online: {}/{}", sync_count, online_count, nodes.len());
+    Canvas::draw_string_prop(x + 18, y + 41, &alloc::format!("BeaverSync activo | {}", right_stats), Color::BEAVER_TEAL_BRIGHT, None);
     // 2. Tarjetas de Dispositivos Conectados (Topología Multi-Dispositivo Estilo Genisys)
     let left_w = (w.saturating_sub(30)) * 55 / 100;
     Canvas::fill_rounded_rect(x + 10, y + 68, left_w, 185, 8, Color::WHITE);
@@ -691,9 +706,9 @@ pub fn draw_sync_window() {
     // Dispositivo Local con icono vectorial
     Canvas::fill_rounded_rect(x + 16, y + 92, left_w.saturating_sub(12), 34, 6, Color::BEAVER_TITANIUM_BAR);
     draw_device_icon(x + 20, y + 96, DeviceKind::Pc, Color::BEAVER_AMBER);
-    Canvas::draw_string_prop(x + 48, y + 96, "beaver-node0 (Este Equipo)", Color::BEAVER_TEXT_DARK, None);
-    Canvas::draw_string_prop(x + 48, y + 110, "Estado: Maestro Local | 4 Cores | 512 MB | Sinc: 100%", Color::BEAVER_EMERALD, None);
-
+    let local_name = { crate::drivers::mesh::MESH_MANAGER.lock().local_name.clone() };
+    Canvas::draw_string_prop(x + 48, y + 96, &alloc::format!("{} (Este Equipo)", local_name), Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop(x + 48, y + 110, "Estado: Maestro Local | 1 BSP Core | RAM real via allocator", Color::BEAVER_EMERALD, None);
     // Dispositivos Remotos en la Malla
     for (i, node) in nodes.iter().enumerate().take(3) {
         let dy = y + 130 + i * 38;
@@ -1073,7 +1088,7 @@ pub fn draw_spotlight_overlay(screen_w: usize, _screen_h: usize) {
         ("BeaverPhotos", "Galeria de ejemplo con miniaturas generadas", WindowId::Photos),
         ("BeaverCalendar", "Calendario mensual con hora local del RTC", WindowId::Calendar),
         ("BeaverFiles", "Explorador VFS (/disk, /net, /home, /sys)", WindowId::Files),
-        ("BeaverSync", "[DEMO] Malla de dispositivos (nodos simulados)", WindowId::Sync),
+        ("BeaverSync", "Malla de dispositivos (descubrimiento UDP real)", WindowId::Sync),
     ];
 
     for (i, (title, desc, _win_id)) in results.iter().enumerate() {
