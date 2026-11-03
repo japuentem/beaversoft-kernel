@@ -128,3 +128,88 @@ Continuar con **Fase 2** (mapa de memoria real + frame allocator con bitmap). Es
 Usar la frase: *"Continúa con el plan de `docs/plan_continuacion_2026-11-01.md` desde la primera casilla sin marcar."*
 
 ================================================================================
+
+
+## Interacción #5 [10:22:39]
+
+### 👤 Pregunta / Petición del Usuario:
+"Continúa con el plan de docs/plan_continuacion_2026-11-01.md desde la primera casilla sin marcar"
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Primera casilla sin marcar: **Fase 2 — Mapa de memoria real y asignador de marcos con bitmap**.
+
+Análisis del estado actual antes de proceder:
+- `kernel/src/memory/mod.rs`: límite fijo de 64 MiB, cast `*const _ as *mut` (UB en Rust), uso de `f32` en línea 51.
+- `kernel/src/memory/frame_allocator.rs`: bump allocator sin liberación, 67 líneas.
+- `boot/boot.s`: `kernel_main()` se llama sin argumentos — `eax`/`ebx` (magic/info Multiboot) no se preservan.
+- `boot/uefi/src/main.rs`: `UefiBootInfo` en `0x8000` (colisión con futuro trampolín SMP), sin campos de mapa de memoria. El mapa se obtiene en `MEM_MAP` pero nunca se pasa al kernel.
+
+Plan de implementación Fase 2:
+1. `boot/boot.s`: guardar `eax`→`mb_magic` y `ebx`→`mb_info` en `.data` antes del `rep stosd`, cargar en `rdi`/`rsi` antes de `call kernel_main`.
+2. `boot/uefi/src/main.rs`: mover `UEFI_BOOT_INFO_ADDR` a `0x9000`, ampliar `UefiBootInfo` con `mem_map_addr/size/desc_size`, escribir el mapa real.
+3. `kernel/src/memory/memmap.rs` (nuevo): estructuras `MemRegion`, parsers para MB1 y UEFI, detección por magic.
+4. `kernel/src/memory/frame_allocator.rs`: reescribir como bitmap de 128 KiB, API `allocate/free/contiguous`.
+5. `kernel/src/memory/mod.rs`: eliminar cast UB, eliminar f32, llamar a la nueva API.
+6. `kernel/src/main.rs`: cambiar firma a `kernel_main(boot_magic: u64, boot_info: u64)`.
+7. Verificación: `cargo check` + `cargo build --release`.
+
+================================================================================
+
+## Interacción #6 [10:22:39 - 10:40:00]
+
+### 👤 Pregunta / Petición del Usuario:
+"Continúa con el plan de docs/plan_continuacion_2026-11-01.md desde la primera casilla sin marcar" (Fase 2).
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+**Fase 2 — Mapa de memoria real y asignador de marcos con bitmap.**
+
+**Archivos modificados / creados:**
+
+1. **`boot/boot.s`**:
+   - Añadidas variables `.data`: `mb_magic` y `mb_info`.
+   - En `_start`: guardado `eax`/`ebx` antes de que `rep stosd` destruya `edi`/`eax`.
+   - En `long_mode_start`: `mov edi, [mb_magic]` / `mov esi, [mb_info]` antes de `call kernel_main`.
+   - En `uefi_entry`: `mov edi, 0xBEA0B007` / `mov esi, 0x9000` antes de `call kernel_main`.
+
+2. **`boot/uefi/src/main.rs`**:
+   - `UEFI_BOOT_INFO_ADDR`: `0x8000` → `0x9000` (libera 0x8000 para futuro trampolín SMP).
+   - `UefiBootInfo` ampliado con 3 campos: `mem_map_addr`, `mem_map_size`, `mem_desc_size`.
+   - Añadido bloque post-`exit_boot_services` que copia el mapa a `UEFI_MEM_MAP_ADDR=0x9100` y actualiza `boot_info`.
+
+3. **`kernel/src/memory/memmap.rs`** (nuevo, ~210 líneas):
+   - `MemRegion { start, len, usable }`, `MemMap { regions: [MemRegion; 64], count }`.
+   - `parse_multiboot1(info: u64)`: lee flags, mmap_length/addr, itera entradas con campo `size`.
+   - `parse_uefi(map_addr, map_size, desc_size)`: itera EFI_MEMORY_DESCRIPTORs, tipos 3/4/7/14 = usable.
+   - `parse_and_print(boot_magic, boot_info)`: detecta MB1 vs UEFI por magic, parsea e imprime por serial `[MEM] 0x... - 0x... USABLE/RESERVED`.
+
+4. **`kernel/src/memory/frame_allocator.rs`** (reescrito, ~284 líneas):
+   - `FrameAllocatorInner { bitmap: [u64; 16384], free_frames, total_usable, search_hint }`.
+   - Inicio: todo `u64::MAX` (ocupado). Se libera via `init_from_memmap`.
+   - `reserve_kernel_regions`: re-reserva primer MiB, imagen kernel, heap, DMA audio, backbuffer, 0x9000.
+   - API pública via `SpinMutex`: `allocate_frame`, `free_frame`, `allocate_contiguous(n)`.
+   - Eliminado el cast `*const _ as *mut` (UB eliminado).
+
+5. **`kernel/src/memory/mod.rs`** (reescrito):
+   - `init_memory(memmap: &MemMap)` en vez de `init_memory()`.
+   - Eliminado `f32` (línea 51 usaba `k_size as f32 / 1024.0`).
+   - Muestra RAM libre/total en MiB enteros.
+
+6. **`kernel/src/main.rs`**:
+   - Firma: `pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> !`.
+   - Paso 8 ahora: `let memmap = memmap::parse_and_print(boot_magic, boot_info); init_memory(&memmap);`.
+
+7. **`kernel/src/shell.rs`**:
+   - Comando `mem`: muestra RAM usable/libre real en MiB.
+   - Nuevo comando `test-frames`: asigna 1000 marcos, los libera, verifica que el contador regrese al valor inicial.
+
+8. **`kernel/src/gui/desktop.rs`**:
+   - Monitor de Recursos: muestra `ram_free_mib` / `ram_total_mib` reales.
+
+**Compilación:** `cargo check` ✅ (0.90s) · `cargo build --release` ✅ (5.30s)
+**Commit:** `5fd51d5` — "Fase 2: mapa de memoria real (MB1+UEFI), bitmap frame allocator, sin f32/UB"
+
+================================================================================

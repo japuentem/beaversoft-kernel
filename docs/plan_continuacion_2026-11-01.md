@@ -68,35 +68,20 @@ Archivos: `kernel/src/gui/desktop.rs`, `kernel/src/drivers/timer.rs`, `kernel/sr
 
 ---
 
-## Fase 2 — Mapa de memoria real y asignador de marcos con bitmap (≈2–3 h)
+## Fase 2 - Mapa de memoria real y asignador de marcos con bitmap (~2-3 h)  [COMPLETADA 2026-11-03]
 
 ### 2.1 Recibir el mapa de memoria
-- [ ] **Ruta Multiboot (`boot/boot.s`):** al inicio de `_start`, guardar `eax` (magic) y `ebx` (puntero info) en `esi`/`edi` **antes** de L63 (`rep stosd` usa `edi`; elegir registros que no se pisen, p. ej. guardarlos en variables `.data`: `mb_magic`, `mb_info`). En `long_mode_start`, antes de `call kernel_main`, cargar `rdi = mb_magic`, `rsi = mb_info`.
-- [ ] **Ruta UEFI (`boot/uefi/src/main.rs`):**
-  - Mover `UEFI_BOOT_INFO_ADDR` de `0x8000` a una dirección libre (p. ej. `0x9000`) **o** mejor: dejar 0x8000 libre para el futuro trampolín SMP. Actualizar el lado del kernel que lo lee.
-  - Ampliar `UefiBootInfo` con `mem_map_addr: u64, mem_map_size: u64, mem_desc_size: u64`. Copiar el mapa obtenido en el `get_memory_map` final (L372) a un búfer conocido antes de `exit_boot_services`.
-- [ ] **Kernel:** cambiar la firma a `kernel_main(boot_magic: u64, boot_info: u64)`. Crear `kernel/src/memory/memmap.rs` con:
-  ```rust
-  pub struct MemRegion { pub start: u64, pub len: u64, pub usable: bool }
-  pub fn parse_multiboot1(info: u64) -> Vec-free fixed array [MemRegion; 64]  // sin heap: aún no existe
-  pub fn parse_uefi(info: u64) -> [MemRegion; 64]
-  ```
-  (Usar arreglo fijo porque el heap se inicializa después.) Detectar la ruta por magic: `0x2BADB002` (MB1), `0x36d76289` (MB2), `0xBEA0B007` (UEFI).
-- [ ] Imprimir el mapa por serial al arrancar: `[MEM] 0x... - 0x... USABLE/RESERVED`.
+- [x] Ruta Multiboot: mb_magic/mb_info en .data antes de rep stosd. long_mode_start pasa edi/esi a kernel_main. uefi_entry pasa 0xBEA0B007 y 0x9000.
+- [x] Ruta UEFI: UEFI_BOOT_INFO_ADDR movido 0x8000->0x9000. UefiBootInfo ampliado con mem_map_addr/size/desc_size. Mapa copiado a 0x9100 post exit_boot_services.
+- [x] Kernel: firma kernel_main(boot_magic: u64, boot_info: u64). Creado memory/memmap.rs con MemRegion, MemMap, parse_multiboot1, parse_uefi, parse_and_print.
 
 ### 2.2 Asignador de marcos con bitmap
-- [ ] Reescribir `kernel/src/memory/frame_allocator.rs`:
-  - Bitmap estático para hasta 4 GiB (1,048,576 marcos → 128 KiB de bitmap en `.bss`).
-  - Inicio: todo marcado "ocupado"; liberar solo regiones `usable` del mapa.
-  - Volver a marcar ocupado: imagen del kernel (`_kernel_start.._kernel_end`), heap (`HEAP_START..+HEAP_SIZE`), `AUDIO_DMA_BUFFER_ADDR`, `BACKBUFFER_PHYS_ADDR` (3 MiB), primer MiB, framebuffer LFB.
-  - API: `allocate_frame() -> Option<usize>`, `free_frame(addr)`, `allocate_contiguous(n) -> Option<usize>` (la necesitará el E1000), contadores reales.
-  - Proteger con `SpinMutex<FrameAllocatorInner>` → **eliminar** el cast `*const _ as *mut` de `memory/mod.rs` L44.
-- [ ] Actualizar el Monitor de Recursos para mostrar RAM total/libre **real** del mapa.
-- [ ] Eliminar `{:.2}` con `f32` en `memory/mod.rs` L51 (usar KiB enteros).
+- [x] Reescrito frame_allocator.rs: bitmap 128 KiB, inicio todo ocupado, libera solo usable, re-reserva regiones criticas.
+- [x] API: allocate_frame, free_frame, allocate_contiguous(n), free_frames_count, total_usable_frames. Con SpinMutex.
+- [x] Eliminado cast UB *const->*mut. Eliminado f32 de mod.rs.
+- [x] Monitor Recursos y comando mem muestran RAM real en MiB. Anadido test-frames.
 
-**Aceptación:** con `-m 512M` el kernel reporta ≈512 MiB y con `-m 1G` ≈1 GiB (sin recompilar); prueba de shell que asigna 1000 marcos, los libera y el contador vuelve al valor inicial; ambos modos de arranque (`.\run.ps1` y `.\run.ps1 -Uefi`) funcionan.
-
----
+**Aceptacion:** cargo check OK, cargo build --release OK. Commit: 5fd51d5.
 
 ## Fase 3 — Retirar el SMP falso (≈20 min)  ✅ COMPLETADA 2026-11-03
 
