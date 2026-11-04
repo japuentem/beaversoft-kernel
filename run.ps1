@@ -12,6 +12,7 @@ param(
     [switch]$NoGui,
     [switch]$Clean,
     [switch]$Uefi,
+    [switch]$Iso,
     [switch]$Test,
     # -Node A: escucha :5555  MAC ..:BE:A0:01  IP 10.0.0.1
     # -Node B: conecta :5555  MAC ..:BE:A0:02  IP 10.0.0.2
@@ -85,7 +86,34 @@ if (-not (Test-Path $DiskImg)) {
     $fs.Close()
 }
 
-if ($Uefi) {
+if ($Iso) {
+    Write-Host "[ISO] Modo ISO activado. Generando imagen híbrida target\beaver-os-v0.9.0.iso..." -ForegroundColor Yellow
+    & powershell -ExecutionPolicy Bypass -File "scripts\build_iso.ps1" -SkipBuild
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[ERROR] Falló la generación de la imagen ISO."
+        exit $LASTEXITCODE
+    }
+
+    $IsoFile = "target\beaver-os-v0.9.0.iso"
+    $OvmfFirmware = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
+    $QemuArgs = @(
+        "-drive", "if=pflash,format=raw,readonly=on,file=$OvmfFirmware",
+        "-cdrom", $IsoFile,
+        "-boot", "d",
+        "-device", "ahci,id=ahci0",
+        "-drive", "id=sata0,file=$DiskImg,format=raw,if=none",
+        "-device", "ide-hd,drive=sata0,bus=ahci0.0",
+        "-nic", "model=e1000",
+        "-smp", "4",
+        "-m", "512M",
+        "-serial", "stdio"
+    )
+    if ($NoGui) {
+        $QemuArgs += @("-display", "none")
+    } else {
+        $QemuArgs += @("-audiodev", "dsound,id=snd0", "-machine", "pcspk-audiodev=snd0", "-device", "intel-hda", "-device", "hda-duplex,audiodev=snd0")
+    }
+} elseif ($Uefi) {
     Write-Host "[UEFI] Modo UEFI activado. Construyendo cargador BOOTX64.EFI..." -ForegroundColor Yellow
     $LLD = "C:\Users\japue\.rustup\toolchains\nightly-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\bin\rust-lld.exe"
     $BootObj = if ($Node -ne '') { "target\bootx64-$Node.obj" } else { "target\bootx64.obj" }

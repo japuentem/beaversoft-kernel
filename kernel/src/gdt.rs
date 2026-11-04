@@ -12,18 +12,18 @@ use core::ptr::addr_of_mut;
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 1;
 
-// Selectores de segmento de la GDT (Phase 6 layout):
+// Selectores de segmento de la GDT (Phase 6 layout compatible con SYSRETQ):
 //   0x00 – Null
 //   0x08 – Kernel Code  (Ring 0, DPL=0)
 //   0x10 – Kernel Data  (Ring 0, DPL=0)
-//   0x18 – User Code    (Ring 3, DPL=3)  ← nuevo
-//   0x20 – User Data    (Ring 3, DPL=3)  ← nuevo
+//   0x18 – User Data    (Ring 3, DPL=3, STAR[63:48] + 8)
+//   0x20 – User Code    (Ring 3, DPL=3, STAR[63:48] + 16)
 //   0x28 – TSS low  (16-byte descriptor, 2 slots)
 //   0x30 – TSS high
 pub const SELECTOR_KERNEL_CODE: u16 = 0x08;
 pub const SELECTOR_KERNEL_DATA: u16 = 0x10;
-pub const SELECTOR_USER_CODE:   u16 = 0x18 | 3; // RPL=3
-pub const SELECTOR_USER_DATA:   u16 = 0x20 | 3; // RPL=3
+pub const SELECTOR_USER_DATA:   u16 = 0x18 | 3; // RPL=3 (0x1B)
+pub const SELECTOR_USER_CODE:   u16 = 0x20 | 3; // RPL=3 (0x23)
 pub const SELECTOR_TSS:         u16 = 0x28;
 
 #[repr(C, packed)]
@@ -98,12 +98,11 @@ pub fn init_gdt() {
         // Kernel Data 64-bit (Ring 0): P=1, DPL=00, S=1, Type=0x2 (Read/Write)
         *gdt_ptr_raw.add(2) = 0x0000920000000000;
 
-        // User Code 64-bit (Ring 3): P=1, DPL=11, S=1, Type=0xA (Exec/Read), L=1
-        // 0x00AFFB000000FFFF → L=1, DPL=3 (bits 45-46), Present
-        *gdt_ptr_raw.add(3) = 0x0020FA0000000000;
+        // User Data 64-bit (Ring 3, slot 3 = 0x18): P=1, DPL=11, S=1, Type=0x2 (Read/Write)
+        *gdt_ptr_raw.add(3) = 0x0000F20000000000;
 
-        // User Data 64-bit (Ring 3): P=1, DPL=11, S=1, Type=0x2 (Read/Write)
-        *gdt_ptr_raw.add(4) = 0x0000F20000000000;
+        // User Code 64-bit (Ring 3, slot 4 = 0x20): P=1, DPL=11, S=1, Type=0xA (Exec/Read), L=1
+        *gdt_ptr_raw.add(4) = 0x0020FA0000000000;
 
         // 4. Crear Descriptor TSS de 64 bits (16 bytes = 2 entradas de 64 bits) en slots 5..6
         let tss_base  = addr_of_mut!(TSS) as u64;

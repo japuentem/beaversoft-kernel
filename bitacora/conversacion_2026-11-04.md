@@ -3,14 +3,14 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-04
-// Total de interacciones del día: 5
+// Total de interacciones del día: 6
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-04
 
 **Agente:** Antigravity (Google DeepMind)  
 **Sesión iniciada:** 09:06 (hora local UTC-6)  
-**Objetivo:** Clarificación de marcas, corrección de arranque, implementación de pila TCP/HTTP real y desarrollo del espacio de usuario nativo (Ring 3 Shell, beaver-libc y Syscalls POSIX).
+**Objetivo:** Clarificación de marcas, corrección de arranque, implementación de pila TCP/HTTP real, espacio de usuario nativo (Ring 3 Shell, beaver-libc, Syscalls POSIX) e instalación en hardware real con imagen ISO híbrida (Opción 4).
 
 ---
 
@@ -125,10 +125,7 @@ Se diagnosticó y corrigió el fallo de conexión local en `curl http://beaver.l
    - **Diagnóstico:** El host `beaver.lan` resolvía a nuestra propia interfaz de red (`my_ip` / `10.0.2.15`). Al no contar con enrutamiento de loopback, el paquete SYN salía a la tarjeta física/emulada E1000 sin llegar nunca a un receptor interno, agotando el tiempo de espera (*timeout*).
    - **Solución Implementada (`kernel/src/drivers/net.rs`):**
      - Añadida intercepción en `send_ipv4_packet`: todo tráfico destinado a `127.0.0.1` o `my_ip` se despacha a la interfaz de loopback virtual `deliver_loopback_ipv4`.
-     - Implementado el servidor HTTP nativo en el puerto 80 (`handle_local_http_server`): responde el *handshake* SYN con SYN-ACK, procesa peticiones HTTP/1.1 y devuelve datos auténticos del sistema:
-       - `/info.json`: telemetría en vivo en formato JSON (`uptime`, núcleos SMP, RAM total/libre de `FRAME_ALLOCATOR`, controlador AHCI DMA).
-       - `/disk/...`: entrega directa de archivos almacenados en BeaverFS.
-       - `/`: página de inicio web HTML de Beaver OS.
+     - Implementado el servidor HTTP nativo en el puerto 80 (`handle_local_http_server`): responde el *handshake* SYN con SYN-ACK, procesa peticiones HTTP/1.1 y devuelve datos auténticos del sistema (`/info.json`, `/disk/...`, `/`).
      - Implementado `handle_loopback_client_segment` para alimentar directamente los descriptores del cliente local y transición de estados TCP sin pérdida de paquetes.
 
 2. **Implementación de la Opción 3 (Espacio de Usuario Nativo: Ring 3 Shell y `beaver-libc`):**
@@ -136,23 +133,9 @@ Se diagnosticó y corrigió el fallo de conexión local en `curl http://beaver.l
      - Modificado el stub de assembly `syscall_handler_asm` para cumplir con la ABI de llamada System V AMD64 (`RAX` -> `RDI` [nr], `RDI` -> `RSI` [arg0], `RSI` -> `RDX` [arg1], `RDX` -> `RCX` [arg2]).
      - Implementada tabla de descriptores de archivos `OPEN_FILES` (descriptores `0..31` mapeados a `fd >= 3`).
      - Validación de seguridad de punteros de memoria de usuario (`is_valid_user_ptr`).
-     - Syscalls POSIX implementadas:
-       - `SYS_READ` (0): lee de stdin (teclado interactivo vía `pop_input_char`) para `fd == 0`, o de archivos VFS para `fd >= 3`.
-       - `SYS_WRITE` (1): escribe en consola/VGA para `fd == 1` (stdout) o `fd == 2` (stderr en color rojo), o en archivos VFS para `fd >= 3`.
-       - `SYS_OPEN` (2): abre o crea archivos en BeaverFS/VFS y retorna `fd`.
-       - `SYS_CLOSE` (3): cierra descriptores abiertos.
-       - `SYS_LSEEK` (8): posicionamiento en archivos (`SEEK_SET`, `SEEK_CUR`).
-       - `SYS_YIELD` (24): cesión voluntaria de quantum de CPU.
-       - `SYS_GETPID` (39): identificador de tarea/proceso actual.
-       - `SYS_EXECVE` (59): carga y ejecución de binarios ELF64 desde disco.
-       - `SYS_EXIT` (60): terminación ordenada de procesos usermode.
-       - `SYS_UPTIME` (99): consulta de tiempo de actividad del kernel en segundos.
-       - `SYS_SLEEP` (102): suspensión de ejecución por N ticks.
+     - Syscalls POSIX implementadas: `SYS_READ` (0), `SYS_WRITE` (1), `SYS_OPEN` (2), `SYS_CLOSE` (3), `SYS_LSEEK` (8), `SYS_YIELD` (24), `SYS_GETPID` (39), `SYS_EXECVE` (59), `SYS_EXIT` (60), `SYS_UPTIME` (99), `SYS_SLEEP` (102).
    - **Biblioteca Estándar de Usuario `beaver-libc` (`user/beaver-libc/`):**
-     - Cabeceras C POSIX:
-       - `include/beaver/syscall.h`: macros de ensamblador en línea para `syscall0`, `syscall1`, `syscall2`, `syscall3` y constantes de syscalls.
-       - `include/beaver/unistd.h`: firmas de `read`, `write`, `open`, `close`, `lseek`, `getpid`, `uptime`, `sleep`, `exit`, `sched_yield`.
-       - `include/beaver/stdio.h`: funciones de entrada/salida estándar `puts`, `putchar`, `getchar`.
+     - Cabeceras C POSIX: `include/beaver/syscall.h`, `include/beaver/unistd.h`, `include/beaver/stdio.h`.
      - Implementación en C: `src/beaver_libc.c`.
      - Implementación en Rust autónomo `no_std`: `src/lib.rs` y `Cargo.toml`.
    - **Shell Nativo en Ring 3 (`beaver-sh` / `user/shell/` y `kernel/src/usermode.rs`):**
@@ -164,5 +147,50 @@ Se diagnosticó y corrigió el fallo de conexión local en `curl http://beaver.l
    - **Suite de Pruebas Automatizadas de Regresión (`kernel/src/tests.rs`):**
      - Añadida prueba #16 `test_posix_syscalls_and_beaver_libc`: valida `SYS_UPTIME`, `SYS_GETPID`, `SYS_WRITE` en stdout, apertura/escritura/lectura/cierre de archivo VFS mediante syscalls, rechazo de descriptores inválidos con `-EBADF`, y ejecución de `/disk/bin/sh.elf`.
      - Verificación completa: **16/16 pruebas del kernel aprobadas** en QEMU con código de salida `33`.
+
+================================================================================
+
+## Interacción #6 [16:40:00]
+
+### 👤 Pregunta / Petición del Usuario:
+al ejecutar root@beaver:/# sh aparece lo que se ve en la imagen, corrigelo y cuando termines continua con la Opcion 4
+[Captura adjunta de pantalla mostrando: [CRITICAL] #GP KERNEL General Protection Fault! Error: 0x28 tras imprimir el banner de beaver-sh]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se diagnosticó y corrigió el fallo de protección general (`#GP Error: 0x28`) ocurrido al retornar de la syscall en el shell de Ring 3, y se completó íntegramente la **Opción 4** (Instalación en Hardware Real e Imagen ISO Híbrida):
+
+1. **Diagnóstico y Corrección de `#GP Error: 0x28` en `SYSRETQ`:**
+   - **Causa Raíz de Arquitectura x86_64:** Al ejecutar `SYSRETQ` en modo largo de 64 bits, la CPU carga obligatoriamente los registros de segmento con las fórmulas arquitectónicas fijas:
+     - `CS = (STAR[63:48] + 16) | 3`
+     - `SS = (STAR[63:48] + 8) | 3`
+     Anteriormente, `STAR[63:48]` estaba configurado con `0x0018`. Por tanto, `SYSRETQ` calculaba `0x18 + 16 = 0x28` para el selector de código `CS`. Sin embargo, en la GDT el selector `0x28` correspondía al descriptor de la TSS (*Task State Segment*), y no a un segmento de código. Al intentar cargar una TSS como segmento de código, la CPU abortó inmediatamente la instrucción `sysretq` lanzando la excepción `#GP (General Protection Fault)` con código de error `0x28` ([`SELECTOR_TSS`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gdt.rs#L27)).
+   - **Solución Implementada (`kernel/src/gdt.rs` y `kernel/src/syscall.rs`):**
+     - Reordenada la GDT de manera estándar:
+       - Slot 3 (`0x18`): User Data (DPL=3) -> `SELECTOR_USER_DATA = 0x18 | 3` (`0x1B`).
+       - Slot 4 (`0x20`): User Code (DPL=3) -> `SELECTOR_USER_CODE = 0x20 | 3` (`0x23`).
+       - Slots 5..6 (`0x28`..`0x37`): TSS.
+     - Ajustado el registro MSR `IA32_STAR`: bits `63:48` fijados a `0x0010`.
+     - Ahora `SYSRETQ` carga exactamente `SS = (0x10 + 8) | 3 = 0x1B` (User Data) y `CS = (0x10 + 16) | 3 = 0x23` (User Code). El retorno a Ring 3 se efectúa de forma 100% limpia sin excepciones.
+
+2. **Implementación de la Opción 4 (Instalación en Hardware Real e Imagen ISO Híbrida):**
+   - **Generador de Medios Híbridos en PowerShell Puro (`scripts/build_iso.ps1`):**
+     - Herramienta autónoma sin dependencias externas pesadas (`xorriso` o `grub`).
+     - Construye una partición EFI FAT16 formateada con BPB estándar conteniendo `\EFI\BOOT\BOOTX64.EFI` y `\KERNEL.ELF`.
+     - Empaqueta un volumen ISO 9660 con Catálogo de Arranque El Torito para arquitectura EFI (ID de Plataforma `0xEF`).
+     - Produce dos imágenes listas para producción:
+       - `target/beaver-os-v0.9.0.iso`: Imagen ISO híbrida booteable UEFI/El Torito (16.04 MB).
+       - `target/beaver-os-v0.9.0.img`: Imagen raw GPT/FAT compatible con memorias USB (16 MB).
+   - **Integración con el Flujo de Pruebas (`run.ps1`):**
+     - Añadido el parámetro `-Iso` a `run.ps1` para generar la ISO y bootearla directamente en QEMU emulando una unidad óptica CD-ROM con firmware OVMF (`-cdrom target\beaver-os-v0.9.0.iso -boot d`).
+   - **Guía Definitiva de Instalación Bare-Metal (`docs/BARE_METAL_INSTALLATION.md`):**
+     - Documentación exhaustiva cubriendo:
+       - Métodos de grabación de memorias USB con `create_usb.ps1`, Rufus (modo GPT/UEFI), BalenaEtcher y `dd`.
+       - Parámetros requeridos de firmware BIOS/UEFI en PCs/laptops reales: modo UEFI Native, Secure Boot desactivado para binarios bare-metal, modo SATA AHCI.
+       - Verificación de hardware en vivo: GOP Framebuffer, AHCI SATA DMA, red E1000 y Ring 3 Shell.
+       - Instalación permanente en disco interno con el comando `install` (tabla GPT, esquema de resiliencia A/B y BeaverFS).
+   - **Suite de Pruebas de Regresión:**
+     - 16/16 pruebas pasando exitosamente en QEMU con código de salida `33`.
 
 ================================================================================

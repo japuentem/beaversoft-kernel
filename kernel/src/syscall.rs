@@ -143,9 +143,13 @@ pub fn init_syscalls() {
         wrmsr(MSR_EFER, efer | 0x1);
 
         // 2. Configurar IA32_STAR:
-        //    bits 63:48 = base de selectores User  → 0x18 (User Code = 0x18|3 = 0x1B)
-        //    bits 47:32 = selector Kernel Code      → 0x08
-        let star: u64 = (0x0018_u64 << 48) | (0x0008_u64 << 32);
+        //    bits 63:48 = base de selectores User: 0x0010
+        //      sysretq carga SS = (STAR[63:48] + 8) | 3  = 0x18 | 3 = 0x1B (User Data)
+        //      sysretq carga CS = (STAR[63:48] + 16) | 3 = 0x20 | 3 = 0x23 (User Code)
+        //    bits 47:32 = selector Kernel Code: 0x0008
+        //      syscall carga CS = STAR[47:32]      = 0x08 (Kernel Code)
+        //      syscall carga SS = STAR[47:32] + 8  = 0x10 (Kernel Data)
+        let star: u64 = (0x0010_u64 << 48) | (0x0008_u64 << 32);
         wrmsr(MSR_STAR, star);
 
         // 3. IA32_LSTAR = dirección del handler en Ring 0
