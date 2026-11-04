@@ -61,6 +61,7 @@ impl AtaDrive {
         (self.total_sectors as u64 * 512 / (1024 * 1024)) as u32
     }
 
+    // SAFETY: Acceso exclusivo a los puertos I/O del canal ATA primario (`0x1F0..0x1F7`) en Ring 0.
     pub unsafe fn init(&mut self) -> Result<(), AtaError> {
         // Seleccionar Maestro (Drive 0)
         outb(ATA_DRIVE_HEAD, 0xA0);
@@ -128,6 +129,7 @@ impl AtaDrive {
         Ok(())
     }
 
+    // SAFETY: Sondeo en Ring 0 de los registros de estado ATA (`0x3F6` y `0x1F7`) con el cerrojo del controlador adquirido.
     unsafe fn wait_ready(&self) -> Result<(), AtaError> {
         // Pausa de 400 ns leyendo el puerto de estado alterno (0x3F6)
         for _ in 0..4 {
@@ -151,6 +153,7 @@ impl AtaDrive {
         }
     }
 
+    // SAFETY: Lectura PIO de 256 palabras (`u16`) desde `ATA_DATA` hacia un búfer válido de 512 bytes en Ring 0.
     pub unsafe fn read_sector(&self, lba: u32, buf: &mut [u8; 512]) -> Result<(), AtaError> {
         if !self.present {
             return Err(AtaError::NoDrive);
@@ -177,6 +180,7 @@ impl AtaDrive {
         Ok(())
     }
 
+    // SAFETY: Escritura PIO de 256 palabras (`u16`) desde un búfer válido de 512 bytes hacia `ATA_DATA` en Ring 0.
     pub unsafe fn write_sector(&self, lba: u32, buf: &[u8; 512]) -> Result<(), AtaError> {
         if !self.present {
             return Err(AtaError::NoDrive);

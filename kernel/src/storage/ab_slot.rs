@@ -80,6 +80,7 @@ impl BeaverBootRecord {
 
     pub fn to_bytes(&self) -> [u8; SECTOR_SIZE] {
         let mut buf = [0_u8; SECTOR_SIZE];
+        // SAFETY: BeaverBootRecord es #[repr(C, packed)] de exactamente 512 bytes (SECTOR_SIZE) sin padding.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 self as *const Self as *const u8,
@@ -91,6 +92,7 @@ impl BeaverBootRecord {
     }
 
     pub fn from_bytes(buf: &[u8; SECTOR_SIZE]) -> Self {
+        // SAFETY: read_unaligned deserializa de forma segura la estructura #[repr(C, packed)] de 512 bytes.
         unsafe {
             core::ptr::read_unaligned(buf.as_ptr() as *const Self)
         }
@@ -100,6 +102,7 @@ impl BeaverBootRecord {
         let raw = self as *const Self as *const u8;
         // Calcular CRC excluyendo el campo header_crc32 (offset 12..16)
         let mut sum: u32 = 0xFFFF_FFFF;
+        // SAFETY: i < SECTOR_SIZE (512 bytes) está dentro del tamaño exacto de BeaverBootRecord.
         unsafe {
             for i in 0..SECTOR_SIZE {
                 if i >= 12 && i < 16 {

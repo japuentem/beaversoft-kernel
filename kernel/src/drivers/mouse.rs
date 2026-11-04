@@ -159,9 +159,12 @@ impl MouseDriver {
                 self.state.right_button = right;
                 self.state.middle_button = middle;
 
-                // Límites de resolución VESA 1024x768
-                self.state.x = (self.state.x + dx).clamp(0, 1023);
-                self.state.y = (self.state.y - dy).clamp(0, 767);
+                // Límites dinámicos de resolución según el modo VBE/GOP activo
+                let (scr_w, scr_h) = crate::gui::canvas::Canvas::screen_dimensions();
+                let max_x = (scr_w.saturating_sub(1)) as i32;
+                let max_y = (scr_h.saturating_sub(1)) as i32;
+                self.state.x = (self.state.x + dx).clamp(0, max_x);
+                self.state.y = (self.state.y - dy).clamp(0, max_y);
 
                 return Some(self.state);
             }
@@ -176,6 +179,7 @@ impl MouseDriver {
 fn wait_input_clear() {
     let mut timeout = 100_000;
     while timeout > 0 {
+        // SAFETY: Lectura del registro de estado del controlador 8042 en el puerto I/O 0x64 (Ring 0).
         if (unsafe { inb(PS2_STATUS_PORT) } & 0x02) == 0 {
             return;
         }
@@ -186,6 +190,7 @@ fn wait_input_clear() {
 fn wait_output_full() -> bool {
     let mut timeout = 100_000;
     while timeout > 0 {
+        // SAFETY: Lectura del registro de estado del controlador 8042 en el puerto I/O 0x64 (Ring 0).
         if (unsafe { inb(PS2_STATUS_PORT) } & 0x01) != 0 {
             return true;
         }
@@ -197,6 +202,7 @@ fn wait_output_full() -> bool {
 pub static MOUSE: SpinMutex<MouseDriver> = SpinMutex::new(MouseDriver::new());
 
 pub fn init_mouse() {
+    // SAFETY: Inicialización única del ratón PS/2 bajo el cerrojo MOUSE.lock() en Ring 0.
     unsafe {
         MOUSE.lock().init();
     }

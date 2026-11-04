@@ -87,6 +87,7 @@ impl MemMap {
 /// # Safety
 /// `info_ptr` debe ser la dirección física válida del struct MultibootInfo
 /// tal como la entregó GRUB/QEMU en el registro ebx.
+// SAFETY: El llamador garantiza que `info_ptr` apunta a una estructura `MultibootInfo` física válida entregada por el bootloader.
 pub unsafe fn parse_multiboot1(info_ptr: u64) -> MemMap {
     let mut map = MemMap::empty();
 
@@ -152,6 +153,7 @@ pub unsafe fn parse_multiboot1(info_ptr: u64) -> MemMap {
 /// Parsea el mapa de memoria entregado por el cargador UEFI.
 /// # Safety
 /// `map_addr` y `map_size`/`desc_size` deben venir del campo mem_map_* de UefiBootInfo.
+// SAFETY: El llamador garantiza que `map_addr`, `map_size` y `desc_size` describen el búfer de descriptores UEFI en memoria física mapeada.
 pub unsafe fn parse_uefi(map_addr: u64, map_size: u64, desc_size: u64) -> MemMap {
     let mut map = MemMap::empty();
 
@@ -183,6 +185,7 @@ pub unsafe fn parse_uefi(map_addr: u64, map_size: u64, desc_size: u64) -> MemMap
 /// Detecta el tipo de arranque por magic y parsea el mapa correspondiente.
 /// Imprime cada region por serial (kprintln!).
 pub fn parse_and_print(boot_magic: u64, boot_info: u64) -> MemMap {
+    // SAFETY: `boot_magic` identifica el protocolo de arranque activo y `boot_info` contiene el puntero físico entregado por el cargador.
     let map = unsafe {
         if boot_magic == BOOT_MAGIC_MB1 {
             parse_multiboot1(boot_info)

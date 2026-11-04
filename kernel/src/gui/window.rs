@@ -337,9 +337,12 @@ impl WindowManager {
         if let Some(id) = self.dragging_window {
             let offset_x = self.drag_offset_x;
             let offset_y = self.drag_offset_y;
+            let (scr_w, scr_h) = crate::gui::canvas::Canvas::screen_dimensions();
             if let Some(win) = self.get_window_mut(id) {
-                let new_x = mx.saturating_sub(offset_x).clamp(0, 1024 - win.width);
-                let new_y = my.saturating_sub(offset_y).clamp(32, 768 - 60 - win.height);
+                let max_x = scr_w.saturating_sub(win.width);
+                let max_y = scr_h.saturating_sub(60 + win.height).max(32);
+                let new_x = mx.saturating_sub(offset_x).clamp(0, max_x);
+                let new_y = my.saturating_sub(offset_y).clamp(32, max_y);
                 if win.x != new_x || win.y != new_y {
                     win.x = new_x;
                     win.y = new_y;

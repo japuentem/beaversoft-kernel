@@ -24,7 +24,9 @@ pub struct SpinMutex<T> {
 
 pub type SpinLock<T> = SpinMutex<T>;
 
+// SAFETY: `SpinMutex` garantiza exclusión mutua mediante operaciones atómicas `Acquire`/`Release` e inhibición de interrupciones siempre que `T: Send`.
 unsafe impl<T: Send> Sync for SpinMutex<T> {}
+// SAFETY: Un `SpinMutex<T>` puede enviarse entre hilos de forma segura si el dato protegido `T` implementa `Send`.
 unsafe impl<T: Send> Send for SpinMutex<T> {}
 
 /// Obtiene un identificador ligero del núcleo actual (0 en modo uniprocesador BSP).
@@ -123,6 +125,7 @@ impl<T> SpinMutex<T> {
                 self.owner_cpu.store(NO_OWNER_CPU, Ordering::Relaxed);
                 self.owner_loc.store(0, Ordering::Relaxed);
                 self.lock.store(false, Ordering::Release);
+                // SAFETY: Emisión directa al puerto COM1 (0x3F8) en Ring 0 sin adquirir cerrojos para diagnóstico de emergencia.
                 unsafe {
                     emergency_serial_log("\r\n[SPINLOCK REENTRANCY DETECTED] Reentrada ilegal en SpinMutex!\r\n");
                 }
@@ -147,6 +150,7 @@ impl<T> SpinMutex<T> {
 
             if spins >= Self::DEADLOCK_THRESHOLD_SPINS {
                 let prev_loc = self.owner_location();
+                // SAFETY: Emisión directa al puerto COM1 (0x3F8) en Ring 0 sin adquirir cerrojos ante detección de deadlock.
                 unsafe {
                     emergency_serial_log("\r\n[ANTI-DEADLOCK WATCHDOG] Contencion prolongada en SpinMutex!\r\n");
                 }
@@ -186,12 +190,14 @@ impl<'a, T> Deref for SpinMutexGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
+        // SAFETY: La posesión de `SpinMutexGuard` garantiza acceso exclusivo al contenido de `UnsafeCell<T>`.
         unsafe { &*self.mutex.data.get() }
     }
 }
 
 impl<'a, T> DerefMut for SpinMutexGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: La posesión exclusiva mutable de `SpinMutexGuard` garantiza ausencia de referencias concurrentes a `UnsafeCell<T>`.
         unsafe { &mut *self.mutex.data.get() }
     }
 }
@@ -208,6 +214,7 @@ impl<'a, T> Drop for SpinMutexGuard<'a, T> {
 #[inline]
 fn disable_interrupts_and_save() -> bool {
     let rflags: u64;
+    // SAFETY: Lectura de RFLAGS mediante `pushfq`/`pop` y desactivación de interrupciones (`cli`) en Ring 0.
     unsafe {
         core::arch::asm!(
             "pushfq",
@@ -224,6 +231,7 @@ fn disable_interrupts_and_save() -> bool {
 #[inline]
 fn restore_interrupts(was_enabled: bool) {
     if was_enabled {
+        // SAFETY: Reactivación de interrupciones (`sti`) en Ring 0 solo si estaban previamente activas antes de adquirir el candado.
         unsafe {
             core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
         }
@@ -232,6 +240,7 @@ fn restore_interrupts(was_enabled: bool) {
 
 /// Emite bytes directamente al puerto serie COM1 sin adquirir ningún cerrojo,
 /// garantizando que el reporte de Deadlock sea 100% inmune a bloqueos recursivos.
+// SAFETY: Acceso directo en Ring 0 a los puertos I/O estándar de COM1 (`0x3F8`/`0x3FD`) durante pánico o deadlock.
 unsafe fn emergency_serial_log(msg: &str) {
     for b in msg.bytes() {
         while (crate::io::inb(0x3FD) & 0x20) == 0 {

@@ -64,13 +64,14 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 7] = [
+    let tests: [(&str, fn()); 8] = [
         ("spinmutex_owner_and_reentrancy_guard", test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",       test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",             test_heap_dynamic_allocations),
         ("vfs_beaverfs_read_write",              test_vfs_beaverfs_read_write),
         ("mesh_file_sync_and_ack",               test_mesh_file_sync_and_ack),
         ("audio_integer_chime_no_fpu",           test_audio_integer_chime_no_fpu),
+        ("gui_dirty_rects_and_resolution",       test_gui_dirty_rects_and_resolution),
         ("crc32_ieee8023_integrity",             test_crc32_ieee8023),
     ];
 
@@ -224,6 +225,30 @@ pub fn test_audio_integer_chime_no_fpu() {
 
 pub fn test_crc32_ieee8023() {
     assert_eq!(crate::storage::crc32::crc32(b"123456789"), 0xCBF43926);
+}
+
+pub fn test_gui_dirty_rects_and_resolution() {
+    use crate::gui::canvas::Canvas;
+
+    let (scr_w, scr_h) = Canvas::screen_dimensions();
+    assert!(scr_w >= 640 && scr_h >= 480, "Dimensiones de pantalla activas validas");
+
+    // Limpiar cualquier rectángulo sucio previo
+    let _ = Canvas::take_dirty_rect();
+    assert_eq!(Canvas::take_dirty_rect(), None);
+
+    // Marcar dos regiones disjuntas y verificar la envolvente (bounding box)
+    Canvas::mark_dirty_rect(100, 120, 50, 40);
+    Canvas::mark_dirty_rect(200, 80, 100, 60);
+    let dirty = Canvas::take_dirty_rect().expect("Debe existir region sucia acumulada");
+    assert_eq!(dirty, (100, 80, 200, 80));
+    assert_eq!(Canvas::take_dirty_rect(), None, "Debe limpiarse tras take_dirty_rect");
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_gui_dirty_rects() {
+    test_gui_dirty_rects_and_resolution();
 }
 
 #[cfg(test)]

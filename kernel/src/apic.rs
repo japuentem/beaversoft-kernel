@@ -74,6 +74,7 @@ impl SmpManager {
 
     /// Lee un registro de 32 bits del Local APIC por MMIO
     #[inline(always)]
+    // SAFETY: El llamador garantiza que `self.lapic_base + offset` apunta a un registro MMIO válido del Local APIC.
     pub unsafe fn read_reg(&self, offset: usize) -> u32 {
         let ptr = (self.lapic_base + offset as u64) as *const u32;
         core::ptr::read_volatile(ptr)
@@ -81,6 +82,7 @@ impl SmpManager {
 
     /// Escribe un registro de 32 bits en el Local APIC por MMIO
     #[inline(always)]
+    // SAFETY: El llamador garantiza que `self.lapic_base + offset` apunta a un registro MMIO válido del Local APIC.
     pub unsafe fn write_reg(&self, offset: usize, value: u32) {
         let ptr = (self.lapic_base + offset as u64) as *mut u32;
         core::ptr::write_volatile(ptr, value);
@@ -89,6 +91,7 @@ impl SmpManager {
     /// Notifica el fin de una interrupción al Local APIC (EOI)
     #[inline(always)]
     pub fn end_of_interrupt(&self) {
+        // SAFETY: El registro `LAPIC_EOI` (offset 0xB0) es seguro de escribir en MMIO para acusar recibo de interrupción.
         unsafe {
             self.write_reg(LAPIC_EOI, 0);
         }
@@ -104,6 +107,7 @@ pub fn init_smp() {
     let mut smp = SMP.lock();
 
     // 1. Obtener dirección base del Local APIC desde el MSR 0x1B
+    // SAFETY: `MSR_APIC_BASE` (0x1B) es un registro arquitectónico estándar x86_64 legible en Ring 0.
     let msr_apic = unsafe { read_msr(MSR_APIC_BASE) };
     let lapic_phys = msr_apic & 0xFFFFF000;
     if lapic_phys != 0 {
@@ -111,6 +115,7 @@ pub fn init_smp() {
     }
 
     // 2. Habilitar Local APIC en el registro SVR (Vector 0xFF + Bit 8 = APIC Enable)
+    // SAFETY: Acceso MMIO a los registros SVR, EOI y TPR del Local APIC cuya base física fue verificada en `MSR_APIC_BASE`.
     unsafe {
         // Enviar EOI pendiente si existiera
         smp.write_reg(LAPIC_EOI, 0);
@@ -124,6 +129,7 @@ pub fn init_smp() {
     }
 
     // 3. Registrar el procesador principal (BSP)
+    // SAFETY: Lectura MMIO del registro `LAPIC_ID` (offset 0x20) con el Local APIC ya habilitado.
     let bsp_id = unsafe { (smp.read_reg(LAPIC_ID) >> 24) & 0xFF };
     smp.bsp_apic_id = bsp_id;
     smp.cores.clear();
@@ -155,6 +161,7 @@ pub fn init_smp() {
 
 /// Configura el temporizador de alta resolución del Local APIC
 fn init_lapic_timer(smp: &SmpManager, _freq_hz: u32) {
+    // SAFETY: Escritura MMIO en los registros de configuración del temporizador del Local APIC (`DIV`, `LVT_TIMER`, `TIMER_INIT`).
     unsafe {
         // Configurar divisor de reloj: Divide por 16 (bits 3,1,0 = 0b011)
         smp.write_reg(LAPIC_TIMER_DIV, 0x03);
@@ -188,6 +195,7 @@ fn wake_secondary_cores(_smp: &mut SmpManager) {
 
 /// Lectura segura de registro MSR (Model-Specific Register)
 #[inline(always)]
+// SAFETY: El llamador debe garantizar que `msr` es una dirección MSR válida en la arquitectura actual y se ejecuta en Ring 0.
 pub unsafe fn read_msr(msr: u32) -> u64 {
     let low: u32;
     let high: u32;
@@ -203,6 +211,7 @@ pub unsafe fn read_msr(msr: u32) -> u64 {
 
 /// Escritura segura en registro MSR
 #[inline(always)]
+// SAFETY: El llamador debe garantizar que `msr` y `value` son válidos para la arquitectura y que se ejecuta en Ring 0.
 pub unsafe fn write_msr(msr: u32, value: u64) {
     let low = value as u32;
     let high = (value >> 32) as u32;
@@ -220,6 +229,7 @@ pub unsafe fn write_msr(msr: u32, value: u64) {
 pub extern "C" fn ap_kernel_entry() -> ! {
     // Configurar Local APIC del núcleo secundario
     let smp = SMP.lock();
+    // SAFETY: Configuración de los registros MMIO `LAPIC_SVR` y `LAPIC_TPR` del núcleo secundario actual.
     unsafe {
         let svr = smp.read_reg(LAPIC_SVR);
         smp.write_reg(LAPIC_SVR, svr | 0x1FF);
@@ -231,6 +241,7 @@ pub extern "C" fn ap_kernel_entry() -> ! {
 
     // Bucle inactivo del AP esperando asignación de tareas del planificador
     loop {
+        // SAFETY: `hlt` suspende el núcleo secundario en Ring 0 hasta recibir una interrupción.
         unsafe {
             core::arch::asm!("hlt");
         }

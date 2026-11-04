@@ -69,6 +69,7 @@ impl VgaWriter {
         let buffer = VGA_BUFFER_ADDR as *mut u16;
         let blank_entry = (self.color as u16) << 8 | (b' ' as u16);
         for i in 0..(VGA_WIDTH * VGA_HEIGHT) {
+            // SAFETY: `0xB8000` es el búfer MMIO de texto VGA mapeado por identidad y `i` está acotado a `80 * 25`.
             unsafe {
                 core::ptr::write_volatile(buffer.add(i), blank_entry);
             }
@@ -85,6 +86,7 @@ impl VgaWriter {
             let buffer = VGA_BUFFER_ADDR as *mut u16;
             let color_attr = ((bg as u8) << 4) | (fg as u8);
             let entry = (color_attr as u16) << 8 | (byte as u16);
+            // SAFETY: `row` y `col` están verificados dentro de los límites del búfer MMIO VGA en `0xB8000`.
             unsafe {
                 core::ptr::write_volatile(buffer.add(offset), entry);
             }
@@ -113,6 +115,7 @@ impl VgaWriter {
                 let offset = self.row * VGA_WIDTH + self.col;
                 let buffer = VGA_BUFFER_ADDR as *mut u16;
                 let entry = (self.color as u16) << 8 | (b' ' as u16);
+                // SAFETY: `self.row` y `self.col` se mantienen dentro de `25x80`, apuntando a una celda válida en `0xB8000`.
                 unsafe {
                     core::ptr::write_volatile(buffer.add(offset), entry);
                 }
@@ -157,6 +160,7 @@ impl VgaWriter {
         let buffer = VGA_BUFFER_ADDR as *mut u16;
         let entry = (self.color as u16) << 8 | (cp437_char as u16);
 
+        // SAFETY: `offset` está garantizado menor que `VGA_WIDTH * VGA_HEIGHT` dentro del búfer MMIO `0xB8000`.
         unsafe {
             core::ptr::write_volatile(buffer.add(offset), entry);
         }
@@ -187,6 +191,7 @@ impl VgaWriter {
             for c in 0..VGA_WIDTH {
                 let src_offset = r * VGA_WIDTH + c;
                 let dst_offset = (r - 1) * VGA_WIDTH + c;
+                // SAFETY: `src_offset` y `dst_offset` están dentro del rango `[0, 80 * 25)` del búfer VGA `0xB8000`.
                 unsafe {
                     let entry = core::ptr::read_volatile(buffer.add(src_offset));
                     core::ptr::write_volatile(buffer.add(dst_offset), entry);
@@ -196,6 +201,7 @@ impl VgaWriter {
         let blank_entry = (self.color as u16) << 8 | (b' ' as u16);
         for c in 0..VGA_WIDTH {
             let offset = (VGA_HEIGHT - 1) * VGA_WIDTH + c;
+            // SAFETY: `offset` corresponde a la última fila del búfer VGA `0xB8000` dentro de límites válidos.
             unsafe {
                 core::ptr::write_volatile(buffer.add(offset), blank_entry);
             }
@@ -204,6 +210,7 @@ impl VgaWriter {
 
     fn update_hardware_cursor(&self) {
         let pos = (self.row * VGA_WIDTH + self.col) as u16;
+        // SAFETY: Los puertos CRT Controller `0x3D4` y `0x3D5` actualizan la posición del cursor VGA en Ring 0.
         unsafe {
             outb(0x3D4, 0x0F);
             outb(0x3D5, (pos & 0xFF) as u8);

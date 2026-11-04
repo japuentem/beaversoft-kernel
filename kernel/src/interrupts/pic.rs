@@ -30,6 +30,7 @@ impl ChainedPics {
         }
     }
 
+    // SAFETY: Reprogramación de los controladores PIC 8259A maestro (`0x20`/`0x21`) y esclavo (`0xA0`/`0xA1`) en Ring 0 con IF=0.
     pub unsafe fn initialize(&self) {
         // Guardar máscaras actuales de interrupciones
         let _mask1 = inb(PIC1_DATA);
@@ -67,6 +68,7 @@ impl ChainedPics {
         outb(PIC2_DATA, 0b11111111); // 0xFF: Enmascarar Slave por ahora
     }
 
+    // SAFETY: Actualización del registro IMR del PIC 8259A (`0x21` o `0xA1`) en Ring 0 para desenmascarar una línea IRQ válida.
     pub unsafe fn unmask_irq(&self, irq: u8) {
         if irq < 8 {
             let mask = inb(PIC1_DATA) & !(1 << irq);
@@ -77,6 +79,7 @@ impl ChainedPics {
         }
     }
 
+    // SAFETY: Escritura del comando `PIC_EOI` (`0x20`) a los puertos de comando del PIC 8259A al finalizar una rutina de interrupción.
     pub unsafe fn notify_end_of_interrupt(&self, interrupt_id: u8) {
         if interrupt_id >= self.pic2_offset {
             outb(PIC2_COMMAND, PIC_EOI);

@@ -33,10 +33,12 @@ pub const AUDIO_DMA_BUFFER_ADDR: usize = 0x0100_0000; // 16 MiB
 pub const BACKBUFFER_PHYS_ADDR: usize  = 0x0200_0000; // 32 MiB
 
 pub fn kernel_start() -> usize {
+    // SAFETY: `_kernel_start` es un símbolo exportado por el linker script cuya dirección física marca el inicio de la imagen del kernel.
     unsafe { &_kernel_start as *const u8 as usize }
 }
 
 pub fn kernel_end() -> usize {
+    // SAFETY: `_kernel_end` es un símbolo exportado por el linker script cuya dirección física marca el fin de la imagen del kernel.
     unsafe { &_kernel_end as *const u8 as usize }
 }
 
@@ -48,6 +50,7 @@ pub fn init_memory(memmap: &MemMap) {
     let k_size  = k_end - k_start;
 
     // 1. Inicializar el Heap del kernel (4 MiB en direccion fija)
+    // SAFETY: `HEAP_START..HEAP_START + HEAP_SIZE` es una región física reservada exclusivamente para el heap dinámico y se inicializa una única vez.
     unsafe {
         HEAP_ALLOCATOR.init(HEAP_START, HEAP_SIZE);
     }

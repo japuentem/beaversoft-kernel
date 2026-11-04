@@ -29,6 +29,7 @@ pub fn pci_read_config_u32(bus: u8, device: u8, function: u8, offset: u8) -> u32
         | ((offset as u32) & 0xFC)
         | 0x80000000;
 
+    // SAFETY: Acceso a los puertos de configuración PCI Mechanism #1 (0xCF8/0xCFC) alineado a 32 bits en Ring 0.
     unsafe {
         outl(PCI_CONFIG_ADDRESS_PORT, address);
         inl(PCI_CONFIG_DATA_PORT)
@@ -42,6 +43,7 @@ pub fn pci_write_config_u32(bus: u8, device: u8, function: u8, offset: u8, value
         | ((offset as u32) & 0xFC)
         | 0x80000000;
 
+    // SAFETY: Escritura de registro de configuración PCI de 32 bits mediante los puertos 0xCF8/0xCFC en Ring 0.
     unsafe {
         outl(PCI_CONFIG_ADDRESS_PORT, address);
         outl(PCI_CONFIG_DATA_PORT, value);

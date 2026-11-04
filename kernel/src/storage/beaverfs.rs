@@ -186,6 +186,7 @@ impl BeaverFs {
         // 1. Crear y escribir el superbloque
         let sb = Superblock::new(BEAVERFS_TOTAL_SECTORS);
         let mut sb_buf = [0_u8; SECTOR_SIZE];
+        // SAFETY: `sb` es una estructura `#[repr(C, packed)]` de tamaño inferior a `SECTOR_SIZE` (512 bytes) y `sb_buf` no se solapa con `sb`.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 &sb as *const Superblock as *const u8,
@@ -226,6 +227,7 @@ impl BeaverFs {
 
         // Guardar Inodo Raíz en el primer sector de inodos
         let mut inode_sec_buf = [0_u8; SECTOR_SIZE];
+        // SAFETY: `root_inode` cabe dentro de `inode_sec_buf` (64 <= 512 bytes) y ambas regiones de memoria son independientes.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 &root_inode as *const DiskInode as *const u8,
@@ -240,6 +242,7 @@ impl BeaverFs {
         let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
         for i in 0..entries_count {
             let empty_entry = DirEntry::empty();
+            // SAFETY: `i * size_of::<DirEntry>()` permanece dentro de los 512 bytes de `dir_init_buf` y no hay solapamiento con `empty_entry`.
             unsafe {
                 let ptr = dir_init_buf.as_mut_ptr().add(i * core::mem::size_of::<DirEntry>());
                 core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
@@ -258,6 +261,7 @@ impl BeaverFs {
         let mut buf = [0_u8; SECTOR_SIZE];
         block_dev.read_sector(BEAVERFS_START_LBA + SUPERBLOCK_REL_LBA, &mut buf)?;
 
+        // SAFETY: `read_unaligned` lee de forma segura un `Superblock` (`#[repr(C, packed)]`) desde los primeros bytes de `buf`.
         let sb = unsafe { core::ptr::read_unaligned(buf.as_ptr() as *const Superblock) };
         if sb.magic != BEAVERFS_MAGIC {
             return Err("Firma BeaverFS no detectada en disco (Superbloque no inicializado)");
@@ -281,6 +285,7 @@ impl BeaverFs {
         let mut buf = [0_u8; SECTOR_SIZE];
         block_dev.read_sector(BEAVERFS_START_LBA + INODE_TABLE_REL_LBA + sec_offset, &mut buf)?;
 
+        // SAFETY: `in_sec_idx < INODES_PER_SECTOR` garantiza que el desplazamiento de 64 bytes esté dentro de `buf` (512 bytes).
         let inode = unsafe {
             let ptr = buf.as_ptr().add(in_sec_idx * core::mem::size_of::<DiskInode>()) as *const DiskInode;
             core::ptr::read_unaligned(ptr)
@@ -301,6 +306,7 @@ impl BeaverFs {
         let mut buf = [0_u8; SECTOR_SIZE];
         block_dev.read_sector(BEAVERFS_START_LBA + INODE_TABLE_REL_LBA + sec_offset, &mut buf)?;
 
+        // SAFETY: `in_sec_idx < INODES_PER_SECTOR` asegura que la escritura de `DiskInode` (64 bytes) ocurra dentro de `buf` sin solapamiento.
         unsafe {
             let ptr = buf.as_mut_ptr().add(in_sec_idx * core::mem::size_of::<DiskInode>());
             core::ptr::copy_nonoverlapping(inode as *const DiskInode as *const u8, ptr, core::mem::size_of::<DiskInode>());
@@ -362,6 +368,7 @@ impl BeaverFs {
             let mut dir_buf = [0_u8; SECTOR_SIZE];
             BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + root_block, &mut dir_buf)?;
             for i in 0..entries_count {
+                // SAFETY: `i * size_of::<DirEntry>()` permanece dentro de los 512 bytes de `dir_buf` y `read_unaligned` soporta `#[repr(C, packed)]`.
                 let entry = unsafe {
                     let ptr = dir_buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
                     core::ptr::read_unaligned(ptr)
@@ -397,6 +404,7 @@ impl BeaverFs {
             let mut dir_buf = [0_u8; SECTOR_SIZE];
             BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + root_block, &mut dir_buf)?;
             for i in 0..entries_count {
+                // SAFETY: `i < entries_count` garantiza que la lectura de `DirEntry` esté dentro de `dir_buf`.
                 let entry = unsafe {
                     let ptr = dir_buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
                     core::ptr::read_unaligned(ptr)
@@ -428,6 +436,7 @@ impl BeaverFs {
                                 let empty_entry = DirEntry::empty();
                                 let mut init_buf = [0_u8; SECTOR_SIZE];
                                 for i in 0..entries_count {
+                                    // SAFETY: `i * size_of::<DirEntry>()` está dentro de `init_buf` (512 bytes) sin solapamiento.
                                     unsafe {
                                         let ptr = init_buf.as_mut_ptr().add(i * core::mem::size_of::<DirEntry>());
                                         core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
@@ -450,6 +459,7 @@ impl BeaverFs {
                 let mut dir_buf = [0_u8; SECTOR_SIZE];
                 let mut bd = BLOCK_DEVICE.lock();
                 bd.read_sector(BEAVERFS_START_LBA + target_block, &mut dir_buf)?;
+                // SAFETY: `slot < entries_count` asegura que la escritura de `new_entry` (64 bytes) ocurra dentro de `dir_buf`.
                 unsafe {
                     let ptr = dir_buf.as_mut_ptr().add(slot * core::mem::size_of::<DirEntry>());
                     core::ptr::copy_nonoverlapping(&new_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
@@ -575,6 +585,7 @@ impl BeaverFs {
             BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + root_block, &mut dir_buf)?;
 
             for i in 0..entries_count {
+                // SAFETY: `i * size_of::<DirEntry>()` permanece dentro de los 512 bytes de `dir_buf` y se lee sin requerir alineación estricta.
                 let entry = unsafe {
                     let ptr = dir_buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
                     core::ptr::read_unaligned(ptr)
@@ -645,6 +656,7 @@ impl BeaverFs {
         let mut dir_buf = [0_u8; SECTOR_SIZE];
         bd.read_sector(BEAVERFS_START_LBA + target_block, &mut dir_buf)?;
         let empty_entry = DirEntry::empty();
+        // SAFETY: `slot < entries_count` garantiza que la escritura de `empty_entry` (64 bytes) ocurra dentro de `dir_buf`.
         unsafe {
             let ptr = dir_buf.as_mut_ptr().add(slot * core::mem::size_of::<DirEntry>());
             core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());

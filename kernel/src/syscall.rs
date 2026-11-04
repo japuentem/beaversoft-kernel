@@ -48,6 +48,7 @@ pub const SYS_SEM_POST:    u64 = 11;
 // Helpers de lectura/escritura de MSR
 // ──────────────────────────────────────────────────────────────────────────────
 #[inline]
+// SAFETY: El llamador debe garantizar que `msr` es un registro MSR válido y que se ejecuta en Ring 0.
 unsafe fn rdmsr(msr: u32) -> u64 {
     let lo: u32;
     let hi: u32;
@@ -62,6 +63,7 @@ unsafe fn rdmsr(msr: u32) -> u64 {
 }
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `msr` y `value` son válidos para el registro arquitectónico y que se ejecuta en Ring 0.
 unsafe fn wrmsr(msr: u32, value: u64) {
     let lo = value as u32;
     let hi = (value >> 32) as u32;
@@ -92,6 +94,7 @@ pub static mut SYSCALL_KERNEL_STACK_TOP: u64 = 0;
 // Inicialización del subsistema de syscalls
 // ──────────────────────────────────────────────────────────────────────────────
 pub fn init_syscalls() {
+    // SAFETY: Inicialización de `SYSCALL_KERNEL_STACK_TOP` y MSRs `EFER`, `STAR`, `LSTAR` y `FMASK` durante el arranque en Ring 0 con IF=0.
     unsafe {
         // Inicializar puntero de cima de pila
         let base = core::ptr::addr_of_mut!(SYSCALL_KERNEL_STACK) as u64;
@@ -298,6 +301,7 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, _arg2: u64) ->
             // arg0: dirección u32 en memoria de usuario, arg1: valor esperado
             let user_ptr = arg0 as *const u32;
             let expected = arg1 as u32;
+            // SAFETY: El proceso invocador provee `user_ptr` apuntando a una palabra `u32` válida en su espacio de direcciones mapeado.
             let current = unsafe { *user_ptr };
             if current == expected {
                 crate::task::scheduler::sleep(1);

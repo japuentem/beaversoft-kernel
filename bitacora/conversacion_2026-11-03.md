@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 12
+# Total de interacciones del día: 13
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -415,5 +415,41 @@ Se implementaron y verificaron en paralelo **4 de los 9 puntos de la Fase 6**:
 4. **Pruebas automáticas en QEMU con `isa-debug-exit` (`0xF4`) y soporte `cargo test` (`kernel/src/tests.rs`, `main.rs`, `storage/crc32.rs`, `run.ps1`):**
    - Creado `kernel/src/tests.rs` con `exit_qemu(QemuExitCode::Success)` en el puerto `0xF4` (código de salida `33` en QEMU), `custom_test_frameworks` para `cargo test --target x86_64-unknown-none`, comando `autotest` en shell y bandera `./run.ps1 -Test`.
    - Verificadas 7 pruebas automatizadas en QEMU (`spinmutex_owner_and_reentrancy_guard`, `frame_allocator_alloc_and_free`, `heap_dynamic_allocations`, `vfs_beaverfs_read_write`, `mesh_file_sync_and_ack`, `audio_integer_chime_no_fpu`, `crc32_ieee8023_integrity`), finalizando con `[PASS] QEMU finalizo con codigo 33`.
+
+================================================================================
+
+## Interacción #13 [19:28:45]
+
+### 👤 Pregunta / Petición del Usuario:
+de los puntos implementa los que consideres mas rapidos, si puedes ejecutar mas de uno en paralelo, mejor
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementaron y verificaron en paralelo **3 puntos adicionales de la Fase 6** (alcanzando **7 de 9 puntos completados** en la Fase 6):
+
+1. **GUI independiente de la resolución y redibujo por regiones sucias (*dirty rects*) (`kernel/src/gui/canvas.rs`, `desktop.rs`, `window.rs`, `drivers/mouse.rs`, `tests.rs`):**
+   - Añadido `Canvas::screen_dimensions() -> (usize, usize)` que consulta `(vbe.width, vbe.height)` dinámicamente.
+   - Reemplazados todos los límites hardcodeados `1024`/`768` y `1023`/`767` en `mouse.rs` (`process_byte`), `window.rs` (`update_drag`), y `desktop.rs` (modal `Spotlight`, `Dock` inferior y filas visibles en modo CLI pantalla completa).
+   - Implementado acumulador atómico de regiones sucias (`DIRTY_PENDING`, `DIRTY_MIN_X/Y`, `DIRTY_MAX_X/Y`) con `Canvas::mark_dirty_rect(x, y, w, h)`, `Canvas::take_dirty_rect()` y `Canvas::present_dirty()`.
+   - Añadido `render_window_dirty(win_id)` y actualizadas todas las funciones `render_*_window()` (`Monitor`, `Terminal`, `Files`, `Player`, `Sync`, `Photos`, `Calendar`) y `handle_mouse_event()` para copiar al framebuffer VBE únicamente el rectángulo sucio de la ventana modificada (`w + 8`, `h + 8` incluyendo sombra).
+   - Añadida la prueba automatizada `gui_dirty_rects_and_resolution` a `kernel/src/tests.rs` (8 pruebas en total).
+
+2. **Modularización de `shell.rs` y `desktop.rs` por app/comando (`kernel/src/gui/*`, `kernel/src/shell/*`):**
+   - `kernel/src/gui/desktop.rs` (~1,795 líneas → ~545 líneas) se dividió en:
+     - `kernel/src/gui/apps_system.rs` (`Monitor`, `BeaverFiles`, `BeaverSync`, `Spotlight`).
+     - `kernel/src/gui/apps_media.rs` (`BeaverAudio`, `BeaverPhotos`, `BeaverCalendar`).
+     - Re-exportados en `desktop.rs` para mantener compatibilidad total con llamadas existentes.
+   - `kernel/src/shell.rs` (~2,437 líneas → ~380 líneas) se dividió en:
+     - `kernel/src/shell/cmd_fs.rs` (VFS, BeaverFS, ATA/AHCI/NVMe/GPT, instalador, usuarios y permisos).
+     - `kernel/src/shell/cmd_net.rs` (E1000, `ifconfig`, `ping`, `arp`, `netstat`, `dhcp`, `dns`, `curl`, `wget`, `sockets`, `mesh`, `sync`).
+     - `kernel/src/shell/cmd_sys.rs` (Dashboard, memoria, frame/heap/OOM/deadlock tests, tareas, Ring 3, ELF, slots A/B, IPC, CPU/RTC/SMP, USB, audio, VBE/GUI, BeaverScript, `pkg`, `autotest`, `reboot`, `shutdown`).
+
+3. **Documentación `// SAFETY:` en todos los bloques, funciones e implementaciones `unsafe` del kernel (28 archivos en `kernel/src/`):**
+   - Ejecutado en paralelo mediante subagentes (`Core Safety Documenter` y `Drivers Safety Documenter`) más el agente principal, documentando cada bloque `unsafe {`, `unsafe fn` y `unsafe impl` en `main.rs`, `io.rs`, `vga.rs`, `serial.rs`, `gdt.rs`, `apic.rs`, `sync.rs`, `usermode.rs`, `elf.rs`, `syscall.rs`, `tests.rs`, `interrupts/*`, `memory/*`, `task/*`, `storage/*`, `drivers/*`, `gui/*` y `shell/*`.
+
+4. **Verificación:**
+   - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none` sin errores ni advertencias (`0 warnings`).
+   - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test` ejecutó las **8 pruebas automatizadas** en QEMU, terminando con código `33` (`[PASS]`).
 
 ================================================================================

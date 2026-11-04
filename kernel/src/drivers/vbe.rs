@@ -55,6 +55,8 @@ pub struct UefiBootInfo {
 impl UefiBootInfo {
     pub fn get() -> Option<&'static UefiBootInfo> {
         let ptr = UEFI_BOOT_INFO_ADDR as *const UefiBootInfo;
+        // SAFETY: UEFI_BOOT_INFO_ADDR (0x9000) está mapeada por identidad en la memoria baja
+        // y sólo se desreferencia como referencia estática tras verificar la firma mágica.
         unsafe {
             if (*ptr).magic == UEFI_BOOT_MAGIC {
                 Some(&*ptr)
@@ -85,6 +87,7 @@ impl VbeGraphics {
     }
 
     fn write_reg(&self, index: u16, value: u16) {
+        // SAFETY: Escritura directa a los puertos I/O estándar del adaptador Bochs/VBE DISPI (0x01CE/0x01CF) en Ring 0.
         unsafe {
             outw(VBE_DISPI_IOPORT_INDEX, index);
             outw(VBE_DISPI_IOPORT_DATA, value);
@@ -92,6 +95,7 @@ impl VbeGraphics {
     }
 
     fn read_reg(&self, index: u16) -> u16 {
+        // SAFETY: Acceso a los puertos I/O de índice y datos del controlador VBE DISPI en Ring 0.
         unsafe {
             outw(VBE_DISPI_IOPORT_INDEX, index);
             inw(VBE_DISPI_IOPORT_DATA)
@@ -186,6 +190,7 @@ impl VbeGraphics {
             return;
         }
         let ptr = self.lfb_ptr();
+        // SAFETY: Las coordenadas (x, y) ya fueron validadas dentro de (width, height) y lfb_ptr apunta al LFB activo mapeado.
         unsafe {
             *ptr.add(y * self.width + x) = color;
         }
@@ -198,6 +203,7 @@ impl VbeGraphics {
         }
         let ptr = self.lfb_ptr();
         let total_pixels = self.width * self.height;
+        // SAFETY: El rango 0..total_pixels cubre exactamente las dimensiones activas del Linear Framebuffer mapeado.
         unsafe {
             for i in 0..total_pixels {
                 *ptr.add(i) = color;

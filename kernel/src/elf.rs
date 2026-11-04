@@ -73,6 +73,7 @@ impl<'a> ElfBinary<'a> {
             return Err("El archivo es demasiado pequeño para ser un binario ELF");
         }
 
+        // SAFETY: Se verificó previamente que `data.len() >= size_of::<Elf64Header>()` y `read_unaligned` no exige alineación.
         let header = unsafe { core::ptr::read_unaligned(data.as_ptr() as *const Elf64Header) };
 
         if &header.ident[0..4] != &ELF_MAGIC {
@@ -101,6 +102,7 @@ impl<'a> ElfBinary<'a> {
         for i in 0..count {
             let offset = ph_offset + i * ph_size;
             if offset + ph_size <= self.data.len() {
+                // SAFETY: `offset + ph_size <= self.data.len()` garantiza que la lectura no alineada de `Elf64ProgramHeader` está dentro del slice.
                 let ph = unsafe {
                     core::ptr::read_unaligned(self.data.as_ptr().add(offset) as *const Elf64ProgramHeader)
                 };
@@ -139,6 +141,7 @@ impl<'a> ElfBinary<'a> {
                 }
 
                 // Copiar el contenido del segmento en la dirección destino
+                // SAFETY: Se validó `file_offset + file_sz <= self.data.len()` y `target_vaddr` apunta a la región de usuario mapeada para el ejecutable.
                 unsafe {
                     let dest = target_vaddr as *mut u8;
                     core::ptr::copy_nonoverlapping(self.data.as_ptr().add(file_offset), dest, file_sz);
@@ -197,6 +200,7 @@ pub fn generate_sample_elf_binary() -> Vec<u8> {
         sh_str_index: 0,
     };
 
+    // SAFETY: `Elf64Header` es `#[repr(C, packed)]` de exactamente 64 bytes inicializados y alineación de `u8` es 1.
     let header_bytes = unsafe {
         core::slice::from_raw_parts(&header as *const Elf64Header as *const u8, 64)
     };
@@ -214,6 +218,7 @@ pub fn generate_sample_elf_binary() -> Vec<u8> {
         align: 0x1000,
     };
 
+    // SAFETY: `Elf64ProgramHeader` es `#[repr(C, packed)]` de exactamente 56 bytes inicializados y alineación de `u8` es 1.
     let ph_bytes = unsafe {
         core::slice::from_raw_parts(&ph as *const Elf64ProgramHeader as *const u8, 56)
     };

@@ -55,6 +55,7 @@ pub fn jump_to_ring3(entry: u64, user_stack_top: u64) -> ! {
     let ss = SELECTOR_USER_DATA as u64;
     let rflags: u64 = 0x202; // IF=1, reserved bit
 
+    // SAFETY: Se construye un marco de interrupción válido en la pila con selectores RPL=3 (`cs`, `ss`) y se ejecuta `iretq` hacia `entry`.
     unsafe {
         asm!(
             // Construir frame de IRETQ en la pila (de abajo hacia arriba):
@@ -85,6 +86,7 @@ pub fn jump_to_ring3(entry: u64, user_stack_top: u64) -> ! {
 macro_rules! syscall {
     ($nr:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de la instrucción `syscall` con la convención de registros de BeaverOS y MSRs previamente configurados.
         unsafe {
             asm!(
                 "syscall",
@@ -98,6 +100,7 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de `syscall` pasando 1 argumento en `rdi` y preservando la pila de usuario.
         unsafe {
             asm!(
                 "syscall",
@@ -112,6 +115,7 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de `syscall` pasando 2 argumentos en `rdi` y `rsi` según la ABI del kernel.
         unsafe {
             asm!(
                 "syscall",
@@ -159,6 +163,7 @@ extern "C" fn userland_crash_task() {
     // Intentar leer desde la dirección 0x0 (NULL deref en Ring 3)
     // Esto generará un #PF con CPL=3. El kernel detectará que es un fallo
     // de usuario y matará sólo este proceso (no habrá BSOD).
+    // SAFETY: Desreferencia nula deliberada en Ring 3 (CPL=3) para verificar que la excepción `#PF` aísla y termina el proceso sin afectar al kernel.
     unsafe {
         let null_ptr: *const u64 = 0x0 as *const u64;
         let _val = core::ptr::read_volatile(null_ptr); // → #PF desde Ring 3

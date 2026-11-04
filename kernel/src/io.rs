@@ -8,6 +8,7 @@
 use core::arch::asm;
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `port` es un puerto I/O válido y que se ejecuta en Ring 0.
 pub unsafe fn outb(port: u16, val: u8) {
     asm!(
         "out dx, al",
@@ -18,6 +19,7 @@ pub unsafe fn outb(port: u16, val: u8) {
 }
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `port` es un puerto I/O válido y que se ejecuta en Ring 0.
 pub unsafe fn inb(port: u16) -> u8 {
     let val: u8;
     asm!(
@@ -30,6 +32,7 @@ pub unsafe fn inb(port: u16) -> u8 {
 }
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `port` es un puerto I/O de 16 bits válido en Ring 0.
 pub unsafe fn outw(port: u16, val: u16) {
     asm!(
         "out dx, ax",
@@ -40,6 +43,7 @@ pub unsafe fn outw(port: u16, val: u16) {
 }
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `port` es un puerto I/O de 16 bits válido en Ring 0.
 pub unsafe fn inw(port: u16) -> u16 {
     let val: u16;
     asm!(
@@ -52,6 +56,7 @@ pub unsafe fn inw(port: u16) -> u16 {
 }
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `port` es un puerto I/O de 32 bits válido en Ring 0.
 pub unsafe fn outl(port: u16, val: u32) {
     asm!(
         "out dx, eax",
@@ -62,6 +67,7 @@ pub unsafe fn outl(port: u16, val: u32) {
 }
 
 #[inline]
+// SAFETY: El llamador debe garantizar que `port` es un puerto I/O de 32 bits válido en Ring 0.
 pub unsafe fn inl(port: u16) -> u32 {
     let val: u32;
     asm!(
@@ -75,6 +81,7 @@ pub unsafe fn inl(port: u16) -> u32 {
 
 /// Pausa breve de I/O escribiendo al puerto 0x80 (convención estándar x86)
 #[inline]
+// SAFETY: El puerto 0x80 es el puerto de diagnóstico POST estándar usado para retardos de bus I/O en Ring 0.
 pub unsafe fn io_wait() {
     outb(0x80, 0);
 }

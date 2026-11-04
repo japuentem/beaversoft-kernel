@@ -59,6 +59,7 @@ global_asm!(include_str!("../../boot/boot.s"));
 #[no_mangle]
 pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     // 1. Inicializar hardware básico de salida (UART COM1 y VGA)
+    // SAFETY: Los puertos I/O de COM1 (0x3F8..0x3FD) son exclusivos del controlador UART y estamos en Ring 0 con acceso exclusivo mediante `SERIAL.lock()`.
     unsafe {
         SERIAL.lock().init();
     }
@@ -104,6 +105,7 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
 
     // 6. Remapear y configurar el controlador PIC 8259A Dual
     kprint!("[INIT] Remapeo de PIC 8259 dual a interrupciones 32..47...      ");
+    // SAFETY: La IDT ya está cargada con los vectores 32..47 y las interrupciones aún están deshabilitadas (IF=0).
     unsafe {
         PICS.initialize();
     }
@@ -324,6 +326,7 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     }
 
     // 14. Habilitar interrupciones (STI) y entrar al bucle principal de la Tarea 0
+    // SAFETY: La GDT, IDT, PIC y temporizadores ya están inicializados de forma segura antes de activar IF=1.
     unsafe {
         asm!("sti");
     }
@@ -334,6 +337,7 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
         crate::drivers::net::net_poll_rx();
         // Mantenimiento de la malla: anuncio periodico cada 2 s + expiracion de nodos en 10 s
         crate::drivers::mesh::mesh_tick();
+        // SAFETY: `hlt` suspende el procesador de forma segura en Ring 0 hasta la próxima interrupción.
         unsafe {
             asm!("hlt"); // Esperar la siguiente interrupcion (PIT 100Hz)
         }
@@ -357,6 +361,7 @@ fn panic(info: &PanicInfo) -> ! {
     crate::tests::exit_qemu(crate::tests::QemuExitCode::Failed);
 
     loop {
+        // SAFETY: `hlt` detiene la ejecución de la CPU tras un pánico irrecuperable sin corromper memoria.
         unsafe {
             asm!("hlt");
         }

@@ -35,6 +35,7 @@ impl BlockDeviceManager {
     pub fn read_sector(&self, lba: u32, buf: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
         if self.use_ata {
             let ata = ATA_PRIMARY_MASTER.lock();
+            // SAFETY: Lectura de 256 palabras por PIO desde ATA Primary Master bajo el cerrojo ATA_PRIMARY_MASTER.
             unsafe {
                 ata.read_sector(lba, buf).map_err(|_| "Error al leer sector de disco ATA")?;
             }
@@ -49,6 +50,7 @@ impl BlockDeviceManager {
     pub fn write_sector(&mut self, lba: u32, buf: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
         if self.use_ata {
             let ata = ATA_PRIMARY_MASTER.lock();
+            // SAFETY: Escritura de 256 palabras por PIO hacia ATA Primary Master bajo el cerrojo ATA_PRIMARY_MASTER.
             unsafe {
                 ata.write_sector(lba, buf).map_err(|_| "Error al escribir sector en disco ATA")?;
             }

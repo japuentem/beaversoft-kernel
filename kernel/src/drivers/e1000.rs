@@ -134,6 +134,7 @@ pub struct E1000Driver {
 // SAFETY: El driver se protege externamente con SpinMutex; los punteros son
 // estables (marcos DMA fijos) y solo accedemos desde un contexto a la vez.
 unsafe impl Send for E1000Driver {}
+// SAFETY: El acceso concurrente a E1000Driver está sincronizado mediante SpinMutex global.
 unsafe impl Sync for E1000Driver {}
 
 impl E1000Driver {
@@ -156,6 +157,7 @@ impl E1000Driver {
 
     /// Lee un registro de 32 bits del E1000.
     #[inline]
+    // SAFETY: El llamador debe garantizar que `mmio_base` sea válido y `offset` esté dentro del espacio MMIO del E1000.
     pub unsafe fn read_reg(&self, offset: u32) -> u32 {
         // SAFETY: mmio_base apunta a BAR0 del E1000 mapeado identidad en 4 GiB.
         let ptr = (self.mmio_base + offset as u64) as *const u32;
@@ -164,6 +166,7 @@ impl E1000Driver {
 
     /// Escribe un registro de 32 bits en el E1000.
     #[inline]
+    // SAFETY: El llamador debe garantizar que `mmio_base` sea válido y `offset` corresponda a un registro MMIO escribible.
     pub unsafe fn write_reg(&self, offset: u32, val: u32) {
         // SAFETY: idem.
         let ptr = (self.mmio_base + offset as u64) as *mut u32;
@@ -183,6 +186,7 @@ impl E1000Driver {
         self.initialized = false;
 
         // 1. Reset del dispositivo
+        // SAFETY: `self.mmio_base` acaba de inicializarse con el BAR0 válido del controlador E1000.
         unsafe {
             self.write_reg(E1000_REG_CTRL, self.read_reg(E1000_REG_CTRL) | E1000_CTRL_RST);
         }
@@ -190,6 +194,7 @@ impl E1000Driver {
         for _ in 0..100_000 {
             core::hint::spin_loop();
         }
+        // SAFETY: Acceso MMIO válido tras el reinicio del controlador para deshabilitar IRQs, levantar el enlace y limpiar la MTA.
         unsafe {
             // Desactivar todas las interrupciones — trabajamos en modo polling
             self.write_reg(E1000_REG_IMC, 0xFFFF_FFFF);
@@ -219,6 +224,7 @@ impl E1000Driver {
                 None => return false,
             };
             self.rx_bufs[i] = buf_addr as *mut u8;
+            // SAFETY: `self.rx_descs` apunta a un marco físico de 4 KiB recién asignado con capacidad para `NUM_RX_DESC` descriptores alineados.
             unsafe {
                 let desc_ptr = self.rx_descs.add(i);
                 desc_ptr.write_volatile(RxDesc {
@@ -233,6 +239,7 @@ impl E1000Driver {
         }
         self.rx_tail = NUM_RX_DESC - 1;
 
+        // SAFETY: Programación de los registros MMIO del anillo RX con direcciones físicas de DMA válidas y alineadas.
         unsafe {
             self.write_reg(E1000_REG_RDBAL, rx_desc_addr as u32);
             self.write_reg(E1000_REG_RDBAH, (rx_desc_addr >> 32) as u32);
@@ -258,6 +265,7 @@ impl E1000Driver {
                 None => return false,
             };
             self.tx_bufs[i] = buf_addr as *mut u8;
+            // SAFETY: `self.tx_descs` apunta a un marco físico válido con espacio suficiente para `NUM_TX_DESC` descriptores TX.
             unsafe {
                 let desc_ptr = self.tx_descs.add(i);
                 desc_ptr.write_volatile(TxDesc {
@@ -273,6 +281,7 @@ impl E1000Driver {
         }
         self.tx_tail = 0;
 
+        // SAFETY: Configuración MMIO del anillo TX con direcciones físicas de descriptores válidas y parámetros IEEE 802.3.
         unsafe {
             self.write_reg(E1000_REG_TDBAL, tx_desc_addr as u32);
             self.write_reg(E1000_REG_TDBAH, (tx_desc_addr >> 32) as u32);
@@ -303,9 +312,11 @@ impl E1000Driver {
         }
 
         let tail = self.tx_tail;
+        // SAFETY: `tail < NUM_TX_DESC` y `self.tx_descs` fue inicializado con un arreglo válido de descriptores TX.
         let desc_ptr = unsafe { self.tx_descs.add(tail) };
 
         // Verificar que el descriptor esta libre (DD=1 significa que el HW termino)
+        // SAFETY: Lectura volátil del campo `status` de un descriptor TX válido y alineado en memoria DMA.
         let cur_status = unsafe { core::ptr::addr_of!((*desc_ptr).status).read_volatile() };
         if cur_status & E1000_TXD_STAT_DD == 0 {
             // Buffer ocupado — la cola TX esta llena; descartar este paquete
@@ -313,6 +324,7 @@ impl E1000Driver {
         }
 
         // Copiar trama al buffer DMA
+        // SAFETY: `frame.len() <= TX_BUF_SIZE` (4 KiB asignados en `tx_bufs[tail]`), los búferes no se solapan y `desc_ptr` es válido.
         unsafe {
             core::ptr::copy_nonoverlapping(frame.as_ptr(), self.tx_bufs[tail], frame.len());
             core::ptr::addr_of_mut!((*desc_ptr).length).write_volatile(frame.len() as u16);
@@ -325,6 +337,7 @@ impl E1000Driver {
 
         // Avanzar TX tail para notificar al hardware
         self.tx_tail = (tail + 1) % NUM_TX_DESC;
+        // SAFETY: Actualización del registro MMIO `TDT` dentro del rango `[0, NUM_TX_DESC)`.
         unsafe {
             self.write_reg(E1000_REG_TDT, self.tx_tail as u32);
         }
@@ -332,6 +345,7 @@ impl E1000Driver {
         // Esperar confirmacion DD con lectura volatile (limite de iteraciones)
         for _ in 0..50_000 {
             core::hint::spin_loop();
+            // SAFETY: Lectura volátil del estado del descriptor DMA para verificar la confirmación del hardware.
             let st = unsafe { core::ptr::addr_of!((*desc_ptr).status).read_volatile() };
             if st & E1000_TXD_STAT_DD != 0 {
                 return true;
@@ -357,15 +371,19 @@ impl E1000Driver {
 
         for _ in 0..NUM_RX_DESC {
             let next = (self.rx_tail + 1) % NUM_RX_DESC;
+            // SAFETY: `next < NUM_RX_DESC` y `self.rx_descs` apunta al anillo RX válido en memoria física.
             let desc_ptr = unsafe { self.rx_descs.add(next) };
+            // SAFETY: Lectura volátil del campo `status` del descriptor RX actual.
             let status = unsafe { core::ptr::addr_of!((*desc_ptr).status).read_volatile() };
             if status & E1000_RXD_STAT_DD == 0 {
                 break; // El hardware aun no escribio en el siguiente descriptor
             }
 
+            // SAFETY: Lectura volátil de `length` escrita por el controlador DMA al completar la recepción.
             let length = unsafe { core::ptr::addr_of!((*desc_ptr).length).read_volatile() };
             if status & E1000_RXD_STAT_EOP != 0 && length > 0 {
                 let len = (length as usize).min(RX_BUF_SIZE);
+                // SAFETY: `self.rx_bufs[next]` apunta a un marco de 4 KiB válido y `len` está acotado a `RX_BUF_SIZE` (2048).
                 let buf = unsafe {
                     core::slice::from_raw_parts(self.rx_bufs[next], len)
                 };
@@ -373,6 +391,7 @@ impl E1000Driver {
             }
 
             // Reciclar descriptor: limpiar status/length con write_volatile y devolver al HW
+            // SAFETY: Reinicio volátil de los campos `status` y `length` del descriptor RX antes de devolverlo al hardware.
             unsafe {
                 core::ptr::addr_of_mut!((*desc_ptr).status).write_volatile(0);
                 core::ptr::addr_of_mut!((*desc_ptr).length).write_volatile(0);
@@ -380,6 +399,7 @@ impl E1000Driver {
             core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
 
             self.rx_tail = next;
+            // SAFETY: Escritura en el registro MMIO `RDT` con el nuevo índice de cola RX válido.
             unsafe {
                 self.write_reg(E1000_REG_RDT, self.rx_tail as u32);
             }

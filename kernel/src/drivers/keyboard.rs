@@ -140,6 +140,7 @@ impl KeyboardState {
 pub static KEYBOARD: SpinMutex<KeyboardState> = SpinMutex::new(KeyboardState::new());
 
 pub fn on_keyboard_interrupt() -> Option<char> {
+    // SAFETY: Lectura de un byte desde el puerto de datos del controlador PS/2 (0x60) dentro del manejador de IRQ1.
     let scancode = unsafe { inb(KEYBOARD_DATA_PORT) };
     KEYBOARD.lock().process_scancode(scancode)
 }

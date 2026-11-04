@@ -20,6 +20,7 @@ impl SerialPort {
         Self { port }
     }
 
+    // SAFETY: El llamador debe asegurar que `self.port` apunta a un controlador UART 16550 válido y con acceso exclusivo.
     pub unsafe fn init(&self) {
         // Desactivar interrupciones UART
         outb(self.port + 1, 0x00);
@@ -37,6 +38,7 @@ impl SerialPort {
     }
 
     fn is_transmit_empty(&self) -> bool {
+        // SAFETY: Lectura del registro Line Status (`port + 5`) del UART 16550 en Ring 0.
         unsafe { (inb(self.port + 5) & 0x20) != 0 }
     }
 
@@ -44,12 +46,14 @@ impl SerialPort {
         while !self.is_transmit_empty() {
             core::hint::spin_loop();
         }
+        // SAFETY: Escritura al registro de datos del UART (`self.port`) tras verificar que el búfer TX está vacío.
         unsafe {
             outb(self.port, byte);
         }
     }
 
     pub fn read_byte(&self) -> Option<u8> {
+        // SAFETY: Lectura de los registros de estado y datos del UART 16550 en `self.port`.
         unsafe {
             if (inb(self.port + 5) & 0x01) != 0 {
                 Some(inb(self.port))

@@ -103,6 +103,7 @@ impl FrameAllocatorInner {
             self.mark_used(frame);
             self.search_hint = frame + 1;
             // Limpiar la pagina a ceros
+            // SAFETY: `frame * PAGE_SIZE` es un marco físico recién reservado en RAM usable con identity mapping.
             unsafe {
                 core::ptr::write_bytes((frame * PAGE_SIZE) as *mut u8, 0, PAGE_SIZE);
             }
@@ -115,6 +116,7 @@ impl FrameAllocatorInner {
             let frame = w * BITS + free_bit;
             self.mark_used(frame);
             self.search_hint = frame + 1;
+            // SAFETY: `frame * PAGE_SIZE` es un marco físico libre recién marcado como ocupado en memoria usable mapeada por identidad.
             unsafe {
                 core::ptr::write_bytes((frame * PAGE_SIZE) as *mut u8, 0, PAGE_SIZE);
             }
@@ -161,6 +163,7 @@ impl FrameAllocatorInner {
             }
             let addr = start * PAGE_SIZE;
             // Limpiar toda la region
+            // SAFETY: Los `n` marcos contiguos desde `addr` acaban de reservarse en RAM usable mapeada por identidad.
             unsafe {
                 core::ptr::write_bytes(addr as *mut u8, 0, n * PAGE_SIZE);
             }

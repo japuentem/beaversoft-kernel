@@ -9,10 +9,18 @@
 use crate::drivers::vbe::VBE;
 use crate::gui::font::get_glyph;
 use crate::memory::BACKBUFFER_PHYS_ADDR;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const SCREEN_WIDTH: usize = 1024;
 pub const SCREEN_HEIGHT: usize = 768;
 pub const TOTAL_PIXELS: usize = SCREEN_WIDTH * SCREEN_HEIGHT;
+
+/// Dirty rectangle bounding box tracker for partial screen updates (Dirty Rects)
+static DIRTY_PENDING: AtomicBool = AtomicBool::new(false);
+static DIRTY_MIN_X: AtomicUsize = AtomicUsize::new(SCREEN_WIDTH);
+static DIRTY_MIN_Y: AtomicUsize = AtomicUsize::new(SCREEN_HEIGHT);
+static DIRTY_MAX_X: AtomicUsize = AtomicUsize::new(0);
+static DIRTY_MAX_Y: AtomicUsize = AtomicUsize::new(0);
 
 pub struct Color;
 
@@ -85,6 +93,66 @@ impl Color {
 pub struct Canvas;
 
 impl Canvas {
+    /// Obtiene las dimensiones activas de la pantalla desde el driver VBE/GOP
+    /// (con respaldo seguro a SCREEN_WIDTH x SCREEN_HEIGHT si el cerrojo está ocupado).
+    #[inline]
+    pub fn screen_dimensions() -> (usize, usize) {
+        if let Some(vbe) = VBE.try_lock() {
+            let w = if vbe.width > 0 { vbe.width } else { SCREEN_WIDTH };
+            let h = if vbe.height > 0 { vbe.height } else { SCREEN_HEIGHT };
+            (w, h)
+        } else {
+            (SCREEN_WIDTH, SCREEN_HEIGHT)
+        }
+    }
+
+    /// Registra una región rectangular como sucia (Dirty Rect) para redibujo parcial
+    #[inline]
+    pub fn mark_dirty_rect(x: usize, y: usize, w: usize, h: usize) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        let (scr_w, scr_h) = (SCREEN_WIDTH, SCREEN_HEIGHT);
+        let x1 = x.min(scr_w);
+        let y1 = y.min(scr_h);
+        let x2 = (x + w).min(scr_w);
+        let y2 = (y + h).min(scr_h);
+        if x2 <= x1 || y2 <= y1 {
+            return;
+        }
+        DIRTY_MIN_X.fetch_min(x1, Ordering::Relaxed);
+        DIRTY_MIN_Y.fetch_min(y1, Ordering::Relaxed);
+        DIRTY_MAX_X.fetch_max(x2, Ordering::Relaxed);
+        DIRTY_MAX_Y.fetch_max(y2, Ordering::Relaxed);
+        DIRTY_PENDING.store(true, Ordering::Release);
+    }
+
+    /// Extrae y limpia el rectángulo sucio acumulado `(x, y, w, h)`, si existe
+    pub fn take_dirty_rect() -> Option<(usize, usize, usize, usize)> {
+        if !DIRTY_PENDING.swap(false, Ordering::AcqRel) {
+            return None;
+        }
+        let min_x = DIRTY_MIN_X.swap(SCREEN_WIDTH, Ordering::Relaxed);
+        let min_y = DIRTY_MIN_Y.swap(SCREEN_HEIGHT, Ordering::Relaxed);
+        let max_x = DIRTY_MAX_X.swap(0, Ordering::Relaxed);
+        let max_y = DIRTY_MAX_Y.swap(0, Ordering::Relaxed);
+        if max_x > min_x && max_y > min_y {
+            Some((min_x, min_y, max_x - min_x, max_y - min_y))
+        } else {
+            None
+        }
+    }
+
+    /// Presenta únicamente la región sucia acumulada en el Framebuffer VBE/GOP
+    pub fn present_dirty() -> bool {
+        if let Some((x, y, w, h)) = Self::take_dirty_rect() {
+            Self::present_rect(x, y, w, h);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Puntero directo al búfer secundario en RAM física (Double Buffer)
     #[inline(always)]
     pub fn backbuffer_ptr() -> *mut u32 {
@@ -95,6 +163,8 @@ impl Canvas {
     #[inline(always)]
     pub fn put_pixel(x: usize, y: usize, color: u32) {
         if x < SCREEN_WIDTH && y < SCREEN_HEIGHT {
+            // SAFETY: x < SCREEN_WIDTH y y < SCREEN_HEIGHT garantizan que el desplazamiento
+            // está dentro de los 3 MiB asignados a BACKBUFFER_PHYS_ADDR (0x01C0_0000).
             unsafe {
                 *Self::backbuffer_ptr().add(y * SCREEN_WIDTH + x) = color;
             }
@@ -113,6 +183,7 @@ impl Canvas {
         let row_w = max_x - x;
         for py in y..max_y {
             let row_offset = py * SCREEN_WIDTH + x;
+            // SAFETY: row_offset + row_w <= SCREEN_HEIGHT * SCREEN_WIDTH dentro del backbuffer mapeado.
             unsafe {
                 let slice = core::slice::from_raw_parts_mut(ptr.add(row_offset), row_w);
                 slice.fill(color);
@@ -286,6 +357,7 @@ impl Canvas {
             let factor = ((i * 255) / h) as u8;
             let c = Color::blend(top, bottom, factor);
             let row_offset = (y + i) * SCREEN_WIDTH + x;
+            // SAFETY: row_offset + row_w está dentro de los límites verificados de BACKBUFFER_PHYS_ADDR.
             unsafe {
                 let slice = core::slice::from_raw_parts_mut(ptr.add(row_offset), row_w);
                 slice.fill(c);
@@ -318,10 +390,12 @@ impl Canvas {
                 }
                 let bit = (byte >> (7 - col)) & 1;
                 if bit == 1 {
+                    // SAFETY: px < SCREEN_WIDTH y py < SCREEN_HEIGHT verificados antes de indexar el backbuffer.
                     unsafe {
                         *ptr.add(row_offset + px) = fg;
                     }
                 } else if let Some(bg_color) = bg {
+                    // SAFETY: px < SCREEN_WIDTH y py < SCREEN_HEIGHT verificados antes de indexar el backbuffer.
                     unsafe {
                         *ptr.add(row_offset + px) = bg_color;
                     }
@@ -375,6 +449,7 @@ impl Canvas {
                 if bit == 1 {
                     let px = x + (col - min_col);
                     if px < SCREEN_WIDTH {
+                        // SAFETY: px < SCREEN_WIDTH y py < SCREEN_HEIGHT verificados antes de escribir en backbuffer.
                         unsafe {
                             *ptr.add(row_offset + px) = fg;
                         }
@@ -466,8 +541,10 @@ impl Canvas {
                 if px >= w { continue; }
                 let dist_sq = (dx * dx + dy_sq) as usize;
                 let factor = 35 - ((dist_sq * 35) / (r1 * r1 as isize) as usize) as u8;
+                // SAFETY: py < h <= SCREEN_HEIGHT y px < w <= SCREEN_WIDTH dentro del backbuffer mapeado.
                 let orig = unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) };
                 let blended = Color::blend(orig, Color::BEAVER_TEAL, factor);
+                // SAFETY: Mismo desplazamiento válido dentro del backbuffer.
                 unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) = blended; }
             }
         }
@@ -486,8 +563,10 @@ impl Canvas {
                 if px >= w { continue; }
                 let dist_sq = (dx * dx + dy_sq) as usize;
                 let factor = 30 - ((dist_sq * 30) / (r2 * r2 as isize) as usize) as u8;
+                // SAFETY: py < h <= SCREEN_HEIGHT y px < w <= SCREEN_WIDTH dentro del backbuffer mapeado.
                 let orig = unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) };
                 let blended = Color::blend(orig, 0x7C3AED, factor); // Violeta brillante
+                // SAFETY: Mismo desplazamiento válido dentro del backbuffer.
                 unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) = blended; }
             }
         }
@@ -506,8 +585,10 @@ impl Canvas {
                 if px >= w { continue; }
                 let dist_sq = (dx * dx + dy_sq) as usize;
                 let factor = 22 - ((dist_sq * 22) / (r3 * r3 as isize) as usize) as u8;
+                // SAFETY: py < h <= SCREEN_HEIGHT y px < w <= SCREEN_WIDTH dentro del backbuffer mapeado.
                 let orig = unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) };
                 let blended = Color::blend(orig, Color::BEAVER_AMBER, factor);
+                // SAFETY: Mismo desplazamiento válido dentro del backbuffer.
                 unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) = blended; }
             }
         }
@@ -543,8 +624,10 @@ impl Canvas {
                 if px >= w { continue; }
                 let dist_sq = (dx * dx + dy_sq) as usize;
                 let factor = 22 - ((dist_sq * 22) / (r1 * r1 as isize) as usize) as u8;
+                // SAFETY: py < h <= SCREEN_HEIGHT y px < w <= SCREEN_WIDTH dentro del backbuffer mapeado.
                 let orig = unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) };
                 let blended = Color::blend(orig, Color::BEAVER_TEAL_BRIGHT, factor);
+                // SAFETY: Mismo desplazamiento válido dentro del backbuffer.
                 unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) = blended; }
             }
         }
@@ -562,8 +645,10 @@ impl Canvas {
                 if px >= w { continue; }
                 let dist_sq = (dx * dx + dy_sq) as usize;
                 let factor = 20 - ((dist_sq * 20) / (r2 * r2 as isize) as usize) as u8;
+                // SAFETY: py < h <= SCREEN_HEIGHT y px < w <= SCREEN_WIDTH dentro del backbuffer mapeado.
                 let orig = unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) };
                 let blended = Color::blend(orig, Color::BEAVER_AMBER_LIGHT, factor);
+                // SAFETY: Mismo desplazamiento válido dentro del backbuffer.
                 unsafe { *Self::backbuffer_ptr().add(py * SCREEN_WIDTH + px) = blended; }
             }
         }
@@ -643,6 +728,7 @@ impl Canvas {
         let stride = if vbe.width > 0 { vbe.width } else { SCREEN_WIDTH };
 
         if stride == SCREEN_WIDTH {
+            // SAFETY: src (BACKBUFFER_PHYS_ADDR) y dst (VBE LFB) son regiones no superpuestas de TOTAL_PIXELS u32.
             unsafe {
                 core::ptr::copy_nonoverlapping(src as *const u64, dst as *mut u64, TOTAL_PIXELS / 2);
             }
@@ -650,6 +736,7 @@ impl Canvas {
             let row_w = SCREEN_WIDTH.min(vbe.width);
             let total_rows = SCREEN_HEIGHT.min(vbe.height);
             for y in 0..total_rows {
+                // SAFETY: Cada scanline y * SCREEN_WIDTH y y * stride está dentro del backbuffer y del LFB.
                 unsafe {
                     core::ptr::copy_nonoverlapping(src.add(y * SCREEN_WIDTH), dst.add(y * stride), row_w);
                 }
@@ -677,6 +764,7 @@ impl Canvas {
         for py in y..max_y {
             let src_offset = py * SCREEN_WIDTH + x;
             let dst_offset = py * stride + x;
+            // SAFETY: src_offset..+row_count y dst_offset..+row_count están acotados a SCREEN_WIDTH/vbe.width y SCREEN_HEIGHT/vbe.height.
             unsafe {
                 core::ptr::copy_nonoverlapping(src.add(src_offset), dst.add(dst_offset), row_count);
             }
@@ -689,12 +777,14 @@ impl Canvas {
     }
 
     pub fn invalidate_cursor() {
+        // SAFETY: Actualización de estado estático del cursor de hardware simulado en contexto de GUI.
         unsafe {
             CURSOR_ACTIVE = false;
         }
     }
 
     pub fn restore_cursor() {
+        // SAFETY: Acceso al estado del cursor y punteros de backbuffer/LFB bajo el cerrojo VBE.lock().
         unsafe {
             if !CURSOR_ACTIVE {
                 return;
@@ -737,6 +827,7 @@ impl Canvas {
         let back_ptr = Self::backbuffer_ptr();
         let lfb_ptr = vbe.lfb_ptr();
 
+        // SAFETY: Se mantiene el cerrojo VBE.lock() mientras se restaura y dibuja el sprite del cursor dentro de límites verificados.
         unsafe {
             if CURSOR_ACTIVE {
                 let prev_x = CURSOR_PREV_X;
@@ -811,6 +902,7 @@ impl Canvas {
             let back_ptr = Self::backbuffer_ptr();
             let lfb_ptr = vbe.lfb_ptr();
 
+            // SAFETY: VBE.try_lock() garantiza acceso exclusivo al LFB mientras se actualiza el sprite del cursor.
             unsafe {
                 if CURSOR_ACTIVE {
                     let prev_x = CURSOR_PREV_X;

@@ -46,6 +46,7 @@ pub struct Task {
 }
 
 // Seguridad de memoria en hilos
+// SAFETY: `Task` posee en exclusiva su `Vec<u8>` de pila y solo es manipulada bajo el cerrojo global `SCHEDULER`.
 unsafe impl Send for Task {}
 
 impl Task {
@@ -57,6 +58,7 @@ impl Task {
         let stack_top = stack.as_mut_ptr() as usize + STACK_SIZE;
         let mut sp = (stack_top & !0xF) as *mut u64;
 
+        // SAFETY: `sp` apunta a la cima alineada dentro del búfer `stack` de 16 KiB recién reservado y hay espacio para 9 palabras `u64`.
         unsafe {
             // Dirección de retorno si el hilo finaliza
             sp = sp.sub(1);
@@ -109,6 +111,7 @@ impl Task {
 extern "C" fn task_exit() -> ! {
     scheduler::mark_finished_and_yield();
     loop {
+        // SAFETY: `hlt` suspende la CPU en Ring 0 si un hilo finalizado vuelve a ser alcanzado.
         unsafe {
             core::arch::asm!("hlt");
         }

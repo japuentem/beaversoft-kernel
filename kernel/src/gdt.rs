@@ -74,6 +74,7 @@ struct DescriptorTablePointer {
 }
 
 pub fn init_gdt() {
+    // SAFETY: Se inicializan las estructuras estáticas `TSS` y `GDT` durante el arranque mononúcleo con IF=0 y se cargan con `lgdt`/`ltr`.
     unsafe {
         // 1. Configurar la pila del IST1 en el TSS (para Double Fault)
         let df_stack_end = addr_of_mut!(DOUBLE_FAULT_STACK) as u64 + IST_STACK_SIZE as u64;
@@ -153,6 +154,7 @@ pub fn init_gdt() {
 /// Actualiza el RSP0 del TSS con la pila de kernel de la tarea actual.
 /// Debe llamarse antes de entrar a Ring 3 para cada tarea.
 pub fn set_tss_rsp0(stack_top: u64) {
+    // SAFETY: Actualización atómica en modo uniprocesador del campo `rsp[0]` de la estructura estática `TSS`.
     unsafe {
         (*addr_of_mut!(TSS)).rsp[0] = stack_top;
     }

@@ -17,6 +17,7 @@ static TICKS: AtomicU64 = AtomicU64::new(0);
 pub fn init_pit(target_hz: u32) {
     let divisor = (PIT_BASE_FREQUENCY / target_hz) as u16;
 
+    // SAFETY: Programación de los puertos I/O del temporizador PIT 8254 (0x43 comando y 0x40 canal 0) en Ring 0.
     unsafe {
         // Modo 3: Generador de onda cuadrada, lectura/escritura Byte bajo luego Byte alto
         outb(PIT_COMMAND, 0x36);
@@ -45,6 +46,7 @@ const CMOS_ADDR: u16 = 0x70;
 const CMOS_DATA: u16 = 0x71;
 
 fn cmos_read(reg: u8) -> u8 {
+    // SAFETY: Selección de registro CMOS en puerto 0x70 y lectura del dato en 0x71 en modo supervisor.
     unsafe {
         outb(CMOS_ADDR, reg);
         crate::io::inb(CMOS_DATA)

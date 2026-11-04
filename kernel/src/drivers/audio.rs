@@ -302,6 +302,7 @@ fn init_hda_hardware(mmio: u64, state: &mut AudioDeviceInfo) {
     }
     let mmio_ptr = mmio as *mut u8;
 
+    // SAFETY: `mmio` proviene de BAR0 del controlador PCI Intel HDA mapeado por identidad y `AUDIO_DMA_BUFFER_ADDR` es una región física reservada para DMA.
     unsafe {
         // 1. Resetear el controlador HDA mediante el bit CRST en GCTL
         let gctl_ptr = mmio_ptr.add(HDA_REG_GCTL) as *mut u32;
@@ -379,6 +380,7 @@ fn init_ac97_hardware(nambar: u16, nabmbar: u16, _state: &mut AudioDeviceInfo) {
     if nabmbar == 0 {
         return;
     }
+    // SAFETY: Programación de puertos I/O de Bus Mastering AC'97 (`nabmbar`/`nambar`) y tabla BDL en `AUDIO_DMA_BUFFER_ADDR`.
     unsafe {
         // Reset bus mastering
         outb(nabmbar + AC97_PO_CR, 0x02); // Reset
@@ -422,6 +424,7 @@ pub fn play_pcm_dma(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_s
     // Copiar muestras a la memoria DMA
     let dma_dest = (AUDIO_DMA_BUFFER_ADDR + 0x1000) as *mut u8;
     let copy_len = pcm_data.len().min(65536);
+    // SAFETY: `dma_dest` apunta al búfer físico de audio de 64 KiB y `copy_len` está acotado a 65536 bytes sin solapamiento.
     unsafe {
         core::ptr::copy_nonoverlapping(pcm_data.as_ptr(), dma_dest, copy_len);
     }
@@ -431,8 +434,10 @@ pub fn play_pcm_dma(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_s
             if state.mmio_base != 0 {
                 let mmio_ptr = state.mmio_base as *mut u8;
                 let stream0_offset = 0x80 + (state.num_input_streams as usize) * 0x20;
+                // SAFETY: `mmio_ptr` es la base MMIO válida del controlador HDA y `stream0_offset` apunta al primer descriptor de salida.
                 let stream_ptr = unsafe { mmio_ptr.add(stream0_offset) };
 
+                // SAFETY: Escritura volátil en los registros MMIO de formato, longitud y control del Stream 0 de Intel HDA.
                 unsafe {
                     // Configurar formato según el archivo
                     // Base rate: bit 14 (0 = 48 kHz, 1 = 44.1 kHz)
@@ -457,6 +462,7 @@ pub fn play_pcm_dma(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_s
         }
         AudioControllerType::Ac97 => {
             if state.nabmbar_io != 0 {
+                // SAFETY: Escritura al puerto de control PCM Out de AC'97 para iniciar la transferencia DMA.
                 unsafe {
                     outb(state.nabmbar_io + AC97_PO_CR, 0x01); // RUN
                 }
@@ -620,6 +626,7 @@ pub fn start_tone(frequency_hz: u32) {
 
     let divisor = PIT_BASE_FREQUENCY / frequency_hz;
 
+    // SAFETY: Programación del Canal 2 del PIT (0x43/0x42) y compuerta del PC Speaker (0x61) en Ring 0.
     unsafe {
         // Configurar PIT Canal 2: Modo 3 (Square Wave Generator), formato Low/High byte (0xB6)
         outb(TIMER_COMMAND, 0xB6);
@@ -636,6 +643,7 @@ pub fn start_tone(frequency_hz: u32) {
 
 /// Detiene la emisión de sonido apagando la compuerta del altavoz
 pub fn stop_sound() {
+    // SAFETY: Desconexión de la compuerta del altavoz PC Speaker limpiando los bits 0 y 1 del puerto 0x61.
     unsafe {
         let prev = inb(SPEAKER_PORT);
         outb(SPEAKER_PORT, prev & 0xFC); // Apaga bits 0 y 1

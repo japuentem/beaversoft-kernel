@@ -33,6 +33,7 @@ pub struct LinkedListAllocator {
     dealloc_count: usize,
 }
 
+// SAFETY: `LinkedListAllocator` solo se accede a través de `SpinMutex<LinkedListAllocator>` y administra memoria del heap global del kernel.
 unsafe impl Send for LinkedListAllocator {}
 
 impl LinkedListAllocator {
@@ -46,6 +47,7 @@ impl LinkedListAllocator {
         }
     }
 
+    // SAFETY: El llamador debe garantizar que `[heap_start, heap_start + heap_size)` es memoria válida no utilizada y que `init` se llama solo una vez.
     pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
         self.total_size = heap_size;
         self.allocated_bytes = 0;
@@ -55,6 +57,7 @@ impl LinkedListAllocator {
         self.add_free_region(heap_start, heap_size);
     }
 
+    // SAFETY: El llamador debe garantizar que `addr` está alineada a `ListNode` y que el bloque `[addr, addr + size)` está libre y es válido.
     pub unsafe fn add_free_region(&mut self, addr: usize, size: usize) {
         if size < size_of::<ListNode>() {
             return;
@@ -92,6 +95,7 @@ impl LinkedListAllocator {
     }
 
     fn find_region(&mut self, size: usize, align: usize) -> Option<(*mut ListNode, usize)> {
+        // SAFETY: Se recorre la lista enlazada de nodos libres cuya validez e invariantes están protegidas por el cerrojo del asignador.
         unsafe {
             let mut current = &mut self.head as *mut ListNode;
             while !(*current).next.is_null() {
@@ -140,6 +144,7 @@ impl LockedHeap {
         Self(SpinMutex::new(LinkedListAllocator::new()))
     }
 
+    // SAFETY: El llamador debe garantizar que `[heap_start, heap_start + heap_size)` es un rango de memoria física válido y exclusivo.
     pub unsafe fn init(&self, heap_start: usize, heap_size: usize) {
         self.0.lock().init(heap_start, heap_size);
     }
@@ -179,6 +184,7 @@ impl LockedHeap {
     pub fn emergency_reclaim(&self) -> usize {
         let allocator = self.0.lock();
         let mut merged_bytes = 0;
+        // SAFETY: Acceso exclusivo bajo `self.0.lock()` a los punteros `ListNode` válidos de la lista libre ordenada.
         unsafe {
             let mut curr = allocator.head.next;
             while !curr.is_null() && !(*curr).next.is_null() {
@@ -197,7 +203,9 @@ impl LockedHeap {
     }
 }
 
+// SAFETY: `LockedHeap` sincroniza todas las operaciones `alloc` y `dealloc` mediante `SpinMutex` inhibiendo interrupciones.
 unsafe impl GlobalAlloc for LockedHeap {
+    // SAFETY: `layout` tiene tamaño y alineación ajustados a `ListNode`, y el acceso a la lista libre está serializado por `self.0.lock()`.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let (size, align) = LinkedListAllocator::size_align(layout);
         let mut allocator = self.0.lock();
@@ -217,6 +225,7 @@ unsafe impl GlobalAlloc for LockedHeap {
         }
     }
 
+    // SAFETY: `ptr` y `layout` provienen de una asignación previa de este mismo `LockedHeap`, protegida por `self.0.lock()`.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let (size, _) = LinkedListAllocator::size_align(layout);
         let mut allocator = self.0.lock();

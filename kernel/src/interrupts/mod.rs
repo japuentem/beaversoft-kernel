@@ -71,6 +71,7 @@ struct IdtPointer {
 static mut IDT: [IdtEntry; 256] = [IdtEntry::empty(); 256];
 
 pub fn init_idt() {
+    // SAFETY: Se inicializa la tabla estática `IDT` antes de habilitar interrupciones (IF=0) y se registra en el procesador mediante `lidt`.
     unsafe {
         // --- Excepciones del CPU ---
         set_entry(0, divide_error_handler as *const () as usize as u64, 0);
@@ -109,6 +110,7 @@ pub fn init_idt() {
     }
 }
 
+// SAFETY: El llamador debe garantizar que `index < 256` y que no hay acceso concurrente a `IDT`.
 unsafe fn set_entry(index: usize, handler_addr: u64, ist: u8) {
     let idt_raw = addr_of_mut!(IDT) as *mut IdtEntry;
     (*idt_raw.add(index)).set_handler_addr(handler_addr, ist);
@@ -121,6 +123,7 @@ unsafe fn set_entry(index: usize, handler_addr: u64, ist: u8) {
 extern "x86-interrupt" fn divide_error_handler(frame: InterruptStackFrame) {
     kprint_color!(VgaColor::LightRed, VgaColor::Black, "\n[CPU EXCEPTION] #DE Divide-by-Zero Error\n{:#?}\n", frame);
     loop {
+        // SAFETY: `hlt` detiene la CPU en Ring 0 tras una excepción fatal de división por cero.
         unsafe { asm!("hlt"); }
     }
 }
@@ -132,6 +135,7 @@ extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
 extern "x86-interrupt" fn invalid_opcode_handler(frame: InterruptStackFrame) {
     kprint_color!(VgaColor::LightRed, VgaColor::Black, "\n[CPU EXCEPTION] #UD Invalid Opcode Encountered\n{:#?}\n", frame);
     loop {
+        // SAFETY: `hlt` detiene la CPU en Ring 0 tras encontrar un opcode inválido irrecuperable.
         unsafe { asm!("hlt"); }
     }
 }
@@ -147,6 +151,7 @@ extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, error
         error_code, frame
     );
     loop {
+        // SAFETY: `hlt` detiene la CPU en la pila dedicada IST1 tras una doble falla irrecuperable.
         unsafe { asm!("hlt"); }
     }
 }
@@ -169,10 +174,12 @@ extern "x86-interrupt" fn general_protection_fault_handler(frame: InterruptStack
             "  → Proceso de usuario terminado. Kernel sigue activo. (Anti-BSOD)\n"
         );
         // EOI al PIC para que el timer pueda seguir funcionando
+        // SAFETY: Envío de EOI al controlador PIC 8259 en Ring 0 antes de ceder la CPU tras aislar el fallo de usuario.
         unsafe { PICS.notify_end_of_interrupt(32); }
         crate::task::scheduler::mark_finished_and_yield();
         // mark_finished_and_yield llama a schedule() que hace switch_context
         // Si llegamos aquí (sin otras tareas), simplemente esperamos
+        // SAFETY: `hlt` suspende la CPU si no quedan más tareas listas para planificar.
         loop { unsafe { asm!("hlt"); } }
     } else {
         // ────────────────────────────────────────────────────────────────
@@ -184,12 +191,14 @@ extern "x86-interrupt" fn general_protection_fault_handler(frame: InterruptStack
             "\n[CRITICAL] #GP KERNEL General Protection Fault! Error: {:#x}\n{:#?}\n",
             error_code, frame
         );
+        // SAFETY: `hlt` detiene la CPU en Ring 0 ante un fallo de protección general dentro del kernel.
         loop { unsafe { asm!("hlt"); } }
     }
 }
 
 extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error_code: u64) {
     let fault_addr: u64;
+    // SAFETY: Lectura del registro de control `CR2` en Ring 0 para obtener la dirección lineal que causó el `#PF`.
     unsafe {
         asm!("mov {}, cr2", out(reg) fault_addr, options(nomem, nostack, preserves_flags));
     }
@@ -210,8 +219,10 @@ extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error_c
             VgaColor::Yellow, VgaColor::Black,
             "  → Segfault de usuario contenido. Proceso terminado. Kernel activo. (Anti-BSOD)\n"
         );
+        // SAFETY: Envío de EOI al PIC 8259 en Ring 0 para mantener activas las interrupciones tras terminar el proceso infractor.
         unsafe { PICS.notify_end_of_interrupt(32); }
         crate::task::scheduler::mark_finished_and_yield();
+        // SAFETY: `hlt` suspende la CPU si no hay otra tarea a la cual conmutar.
         loop { unsafe { asm!("hlt"); } }
     } else {
         // ────────────────────────────────────────────────────────────────
@@ -222,6 +233,7 @@ extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error_c
             "\n[CRITICAL] #PF KERNEL Page Fault!\nAddr: {:#x} | Error: {:#x}\n{:#?}\n",
             fault_addr, error_code, frame
         );
+        // SAFETY: `hlt` detiene la CPU en Ring 0 tras un fallo de página crítico en modo kernel.
         loop { unsafe { asm!("hlt"); } }
     }
 }
@@ -274,20 +286,25 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
             None => break,
         };
 
+        // SAFETY: `SERIAL_ESC` solo es accedida dentro de `timer_interrupt_handler`, que se ejecuta con IF=0 en modo uniprocesador.
         let esc = unsafe { SERIAL_ESC };
         if esc == 0 {
             if b == 0x1B {
+                // SAFETY: Acceso exclusivo a `SERIAL_ESC` en contexto de interrupción con IF=0.
                 unsafe { SERIAL_ESC = 1; }
                 continue;
             }
         } else if esc == 1 {
             if b == b'[' {
+                // SAFETY: Acceso exclusivo a `SERIAL_ESC` en contexto de interrupción con IF=0.
                 unsafe { SERIAL_ESC = 2; }
                 continue;
             } else {
+                // SAFETY: Acceso exclusivo a `SERIAL_ESC` en contexto de interrupción con IF=0.
                 unsafe { SERIAL_ESC = 0; }
             }
         } else if esc == 2 {
+            // SAFETY: Acceso exclusivo a `SERIAL_ESC` en contexto de interrupción con IF=0.
             unsafe { SERIAL_ESC = 0; }
             if b == b'A' {
                 push_input_char(crate::drivers::keyboard::KEY_UP_ARROW);
@@ -307,6 +324,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
         push_input_char(ch);
     }
 
+    // SAFETY: Notificación EOI para el vector 32 (IRQ 0 del PIT) al controlador PIC 8259.
     unsafe {
         PICS.notify_end_of_interrupt(32);
     }
@@ -404,14 +422,17 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame
         push_input_char(ch);
     }
 
+    // SAFETY: Notificación EOI para el vector 33 (IRQ 1 del teclado PS/2) al controlador PIC 8259.
     unsafe {
         PICS.notify_end_of_interrupt(33);
     }
 }
 
 extern "x86-interrupt" fn mouse_interrupt_handler(_frame: InterruptStackFrame) {
+    // SAFETY: Lectura del puerto de estado PS/2 (`0x64`) en el manejador de IRQ 12 en Ring 0.
     let status = unsafe { crate::io::inb(crate::drivers::mouse::PS2_STATUS_PORT) };
     if (status & 0x01) != 0 {
+        // SAFETY: Lectura del puerto de datos PS/2 (`0x60`) tras confirmar que el búfer de salida tiene datos (`status & 0x01`).
         let byte = unsafe { crate::io::inb(crate::drivers::mouse::PS2_DATA_PORT) };
         if (status & 0x20) != 0 {
             if let Some(mut mouse) = crate::drivers::mouse::MOUSE.try_lock() {
@@ -430,12 +451,14 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_frame: InterruptStackFrame) {
         }
     }
 
+    // SAFETY: Notificación EOI para el vector 44 (IRQ 12 en PIC esclavo y maestro).
     unsafe {
         PICS.notify_end_of_interrupt(44);
     }
 }
 
 extern "x86-interrupt" fn generic_irq_handler(_frame: InterruptStackFrame) {
+    // SAFETY: Envío de EOI genérico al PIC maestro en Ring 0 para evitar bloqueo de líneas IRQ no manejadas.
     unsafe {
         PICS.notify_end_of_interrupt(32);
     }

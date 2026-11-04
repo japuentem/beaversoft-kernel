@@ -8,6 +8,8 @@
 pub mod font;
 pub mod canvas;
 pub mod desktop;
+pub mod apps_system;
+pub mod apps_media;
 pub mod window;
 pub mod note;
 pub mod bmp;

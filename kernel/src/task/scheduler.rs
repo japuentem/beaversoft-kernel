@@ -179,6 +179,7 @@ pub fn schedule() {
     }; // <-- ¡EL CERROJO DEL SCHEDULER SE LIBERA AQUÍ MISMO!
 
     if let Some((prev_sp, next_sp)) = context_switch_args {
+        // SAFETY: `prev_sp` y `next_sp` apuntan a pilas de kernel válidas de tareas registradas y el cerrojo `SCHEDULER` ya fue liberado.
         unsafe {
             switch_context(prev_sp, next_sp);
         }

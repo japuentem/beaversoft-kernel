@@ -150,10 +150,10 @@ Archivo nuevo sugerido: `kernel/src/drivers/e1000.rs` (dejar `net.rs` para la pi
 - [x] Pruebas automáticas en QEMU con `-device isa-debug-exit,iobase=0xf4,iosize=0x04` y un modo `cargo test` del kernel.
 - [ ] Trampolín SMP real (MADT + código de 16 bits en 0x8000).
 - [x] Sincronización real de archivos entre nodos (`/disk/notas.txt`) sobre UDP con confirmaciones.
-- [ ] Partir `shell.rs` (2348 líneas) y `desktop.rs` (1769) en módulos por app/comando.
-- [ ] GUI independiente de la resolución (usar `vbe.width/height` en todos los hit-tests) y redibujo por regiones sucias (dirty rects).
+- [x] Partir `shell.rs` (2348 líneas) y `desktop.rs` (1769) en módulos por app/comando.
+- [x] GUI independiente de la resolución (usar `vbe.width/height` en todos los hit-tests) y redibujo por regiones sucias (dirty rects).
 - [x] Quitar `f32/f64` del kernel (45 usos) o documentar la excepción y habilitar/guardar estado SSE correctamente.
-- [ ] Comentarios `// SAFETY:` en los 185 bloques `unsafe`.
+- [x] Comentarios `// SAFETY:` en los 185 bloques `unsafe`.
 - [x] Candado con detección de reentrada (guardar ID de dueño y hacer `panic!` con mensaje claro en lugar de girar para siempre).
 
 ---
