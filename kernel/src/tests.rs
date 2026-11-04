@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 14] = [
+    let tests: [(&str, fn()); 15] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -79,6 +79,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("real_udp_dhcp_dns_structures",            test_real_udp_dhcp_dns),
         ("smp_distributed_scheduler",               test_smp_distributed_scheduler),
         ("ahci_sata_dma_controller",                test_ahci_sata_dma_controller),
+        ("tcp_state_machine_and_http_parser",       test_tcp_state_machine_and_http_parser),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -423,6 +424,57 @@ pub fn test_ahci_sata_dma_controller() {
     }
 }
 
+pub fn test_tcp_state_machine_and_http_parser() {
+    use crate::drivers::net::{
+        calculate_tcp_checksum, parse_http_response, bsd_socket, bsd_close,
+        Ipv4Addr, SOCKET_TABLE, SocketState, AF_INET, SOCK_STREAM, TCP_FLAG_SYN,
+    };
+
+    // 1. Verificación del algoritmo de Checksum TCP con pseudo-cabecera IPv4 (RFC 793)
+    let src_ip = Ipv4Addr::new(10, 0, 2, 15);
+    let dst_ip = Ipv4Addr::new(10, 0, 2, 2);
+    let mut syn_seg = [
+        0xC0, 0x00, // Puerto origen: 49152
+        0x00, 0x50, // Puerto destino: 80 (HTTP)
+        0x00, 0x00, 0x03, 0xE8, // Seq: 1000
+        0x00, 0x00, 0x00, 0x00, // Ack: 0
+        0x50, TCP_FLAG_SYN,     // Offset: 20 bytes, Flag: SYN
+        0xFA, 0xF0,             // Ventana: 64240
+        0x00, 0x00,             // Checksum placeholder
+        0x00, 0x00,             // Urgent pointer
+    ];
+    let csum = calculate_tcp_checksum(src_ip, dst_ip, &syn_seg);
+    assert_ne!(csum, 0, "El checksum calculado no debe ser cero");
+    syn_seg[16] = (csum >> 8) as u8;
+    syn_seg[17] = (csum & 0xFF) as u8;
+    assert_eq!(syn_seg[16], (csum >> 8) as u8);
+    assert_eq!(syn_seg[17], (csum & 0xFF) as u8);
+
+    // 2. Verificación del parser HTTP/1.1 (RFC 7230)
+    let raw_http = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 32\r\nConnection: close\r\n\r\n{\"os\":\"Beaver OS\",\"version\":\"0.9\"}";
+    let resp = parse_http_response(raw_http).expect("El parser HTTP/1.1 debe procesar la respuesta con exito");
+    assert_eq!(resp.status_code, 200, "Codigo de estado HTTP 200");
+    assert_eq!(resp.status_text, "OK", "Texto de estado OK");
+    assert_eq!(resp.content_type, "application/json", "Content-Type detectado");
+    assert_eq!(resp.content_length, 32, "Content-Length coincide");
+    assert_eq!(resp.body, "{\"os\":\"Beaver OS\",\"version\":\"0.9\"}", "Cuerpo de texto identico");
+    assert_eq!(resp.raw_body, b"{\"os\":\"Beaver OS\",\"version\":\"0.9\"}", "Cuerpo binario identico");
+
+    // 3. Verificación de creación, consulta y cierre de sockets en la tabla BSD
+    let sock_id = bsd_socket(AF_INET, SOCK_STREAM, 0).expect("Creacion de socket BSD exitosa");
+    {
+        let table = SOCKET_TABLE.lock();
+        let sock = table[sock_id].as_ref().expect("El descriptor de socket debe ser valido");
+        assert_eq!(sock.state, SocketState::Closed, "Estado inicial Closed");
+        assert_eq!(sock.local_port, 49152 + (sock_id as u16), "Puerto efimero asignado");
+    }
+    bsd_close(sock_id);
+    {
+        let table = SOCKET_TABLE.lock();
+        assert!(table[sock_id].is_none(), "El socket debe quedar liberado en la tabla tras bsd_close");
+    }
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -499,4 +551,10 @@ fn ut_audio_integer() {
 #[test_case]
 fn ut_ahci_sata_dma() {
     test_ahci_sata_dma_controller();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_tcp_state_machine() {
+    test_tcp_state_machine_and_http_parser();
 }

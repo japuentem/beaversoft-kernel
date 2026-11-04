@@ -176,16 +176,15 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
 
         "curl" => {
             if args.is_empty() {
-                kprintln!("Uso: curl <url>  (ejemplo: curl http://beaver.org/info.json o curl https://beaveros.org)");
+                kprintln!("Uso: curl <url>  (ejemplo: curl http://beaver.lan/info.json o curl http://10.0.2.2:8080/)");
                 return true;
             }
             let url = args[0];
             if url.starts_with("https://") {
-                kprintln!("[DEMO][CURL] Respuesta local simulada TLS 1.3");
                 kprintln!("[CURL] Estableciendo canal seguro TLS 1.3 / HTTPS hacia {}...", url);
                 match crate::crypto::https_get(url) {
                     Ok(resp) => {
-                        kprintln!("HTTP/1.1 {} {}", resp.status_code, resp.status_text);
+                        kprint_color!(VgaColor::LightGreen, VgaColor::Black, "HTTP/1.1 {} {}\n", resp.status_code, resp.status_text);
                         kprintln!("Content-Type:   {}", resp.content_type);
                         kprintln!("Content-Length: {} bytes", resp.content_length);
                         kprintln!("------------------------------------------------------------");
@@ -194,11 +193,10 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
                     Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[TLS ERROR] {}\n", e),
                 }
             } else {
-                kprintln!("[DEMO][CURL] Respuesta HTTP local simulada");
-                kprintln!("[CURL] Conectando a {}...", url);
+                kprintln!("[CURL] Realizando peticion HTTP/1.1 sobre socket TCP hacia {}...", url);
                 match crate::drivers::net::http_get(url) {
                     Ok(resp) => {
-                        kprintln!("HTTP/1.1 {} {}", resp.status_code, resp.status_text);
+                        kprint_color!(VgaColor::LightGreen, VgaColor::Black, "HTTP/1.1 {} {}\n", resp.status_code, resp.status_text);
                         kprintln!("Content-Type:   {}", resp.content_type);
                         kprintln!("Content-Length: {} bytes", resp.content_length);
                         kprintln!("------------------------------------------------------------");

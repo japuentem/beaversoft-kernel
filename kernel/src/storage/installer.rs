@@ -37,6 +37,23 @@ pub struct BeaverInstaller;
 impl BeaverInstaller {
     /// Detecta y reporta las unidades de almacenamiento internas disponibles para instalación
     pub fn probe_target_disk() -> TargetDriveInfo {
+        let block_dev = crate::storage::block_device::BLOCK_DEVICE.lock();
+        if block_dev.is_using_ahci() {
+            let ahci = crate::storage::ahci::AHCI_CONTROLLER.lock();
+            if let Some(port) = ahci.active_sata_port {
+                if (port as usize) < ahci.ports.len() {
+                    let p = &ahci.ports[port as usize];
+                    return TargetDriveInfo {
+                        is_present: true,
+                        total_sectors: p.total_sectors as u32,
+                        size_mb: p.capacity_mb,
+                        model: "Unidad Serial ATA AHCI (SATA DMA)",
+                    };
+                }
+            }
+        }
+        drop(block_dev);
+
         let ata = ATA_PRIMARY_MASTER.lock();
         if ata.is_present() {
             TargetDriveInfo {

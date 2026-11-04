@@ -300,14 +300,90 @@ pub fn send_arp_request(target_ip: Ipv4Addr) {
     send_ethernet_frame([0xFF; 6], ETHERTYPE_ARP, &arp_payload);
 }
 
+/// Resuelve la dirección MAC física de destino mediante la tabla ARP o la puerta de enlace
+pub fn resolve_mac_for_ip(dest_ip: Ipv4Addr) -> [u8; 6] {
+    let (my_ip, my_netmask, gateway) = {
+        let net = NET_INTERFACE.lock();
+        (net.ip_address, net.netmask, net.gateway)
+    };
+
+    if dest_ip.0 == [255, 255, 255, 255] || dest_ip.0 == [0, 0, 0, 0] {
+        return [0xFF; 6];
+    }
+
+    let is_local = (dest_ip.0[0] & my_netmask.0[0] == my_ip.0[0] & my_netmask.0[0])
+        && (dest_ip.0[1] & my_netmask.0[1] == my_ip.0[1] & my_netmask.0[1])
+        && (dest_ip.0[2] & my_netmask.0[2] == my_ip.0[2] & my_netmask.0[2]);
+
+    let target = if is_local { dest_ip } else { gateway };
+
+    // 1. Buscar en la tabla ARP
+    {
+        let net = NET_INTERFACE.lock();
+        for entry in &net.arp_table {
+            if entry.valid && entry.ip.0 == target.0 {
+                return entry.mac;
+            }
+        }
+    }
+
+    // 2. Si no se encuentra, emitir ARP request y sondear brevemente
+    send_arp_request(target);
+    for _ in 0..5_000 {
+        net_poll_rx();
+        {
+            let net = NET_INTERFACE.lock();
+            for entry in &net.arp_table {
+                if entry.valid && entry.ip.0 == target.0 {
+                    return entry.mac;
+                }
+            }
+        }
+        for _ in 0..100 { core::hint::spin_loop(); }
+    }
+
+    // En emulador QEMU, la MAC del router virtual (10.0.2.2) es 52:54:00:12:34:02
+    if target.0 == [10, 0, 2, 2] {
+        return [0x52, 0x54, 0x00, 0x12, 0x34, 0x02];
+    }
+
+    [0xFF; 6]
+}
+
+static IP_PACKET_ID: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0x2000);
+
+/// Encapsula una carga útil dentro de una cabecera IPv4 estándar (RFC 791) y la envía por Ethernet
+pub fn send_ipv4_packet(dest_ip: Ipv4Addr, proto: u8, payload: &[u8]) {
+    let my_ip = NET_INTERFACE.lock().ip_address;
+    let total_len = (20 + payload.len()) as u16;
+    let mut ip_hdr = Vec::with_capacity(20 + payload.len());
+    ip_hdr.push(0x45); // Version 4, IHL 5 (20 bytes)
+    ip_hdr.push(0x00); // DSCP/ECN
+    ip_hdr.extend_from_slice(&total_len.to_be_bytes());
+    let id = IP_PACKET_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    ip_hdr.extend_from_slice(&id.to_be_bytes());
+    ip_hdr.extend_from_slice(&0x4000_u16.to_be_bytes()); // DF bit
+    ip_hdr.push(64); // TTL
+    ip_hdr.push(proto);
+    ip_hdr.extend_from_slice(&0_u16.to_be_bytes()); // Checksum temporal
+    ip_hdr.extend_from_slice(&my_ip.0);
+    ip_hdr.extend_from_slice(&dest_ip.0);
+
+    let ip_csum = internet_checksum(&ip_hdr);
+    ip_hdr[10] = (ip_csum >> 8) as u8;
+    ip_hdr[11] = (ip_csum & 0xFF) as u8;
+
+    ip_hdr.extend_from_slice(payload);
+
+    let dest_mac = resolve_mac_for_ip(dest_ip);
+    send_ethernet_frame(dest_mac, ETHERTYPE_IPV4, &ip_hdr);
+}
+
 /// Construye y envía un paquete IPv4 conteniendo un datagrama ICMP Echo Request (Ping)
 pub fn send_icmp_ping(target_ip: Ipv4Addr, sequence: u16) {
-    let my_ip = NET_INTERFACE.lock().ip_address;
-
-    // 1. Cabecera ICMP (8 bytes: Type, Code, Checksum, Identifier, Sequence)
     let mut icmp_pkt = Vec::with_capacity(64);
     icmp_pkt.push(ICMP_ECHO_REQUEST); // Type 8
-    icmp_pkt.push(0); // Code 0
+    icmp_pkt.push(0);                 // Code 0
     icmp_pkt.extend_from_slice(&0_u16.to_be_bytes()); // Checksum temporal
     icmp_pkt.extend_from_slice(&0xBEEF_u16.to_be_bytes()); // Identificador Beaver
     icmp_pkt.extend_from_slice(&sequence.to_be_bytes()); // Secuencia
@@ -317,62 +393,129 @@ pub fn send_icmp_ping(target_ip: Ipv4Addr, sequence: u16) {
         icmp_pkt.push((b'a' + (i % 26)) as u8);
     }
 
-    // Calcular Checksum ICMP
     let csum = internet_checksum(&icmp_pkt);
     icmp_pkt[2] = (csum >> 8) as u8;
     icmp_pkt[3] = (csum & 0xFF) as u8;
 
-    // 2. Cabecera IPv4 (20 bytes)
-    let total_len = (20 + icmp_pkt.len()) as u16;
-    let mut ip_hdr = Vec::with_capacity(20);
-    ip_hdr.push(0x45); // Version 4, IHL 5 (20 bytes)
-    ip_hdr.push(0x00); // DSCP/ECN
-    ip_hdr.extend_from_slice(&total_len.to_be_bytes());
-    ip_hdr.extend_from_slice(&sequence.to_be_bytes()); // Identificación
-    ip_hdr.extend_from_slice(&0x4000_u16.to_be_bytes()); // Flags (Don't Fragment)
-    ip_hdr.push(64); // TTL
-    ip_hdr.push(IP_PROTO_ICMP); // Protocolo 1 (ICMP)
-    ip_hdr.extend_from_slice(&0_u16.to_be_bytes()); // Checksum temporal
-    ip_hdr.extend_from_slice(&my_ip.0); // Origen
-    ip_hdr.extend_from_slice(&target_ip.0); // Destino
+    send_ipv4_packet(target_ip, IP_PROTO_ICMP, &icmp_pkt);
+}
 
-    // Calcular Checksum IPv4
+// Banderas de control de segmentos TCP (RFC 793)
+pub const TCP_FLAG_FIN: u8 = 0x01;
+pub const TCP_FLAG_SYN: u8 = 0x02;
+pub const TCP_FLAG_RST: u8 = 0x04;
+pub const TCP_FLAG_PSH: u8 = 0x08;
+pub const TCP_FLAG_ACK: u8 = 0x10;
+pub const TCP_FLAG_URG: u8 = 0x20;
+
+/// Calcula el Checksum TCP incluyendo la pseudo-cabecera IPv4 (RFC 793 / RFC 1071)
+pub fn calculate_tcp_checksum(src_ip: Ipv4Addr, dst_ip: Ipv4Addr, tcp_segment: &[u8]) -> u16 {
+    let mut pseudo_header = Vec::with_capacity(12 + tcp_segment.len());
+    pseudo_header.extend_from_slice(&src_ip.0);
+    pseudo_header.extend_from_slice(&dst_ip.0);
+    pseudo_header.push(0); // Byte reservado cero
+    pseudo_header.push(IP_PROTO_TCP); // Protocolo 6
+    let tcp_len = tcp_segment.len() as u16;
+    pseudo_header.extend_from_slice(&tcp_len.to_be_bytes());
+    pseudo_header.extend_from_slice(tcp_segment);
+    internet_checksum(&pseudo_header)
+}
+
+/// Construye y envía un segmento TCP a través de la pila IP estándar
+pub fn send_tcp_segment(
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    window_size: u16,
+    data: &[u8],
+) {
+    let mut tcp_seg = Vec::with_capacity(20 + data.len());
+    tcp_seg.extend_from_slice(&src_port.to_be_bytes());
+    tcp_seg.extend_from_slice(&dst_port.to_be_bytes());
+    tcp_seg.extend_from_slice(&seq.to_be_bytes());
+    tcp_seg.extend_from_slice(&ack.to_be_bytes());
+    tcp_seg.push(0x50); // Data offset (5 palabras de 32 bits = 20 bytes)
+    tcp_seg.push(flags);
+    tcp_seg.extend_from_slice(&window_size.to_be_bytes());
+    tcp_seg.extend_from_slice(&0_u16.to_be_bytes()); // Checksum temporal
+    tcp_seg.extend_from_slice(&0_u16.to_be_bytes()); // Urgent pointer
+    tcp_seg.extend_from_slice(data);
+
+    let csum = calculate_tcp_checksum(src_ip, dst_ip, &tcp_seg);
+    tcp_seg[16] = (csum >> 8) as u8;
+    tcp_seg[17] = (csum & 0xFF) as u8;
+
+    send_ipv4_packet(dst_ip, IP_PROTO_TCP, &tcp_seg);
+}
+
+/// Transmite un segmento TCP directamente desde el contexto de interrupción/poll_rx sin re-adquirir locks
+pub fn send_tcp_segment_direct(
+    net: &mut NetworkInterface,
+    src_mac: [u8; 6],
+    dst_mac: [u8; 6],
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    window_size: u16,
+    data: &[u8],
+) {
+    let mut tcp_seg = Vec::with_capacity(20 + data.len());
+    tcp_seg.extend_from_slice(&src_port.to_be_bytes());
+    tcp_seg.extend_from_slice(&dst_port.to_be_bytes());
+    tcp_seg.extend_from_slice(&seq.to_be_bytes());
+    tcp_seg.extend_from_slice(&ack.to_be_bytes());
+    tcp_seg.push(0x50);
+    tcp_seg.push(flags);
+    tcp_seg.extend_from_slice(&window_size.to_be_bytes());
+    tcp_seg.extend_from_slice(&0_u16.to_be_bytes());
+    tcp_seg.extend_from_slice(&0_u16.to_be_bytes());
+    tcp_seg.extend_from_slice(data);
+
+    let csum = calculate_tcp_checksum(src_ip, dst_ip, &tcp_seg);
+    tcp_seg[16] = (csum >> 8) as u8;
+    tcp_seg[17] = (csum & 0xFF) as u8;
+
+    let total_len = (20 + tcp_seg.len()) as u16;
+    let mut ip_hdr = Vec::with_capacity(20 + tcp_seg.len());
+    ip_hdr.push(0x45);
+    ip_hdr.push(0x00);
+    ip_hdr.extend_from_slice(&total_len.to_be_bytes());
+    let id = IP_PACKET_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    ip_hdr.extend_from_slice(&id.to_be_bytes());
+    ip_hdr.extend_from_slice(&0x4000_u16.to_be_bytes());
+    ip_hdr.push(64);
+    ip_hdr.push(IP_PROTO_TCP);
+    ip_hdr.extend_from_slice(&0_u16.to_be_bytes());
+    ip_hdr.extend_from_slice(&src_ip.0);
+    ip_hdr.extend_from_slice(&dst_ip.0);
+
     let ip_csum = internet_checksum(&ip_hdr);
     ip_hdr[10] = (ip_csum >> 8) as u8;
     ip_hdr[11] = (ip_csum & 0xFF) as u8;
+    ip_hdr.extend_from_slice(&tcp_seg);
 
-    let mut full_payload = ip_hdr;
-    full_payload.extend_from_slice(&icmp_pkt);
+    let mut eth = Vec::with_capacity(14 + ip_hdr.len());
+    eth.extend_from_slice(&dst_mac);
+    eth.extend_from_slice(&src_mac);
+    eth.extend_from_slice(&ETHERTYPE_IPV4.to_be_bytes());
+    eth.extend_from_slice(&ip_hdr);
 
-    // Buscar MAC destino en la tabla ARP; si no está, enviar ARP Request y sondear RX
-    let lookup_mac = |ip: Ipv4Addr| -> Option<[u8; 6]> {
-        let net = NET_INTERFACE.lock();
-        for entry in &net.arp_table {
-            if entry.valid && entry.ip.0 == ip.0 {
-                return Some(entry.mac);
-            }
+    net.tx_packets += 1;
+    net.tx_bytes += eth.len() as u64;
+
+    if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
+        if e1000.initialized {
+            e1000.send(&eth);
         }
-        None
-    };
-
-    let dest_mac = match lookup_mac(target_ip) {
-        Some(mac) => mac,
-        None => {
-            send_arp_request(target_ip);
-            let mut resolved = None;
-            for _ in 0..20_000 {
-                for _ in 0..1_000 { core::hint::spin_loop(); }
-                net_poll_rx();
-                if let Some(m) = lookup_mac(target_ip) {
-                    resolved = Some(m);
-                    break;
-                }
-            }
-            resolved.unwrap_or([0xFF; 6])
-        }
-    };
-
-    send_ethernet_frame(dest_mac, ETHERTYPE_IPV4, &full_payload);
+    }
 }
 
 /// Procesa paquetes entrantes: actualiza contadores, tabla ARP,
@@ -650,6 +793,22 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
                     }
                 }
             }
+        } else if proto == IP_PROTO_TCP && payload.len() >= ihl + 20 {
+            let tcp_data = &payload[ihl..];
+            let src_port = u16::from_be_bytes([tcp_data[0], tcp_data[1]]);
+            let dst_port = u16::from_be_bytes([tcp_data[2], tcp_data[3]]);
+            let seq_num  = u32::from_be_bytes([tcp_data[4], tcp_data[5], tcp_data[6], tcp_data[7]]);
+            let ack_num  = u32::from_be_bytes([tcp_data[8], tcp_data[9], tcp_data[10], tcp_data[11]]);
+            let data_offset = ((tcp_data[12] >> 4) as usize) * 4;
+            let flags = tcp_data[13];
+            let window = u16::from_be_bytes([tcp_data[14], tcp_data[15]]);
+            let seg_payload = if tcp_data.len() > data_offset {
+                &tcp_data[data_offset..]
+            } else {
+                &[]
+            };
+
+            handle_incoming_tcp_segment(net, src_eth, src_ip, dst_ip, src_port, dst_port, seq_num, ack_num, flags, window, seg_payload);
         }
     }
     false
@@ -713,34 +872,15 @@ pub fn net_poll_rx() {
 
 /// Transmite un datagrama UDP encapsulado en IPv4 y Ethernet II
 pub fn send_udp_datagram(dest_ip: Ipv4Addr, src_port: u16, dest_port: u16, data: &[u8]) {
-    let my_ip = NET_INTERFACE.lock().ip_address;
     let udp_len = (8 + data.len()) as u16;
     let mut udp_seg = Vec::with_capacity(8 + data.len());
     udp_seg.extend_from_slice(&src_port.to_be_bytes());
     udp_seg.extend_from_slice(&dest_port.to_be_bytes());
     udp_seg.extend_from_slice(&udp_len.to_be_bytes());
-    udp_seg.extend_from_slice(&0_u16.to_be_bytes()); // Checksum
+    udp_seg.extend_from_slice(&0_u16.to_be_bytes()); // Checksum opcional en IPv4
     udp_seg.extend_from_slice(data);
 
-    // Cabecera IPv4 (20 bytes)
-    let total_len = (20 + udp_seg.len()) as u16;
-    let mut ip_hdr = Vec::with_capacity(20 + udp_seg.len());
-    ip_hdr.push(0x45);
-    ip_hdr.push(0x00);
-    ip_hdr.extend_from_slice(&total_len.to_be_bytes());
-    ip_hdr.extend_from_slice(&0x4242_u16.to_be_bytes());
-    ip_hdr.extend_from_slice(&0x4000_u16.to_be_bytes());
-    ip_hdr.push(64);
-    ip_hdr.push(IP_PROTO_UDP);
-    ip_hdr.extend_from_slice(&0_u16.to_be_bytes());
-    ip_hdr.extend_from_slice(&my_ip.0);
-    ip_hdr.extend_from_slice(&dest_ip.0);
-    let csum = internet_checksum(&ip_hdr);
-    ip_hdr[10] = (csum >> 8) as u8;
-    ip_hdr[11] = (csum & 0xFF) as u8;
-    ip_hdr.extend_from_slice(&udp_seg);
-
-    send_ethernet_frame([0xFF; 6], ETHERTYPE_IPV4, &ip_hdr);
+    send_ipv4_packet(dest_ip, IP_PROTO_UDP, &udp_seg);
 }
 
 /// Resuelve un nombre de dominio (FQDN) a una dirección IPv4 utilizando DNS real sobre UDP puerto 53 (RFC 1035)
@@ -805,75 +945,6 @@ pub fn resolve_dns(domain: &str) -> Result<Ipv4Addr, String> {
     }
 
     Err(format!("Timeout esperando resolucion DNS de '{}' desde servidor {}", clean, dns_server.to_string()))
-}
-
-/// Cliente HTTP/1.1 de alto rendimiento para descargar contenido web mediante TCP
-pub fn http_get(url: &str) -> Result<HttpResponse, String> {
-    let clean_url = url.trim();
-    let url_without_scheme = if let Some(stripped) = clean_url.strip_prefix("http://") {
-        stripped
-    } else if let Some(stripped) = clean_url.strip_prefix("https://") {
-        stripped
-    } else {
-        clean_url
-    };
-
-    let (host_port, path) = match url_without_scheme.find('/') {
-        Some(idx) => (&url_without_scheme[..idx], &url_without_scheme[idx..]),
-        None => (url_without_scheme, "/"),
-    };
-
-    let (host, port) = match host_port.find(':') {
-        Some(idx) => (&host_port[..idx], host_port[idx + 1..].parse::<u16>().unwrap_or(80)),
-        None => (host_port, 80),
-    };
-
-    let target_ip = resolve_dns(host)?;
-
-    // Construcción de la petición HTTP/1.1 estándar (RFC 2616 / RFC 7230)
-    let request_str = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: BeaverOS/0.8.0 (Bare-Metal x86_64)\r\nAccept: */*\r\nConnection: close\r\n\r\n",
-        path, host
-    );
-
-    // Segmento TCP: Flags PSH | ACK (0x18), Ventana 64240
-    let mut tcp_seg = Vec::with_capacity(32 + request_str.len());
-    tcp_seg.extend_from_slice(&49152_u16.to_be_bytes()); // Puerto origen efímero
-    tcp_seg.extend_from_slice(&port.to_be_bytes());       // Puerto destino HTTP
-    tcp_seg.extend_from_slice(&1001_u32.to_be_bytes());   // Sequence Number
-    tcp_seg.extend_from_slice(&0_u32.to_be_bytes());      // Acknowledgment Number
-    tcp_seg.push(0x50);                                   // Data Offset (5 palabras = 20 bytes)
-    tcp_seg.push(0x18);                                   // Flags: PSH, ACK
-    tcp_seg.extend_from_slice(&64240_u16.to_be_bytes());  // Window Size
-    tcp_seg.extend_from_slice(&0_u16.to_be_bytes());      // Checksum
-    tcp_seg.extend_from_slice(&0_u16.to_be_bytes());      // Urgent Pointer
-    tcp_seg.extend_from_slice(request_str.as_bytes());
-
-    // Transmitir trama por la tarjeta Intel E1000
-    send_ethernet_frame([0x52, 0x54, 0x00, 0x12, 0x34, 0x02], ETHERTYPE_IPV4, &tcp_seg);
-
-    // Generar respuesta estructurada HTTP según el recurso solicitado
-    let (status_code, status_text, content_type, body_text) = if path.ends_with(".json") {
-        (200, "OK", "application/json", format!("{{\"os\":\"Beaver OS\",\"version\":\"0.8.0\",\"host\":\"{}\",\"status\":\"online\",\"arch\":\"x86_64\"}}", host))
-    } else if path.contains("pkg") || path.contains("package") {
-        (200, "OK", "text/plain", String::from("# Beaver Package Repository\npackage=hello\nversion=1.0.0\nauthor=japuentem\nstatus=verified\n"))
-    } else if path == "/" || path == "/index.html" {
-        (200, "OK", "text/html", format!("<!DOCTYPE html><html><head><title>Beaver OS Server</title></head><body><h1>Bienvenido a Beaver OS</h1><p>Conectado exitosamente con {} ({})</p></body></html>", host, target_ip.to_string()))
-    } else {
-        (200, "OK", "text/plain", format!("=== BEAVER OS HTTP DOWNLOAD ENGINE ===\nRecurso: {}\nServidor: {}\nIP Destino: {}\nProtocolo: HTTP/1.1\nTransferencia completada con exito.\n", path, host, target_ip.to_string()))
-    };
-
-    let raw_bytes = body_text.as_bytes().to_vec();
-    let content_len = raw_bytes.len();
-
-    Ok(HttpResponse {
-        status_code,
-        status_text: String::from(status_text),
-        content_type: String::from(content_type),
-        content_length: content_len,
-        body: body_text,
-        raw_body: raw_bytes,
-    })
 }
 
 /// Negociación y autoconfiguración dinámica de parámetros de red mediante DHCP (RFC 2131)
@@ -979,7 +1050,7 @@ pub fn dhcp_discover_and_configure() -> Result<DhcpLease, &'static str> {
 }
 
 // ============================================================================
-// BSD Sockets API & TCP Sliding Window Flow Control
+// BSD Sockets API & Full State TCP Machine (RFC 793) & Real HTTP/1.1 Client
 // ============================================================================
 
 pub const AF_INET: i32 = 2;
@@ -995,7 +1066,8 @@ pub enum SocketState {
     SynReceived,
     Established,
     FinWait,
-    ClosedWait,
+    CloseWait,
+    ClosedWait, // Compatibilidad retroactiva
 }
 
 #[derive(Debug, Clone)]
@@ -1016,6 +1088,92 @@ pub static SOCKET_TABLE: SpinLock<[Option<BsdSocket>; 16]> = SpinLock::new([
     None, None, None, None, None, None, None, None,
 ]);
 
+/// Procesa segmentos TCP entrantes en el contexto de interrupción de red
+pub fn handle_incoming_tcp_segment(
+    net: &mut NetworkInterface,
+    src_eth: [u8; 6],
+    src_ip: Ipv4Addr,
+    _dst_ip: Ipv4Addr,
+    src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    _window: u16,
+    payload: &[u8],
+) {
+    let mut table = SOCKET_TABLE.lock();
+    for slot in table.iter_mut() {
+        if let Some(ref mut sock) = slot {
+            let match_conn = sock.local_port == dst_port
+                && (sock.remote_ip.0 == [0, 0, 0, 0] || sock.remote_ip.0 == src_ip.0)
+                && (sock.remote_port == 0 || sock.remote_port == src_port);
+
+            if match_conn {
+                match sock.state {
+                    SocketState::SynSent => {
+                        if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
+                            sock.ack_num = seq.wrapping_add(1);
+                            sock.seq_num = ack;
+                            sock.state = SocketState::Established;
+
+                            // Responder con ACK sin re-adquirir el lock de net
+                            let my_ip = net.ip_address;
+                            let my_mac = net.mac_address;
+                            send_tcp_segment_direct(
+                                net, my_mac, src_eth, my_ip, src_ip,
+                                dst_port, src_port, sock.seq_num, sock.ack_num,
+                                TCP_FLAG_ACK, sock.window_size, &[]
+                            );
+                            return;
+                        } else if (flags & TCP_FLAG_RST) != 0 {
+                            sock.state = SocketState::Closed;
+                            return;
+                        }
+                    }
+                    SocketState::Established => {
+                        if (flags & TCP_FLAG_RST) != 0 {
+                            sock.state = SocketState::Closed;
+                            return;
+                        }
+
+                        let mut need_ack = false;
+                        if !payload.is_empty() {
+                            sock.rx_buffer.extend_from_slice(payload);
+                            sock.ack_num = seq.wrapping_add(payload.len() as u32);
+                            need_ack = true;
+                        }
+
+                        if (flags & TCP_FLAG_FIN) != 0 {
+                            sock.ack_num = seq.wrapping_add(if payload.is_empty() { 1 } else { payload.len() as u32 + 1 });
+                            sock.state = SocketState::CloseWait;
+                            need_ack = true;
+                        }
+
+                        if need_ack {
+                            let my_ip = net.ip_address;
+                            let my_mac = net.mac_address;
+                            send_tcp_segment_direct(
+                                net, my_mac, src_eth, my_ip, src_ip,
+                                dst_port, src_port, sock.seq_num, sock.ack_num,
+                                TCP_FLAG_ACK, sock.window_size, &[]
+                            );
+                        }
+                        return;
+                    }
+                    SocketState::FinWait => {
+                        if (flags & TCP_FLAG_ACK) != 0 {
+                            sock.state = SocketState::Closed;
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 pub fn bsd_socket(domain: i32, sock_type: i32, _protocol: i32) -> Result<usize, &'static str> {
     if domain != AF_INET || sock_type != SOCK_STREAM {
         return Err("Dominio o tipo de socket no soportado (solo AF_INET / SOCK_STREAM)");
@@ -1029,7 +1187,7 @@ pub fn bsd_socket(domain: i32, sock_type: i32, _protocol: i32) -> Result<usize, 
                 local_port: 49152 + (i as u16),
                 remote_ip: Ipv4Addr::new(0, 0, 0, 0),
                 remote_port: 0,
-                seq_num: 1000 + (i as u32 * 100),
+                seq_num: 1000 + (i as u32 * 500),
                 ack_num: 0,
                 window_size: 64240,
                 rx_buffer: Vec::new(),
@@ -1040,88 +1198,274 @@ pub fn bsd_socket(domain: i32, sock_type: i32, _protocol: i32) -> Result<usize, 
     Err("Tabla de sockets llena (máximo 16 sockets simultáneos)")
 }
 
+/// Establece una conexión TCP mediante el 3-way handshake estándar (SYN -> SYN-ACK -> ACK)
 pub fn bsd_connect(sock_id: usize, remote_ip: Ipv4Addr, remote_port: u16) -> Result<(), &'static str> {
-    let mut table = SOCKET_TABLE.lock();
-    let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
+    let (my_ip, src_port, seq) = {
+        let mut table = SOCKET_TABLE.lock();
+        let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
 
-    sock.remote_ip = remote_ip;
-    sock.remote_port = remote_port;
-    sock.state = SocketState::SynSent;
+        sock.remote_ip = remote_ip;
+        sock.remote_port = remote_port;
+        sock.state = SocketState::SynSent;
+        sock.seq_num = 1000 + (sock_id as u32 * 500);
+        let my_ip = NET_INTERFACE.lock().ip_address;
+        (my_ip, sock.local_port, sock.seq_num)
+    };
 
-    // 1. Enviar segmento TCP SYN (Handshake paso 1)
-    let mut syn_seg = Vec::with_capacity(32);
-    syn_seg.extend_from_slice(&sock.local_port.to_be_bytes());
-    syn_seg.extend_from_slice(&sock.remote_port.to_be_bytes());
-    syn_seg.extend_from_slice(&sock.seq_num.to_be_bytes());
-    syn_seg.extend_from_slice(&0_u32.to_be_bytes()); // Ack
-    syn_seg.push(0x50);                             // 20 bytes
-    syn_seg.push(0x02);                             // Flags: SYN
-    syn_seg.extend_from_slice(&sock.window_size.to_be_bytes());
-    syn_seg.extend_from_slice(&0_u16.to_be_bytes()); // Checksum
-    syn_seg.extend_from_slice(&0_u16.to_be_bytes()); // Urgent
+    // 1. Enviar segmento TCP SYN inicial
+    send_tcp_segment(my_ip, remote_ip, src_port, remote_port, seq, 0, TCP_FLAG_SYN, 64240, &[]);
 
-    send_ethernet_frame([0x52, 0x54, 0x00, 0x12, 0x34, 0x02], ETHERTYPE_IPV4, &syn_seg);
-
-    // 2. Establecer estado Established con ventana deslizante negociada (Handshake completado)
-    sock.seq_num = sock.seq_num.wrapping_add(1);
-    sock.ack_num = 1;
-    sock.state = SocketState::Established;
-
-    Ok(())
-}
-
-pub fn bsd_send(sock_id: usize, data: &[u8]) -> Result<usize, &'static str> {
-    let mut table = SOCKET_TABLE.lock();
-    let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
-    if sock.state != SocketState::Established {
-        return Err("Socket no conectado");
+    // 2. Esperar respuesta del servidor (SYN-ACK) mediante sondeo del hardware E1000
+    for _ in 0..15_000 {
+        net_poll_rx();
+        {
+            let table = SOCKET_TABLE.lock();
+            if let Some(Some(ref sock)) = table.get(sock_id) {
+                if sock.state == SocketState::Established {
+                    return Ok(());
+                } else if sock.state == SocketState::Closed {
+                    return Err("Conexión rechazada por el servidor remoto (RST)");
+                }
+            }
+        }
+        for _ in 0..300 {
+            core::hint::spin_loop();
+        }
     }
 
-    // Segmentación según Ventana Deslizante (Max Segment Size 1460 bytes)
+    // Timeout: restaurar socket
+    {
+        let mut table = SOCKET_TABLE.lock();
+        if let Some(Some(ref mut sock)) = table.get_mut(sock_id) {
+            sock.state = SocketState::Closed;
+        }
+    }
+    Err("Timeout esperando establecimiento de conexión TCP (SYN-ACK)")
+}
+
+/// Envía datos a través de una conexión TCP establecida (flags PSH | ACK)
+pub fn bsd_send(sock_id: usize, data: &[u8]) -> Result<usize, &'static str> {
+    let (my_ip, remote_ip, local_port, remote_port, seq, ack, win) = {
+        let table = SOCKET_TABLE.lock();
+        let sock = table.get(sock_id).and_then(|s| s.as_ref()).ok_or("Socket descriptor inválido")?;
+        if sock.state != SocketState::Established {
+            return Err("Socket no conectado");
+        }
+        let my_ip = NET_INTERFACE.lock().ip_address;
+        (my_ip, sock.remote_ip, sock.local_port, sock.remote_port, sock.seq_num, sock.ack_num, sock.window_size)
+    };
+
     let mss = 1460_usize;
     let mut total_sent = 0;
+    let mut current_seq = seq;
 
     for chunk in data.chunks(mss) {
-        let mut tcp_seg = Vec::with_capacity(32 + chunk.len());
-        tcp_seg.extend_from_slice(&sock.local_port.to_be_bytes());
-        tcp_seg.extend_from_slice(&sock.remote_port.to_be_bytes());
-        tcp_seg.extend_from_slice(&sock.seq_num.to_be_bytes());
-        tcp_seg.extend_from_slice(&sock.ack_num.to_be_bytes());
-        tcp_seg.push(0x50); // Data offset 20 bytes
-        tcp_seg.push(0x18); // PSH | ACK
-        tcp_seg.extend_from_slice(&sock.window_size.to_be_bytes());
-        tcp_seg.extend_from_slice(&0_u16.to_be_bytes());
-        tcp_seg.extend_from_slice(&0_u16.to_be_bytes());
-        tcp_seg.extend_from_slice(chunk);
-
-        send_ethernet_frame([0x52, 0x54, 0x00, 0x12, 0x34, 0x02], ETHERTYPE_IPV4, &tcp_seg);
-        sock.seq_num = sock.seq_num.wrapping_add(chunk.len() as u32);
+        send_tcp_segment(my_ip, remote_ip, local_port, remote_port, current_seq, ack, TCP_FLAG_PSH | TCP_FLAG_ACK, win, chunk);
+        current_seq = current_seq.wrapping_add(chunk.len() as u32);
         total_sent += chunk.len();
+    }
+
+    {
+        let mut table = SOCKET_TABLE.lock();
+        if let Some(Some(ref mut sock)) = table.get_mut(sock_id) {
+            sock.seq_num = current_seq;
+        }
     }
 
     Ok(total_sent)
 }
 
+/// Lee datos recibidos en el búfer del socket TCP
 pub fn bsd_recv(sock_id: usize, buf: &mut [u8]) -> Result<usize, &'static str> {
-    let mut table = SOCKET_TABLE.lock();
-    let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
+    bsd_recv_timeout(sock_id, buf, 10_000)
+}
 
-    let count = buf.len().min(sock.rx_buffer.len());
-    if count > 0 {
-        buf[..count].copy_from_slice(&sock.rx_buffer[..count]);
-        sock.rx_buffer.drain(..count);
-        Ok(count)
-    } else {
-        Ok(0)
+/// Lee datos con sondeo activo y límite de espera
+pub fn bsd_recv_timeout(sock_id: usize, buf: &mut [u8], timeout_spins: usize) -> Result<usize, &'static str> {
+    for _ in 0..timeout_spins {
+        net_poll_rx();
+        {
+            let mut table = SOCKET_TABLE.lock();
+            if let Some(Some(ref mut sock)) = table.get_mut(sock_id) {
+                if !sock.rx_buffer.is_empty() {
+                    let count = buf.len().min(sock.rx_buffer.len());
+                    buf[..count].copy_from_slice(&sock.rx_buffer[..count]);
+                    sock.rx_buffer.drain(..count);
+                    return Ok(count);
+                }
+                if sock.state == SocketState::CloseWait || sock.state == SocketState::Closed {
+                    return Ok(0); // Fin de flujo (EOF / FIN)
+                }
+            } else {
+                return Err("Socket descriptor inválido");
+            }
+        }
+        for _ in 0..200 {
+            core::hint::spin_loop();
+        }
+    }
+    Ok(0)
+}
+
+/// Cierra ordenadamente el socket TCP (enviando segmento FIN | ACK)
+pub fn bsd_close(sock_id: usize) {
+    let (send_fin, my_ip, remote_ip, local_port, remote_port, seq, ack, win) = {
+        let mut table = SOCKET_TABLE.lock();
+        if let Some(Some(ref mut sock)) = table.get_mut(sock_id) {
+            let active = sock.state == SocketState::Established || sock.state == SocketState::CloseWait;
+            let my_ip = NET_INTERFACE.lock().ip_address;
+            let params = (active, my_ip, sock.remote_ip, sock.local_port, sock.remote_port, sock.seq_num, sock.ack_num, sock.window_size);
+            sock.state = SocketState::Closed;
+            params
+        } else {
+            (false, Ipv4Addr::new(0, 0, 0, 0), Ipv4Addr::new(0, 0, 0, 0), 0, 0, 0, 0, 0)
+        }
+    };
+
+    if send_fin && remote_ip.0 != [0, 0, 0, 0] {
+        send_tcp_segment(my_ip, remote_ip, local_port, remote_port, seq, ack, TCP_FLAG_FIN | TCP_FLAG_ACK, win, &[]);
+    }
+
+    let mut table = SOCKET_TABLE.lock();
+    if sock_id < table.len() {
+        table[sock_id] = None;
     }
 }
 
-pub fn bsd_close(sock_id: usize) {
-    let mut table = SOCKET_TABLE.lock();
-    if let Some(Some(ref mut sock)) = table.get_mut(sock_id) {
-        sock.state = SocketState::Closed;
+/// Parsea una respuesta HTTP/1.1 auténtica (RFC 7230)
+pub fn parse_http_response(raw: &[u8]) -> Result<HttpResponse, String> {
+    if raw.is_empty() {
+        return Err(String::from("Respuesta HTTP vacia recibida"));
     }
-    if sock_id < 16 {
-        table[sock_id] = None;
+
+    let (header_bytes, body_bytes) = if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+        (&raw[..pos], &raw[pos + 4..])
+    } else if let Some(pos) = raw.windows(2).position(|w| w == b"\n\n") {
+        (&raw[..pos], &raw[pos + 2..])
+    } else {
+        (raw, &[][..])
+    };
+
+    let header_str = core::str::from_utf8(header_bytes)
+        .map_err(|_| String::from("Cabeceras HTTP con codificacion no valida"))?;
+
+    let mut lines = header_str.lines();
+    let status_line = lines.next().ok_or_else(|| String::from("Respuesta HTTP sin linea de estado"))?;
+
+    let mut parts = status_line.splitn(3, ' ');
+    let _proto = parts.next().unwrap_or("");
+    let status_code = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(200);
+    let status_text = parts.next().unwrap_or("OK").trim();
+
+    let mut content_type = String::from("text/plain");
+    let mut content_length = body_bytes.len();
+
+    for line in lines {
+        if let Some(colon) = line.find(':') {
+            let key = line[..colon].trim();
+            let val = line[colon + 1..].trim();
+            if key.eq_ignore_ascii_case("content-type") {
+                content_type = String::from(val);
+            } else if key.eq_ignore_ascii_case("content-length") {
+                if let Ok(len) = val.parse::<usize>() {
+                    content_length = len;
+                }
+            }
+        }
     }
+
+    let body_str = core::str::from_utf8(body_bytes)
+        .map(|s| String::from(s))
+        .unwrap_or_else(|_| format!("[Datos binarios: {} bytes]", body_bytes.len()));
+
+    Ok(HttpResponse {
+        status_code,
+        status_text: String::from(status_text),
+        content_type,
+        content_length,
+        body: body_str,
+        raw_body: body_bytes.to_vec(),
+    })
+}
+
+/// Cliente HTTP/1.1 auténtico que opera sobre conexiones TCP nativas
+pub fn http_get(url: &str) -> Result<HttpResponse, String> {
+    let clean_url = url.trim();
+    let url_without_scheme = if let Some(stripped) = clean_url.strip_prefix("http://") {
+        stripped
+    } else if let Some(stripped) = clean_url.strip_prefix("https://") {
+        stripped
+    } else {
+        clean_url
+    };
+
+    let (host_port, path) = match url_without_scheme.find('/') {
+        Some(idx) => (&url_without_scheme[..idx], &url_without_scheme[idx..]),
+        None => (url_without_scheme, "/"),
+    };
+
+    let (host, port) = match host_port.find(':') {
+        Some(idx) => (&host_port[..idx], host_port[idx + 1..].parse::<u16>().unwrap_or(80)),
+        None => (host_port, 80),
+    };
+
+    let target_ip = resolve_dns(host)?;
+
+    let sock_id = bsd_socket(AF_INET, SOCK_STREAM, 0).map_err(|e| String::from(e))?;
+
+    // Conectar vía TCP real
+    if let Err(e) = bsd_connect(sock_id, target_ip, port) {
+        bsd_close(sock_id);
+        return Err(format!("Fallo de conexion TCP hacia {}:{}: {}", host, port, e));
+    }
+
+    // Petición HTTP/1.1 estándar (RFC 7230)
+    let request_str = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: BeaverOS/0.9.0 (Bare-Metal x86_64)\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+        path, host
+    );
+
+    if let Err(e) = bsd_send(sock_id, request_str.as_bytes()) {
+        bsd_close(sock_id);
+        return Err(format!("Error enviando peticion HTTP: {}", e));
+    }
+
+    // Recibir respuesta del servidor
+    let mut response_bytes = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        match bsd_recv_timeout(sock_id, &mut chunk, 15_000) {
+            Ok(0) => break,
+            Ok(n) => {
+                response_bytes.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = response_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let body_received = response_bytes.len() - (pos + 4);
+                    if let Ok(headers) = core::str::from_utf8(&response_bytes[..pos]) {
+                        for line in headers.lines() {
+                            if let Some(idx) = line.find(':') {
+                                if line[..idx].trim().eq_ignore_ascii_case("content-length") {
+                                    if let Ok(expected_len) = line[idx + 1..].trim().parse::<usize>() {
+                                        if body_received >= expected_len {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                bsd_close(sock_id);
+                return Err(format!("Error de recepcion HTTP/TCP: {}", e));
+            }
+        }
+    }
+    bsd_close(sock_id);
+
+    if response_bytes.is_empty() {
+        return Err(format!("Servidor {}:{} cerro la conexion sin enviar datos", host, port));
+    }
+
+    parse_http_response(&response_bytes)
 }

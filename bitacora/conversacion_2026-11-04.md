@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-04
-# Total de interacciones del día: 3
+# Total de interacciones del día: 4
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-04
@@ -38,6 +38,40 @@ Se formalizó la distinción estricta de marca tanto en las reglas institucional
    - Verificado `kernel/src/gui/desktop.rs`: ajustado a `Beaver OS Universal GUI Desktop & Window Compositor`.
    - Verificado `docs/UEFI_BOOT_GUIDE.md`: ajustado a `beaver-kernel`.
    - Banners de inicio y registros en terminal confirmados: únicamente reflejan `BEAVER OS v0.8.0`.
+
+================================================================================
+
+## Interacción #4 [13:15:00]
+
+### 👤 Pregunta / Petición del Usuario:
+aparece un error *Error /net al iniciar, si es correcto continua con la Opcion 2, si el error esta mal corrigelo y continua con la Opcion 2
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se diagnosticó el error reportado, se determinó que se trataba de un comportamiento incorrecto (bug) y se corrigió, junto con la implementación íntegra de la **Opción 2**:
+
+1. **Diagnóstico y Corrección de Errores al Iniciar:**
+   - **Error en `/net` (`kernel/src/main.rs`):** Al arrancar en modo mono-nodo (un solo QEMU), no existen nodos pares descubiertos en `/net` hasta que otro nodo emite anuncios en el puerto UDP 4242. El código anterior forzaba la lectura de `/net/beaver-laptop/status.txt`, produciendo el fallo en rojo `* Error /net: Nodo no encontrado en la red mesh`. Se corrigió verificando primero si existen nodos descubiertos: en caso de modo autónomo, reporta limpiamente `* Red Mesh: Modo Standalone (escuchando anuncios en puerto UDP 4242) [OK]`.
+   - **Error en Instalador Universal (`kernel/src/storage/installer.rs`):** La función `probe_target_disk()` solo consultaba el controlador ATA PIO heredado (`ATA_PRIMARY_MASTER`), desconociendo el nuevo disco SATA AHCI introducido en la Opción 1. Se actualizó para interrogar a `BLOCK_DEVICE` y `AHCI_CONTROLLER`, detectando de inmediato la unidad `Unidad Serial ATA AHCI (SATA DMA) (10 MB, 20480 sectores)` y logrando que la prueba del instalador pase al 100% con `[OK]`.
+
+2. **Implementación de la Opción 2 (Pila TCP de Estado Completo y Descarga HTTP Real):**
+   - **Enrutamiento y Resolución ARP (`kernel/src/drivers/net.rs`):**
+     Implementada la función `resolve_mac_for_ip` (consulta en tabla ARP o resolución dinámica vía ARP request, con conocimiento de la MAC del gateway `52:54:00:12:34:02` en QEMU) y `send_ipv4_packet` para encapsulación estándar RFC 791.
+   - **Checksum TCP Pseudo-Cabecera (RFC 793 / RFC 1071):**
+     Implementado el cálculo estricto `calculate_tcp_checksum` abarcando IP origen, IP destino, protocolo 6, longitud de segmento y datos.
+   - **Transmisión de Segmentos TCP (`send_tcp_segment` y `send_tcp_segment_direct`):**
+     Soporte completo de flags TCP (`SYN`, `ACK`, `PSH`, `FIN`, `RST`). Mecanismo directo sin locks cruzados para responder ACK/SYN-ACK en el bucle de recepción sin producir interbloqueos (*deadlocks*).
+   - **Máquina de Estados y Despacho en `process_incoming_packet`:**
+     Recepción de paquetes `IP_PROTO_TCP`, parsing de puertos, números de secuencia y acuse (`seq`/`ack`), flags y ventana. Despacho a `handle_incoming_tcp_segment` para manejar el *3-way handshake* (`SynSent` -> `Established`), recepción de datos a `rx_buffer` con acuses incrementales, y cierre ordenado (`FIN` -> `CloseWait` / `Closed`).
+   - **Sockets BSD Nativos:**
+     `bsd_socket`, `bsd_connect` (handshake real con sondeo de hardware), `bsd_send` (segmentación MSS 1460 con PSH|ACK), `bsd_recv_timeout` y `bsd_close` (envío de FIN|ACK).
+   - **Cliente HTTP/1.1 y Parser Auténticos (`http_get` y `parse_http_response`):**
+     Eliminadas todas las cadenas simuladas y mocks hardcodeados. El cliente resuelve DNS, abre socket TCP, transmite la solicitud HTTP/1.1 (`GET`, `Host`, `User-Agent`, `Connection: close`), lee el flujo de datos por red y parsea la línea de estado, cabeceras (`Content-Type`, `Content-Length`) y cuerpo de la respuesta.
+   - **Limpieza de Comandos en Shell (`kernel/src/shell/cmd_net.rs`):**
+     Eliminados los mensajes simulados `[DEMO][CURL]`. Los comandos `curl` y `wget` operan ahora 100% sobre la pila TCP auténtica.
+   - **Pruebas de Regresión (`kernel/src/tests.rs`):**
+     Añadida la prueba `tcp_state_machine_and_http_parser`. Ejecución exitosa de **15/15 pruebas automatizadas** en QEMU con código de salida `33` ([`QemuExitCode::Success`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs#L21-L26)).
 
 ================================================================================
 
@@ -109,6 +143,40 @@ Se implementó de manera completa y 100% auténtica la **Opción 1: Controlador 
    - Opción 2: Pila TCP de Estado Completo y Descarga HTTP Real (`curl` y `pkg install`).
    - Opción 3: Espacio de Usuario Nativo (Shell Interactivo en Ring 3 y `beaver-libc`).
    - Opción 4: Instalación en Hardware Bare-Metal e Imagen ISO Híbrida (BIOS/UEFI).
+
+================================================================================
+
+## Interacción #4 [13:15:00]
+
+### 👤 Pregunta / Petición del Usuario:
+aparece un error *Error /net al iniciar, si es correcto continua con la Opcion 2, si el error esta mal corrigelo y continua con la Opcion 2
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se diagnosticó el error reportado, se determinó que se trataba de un comportamiento incorrecto (bug) y se corrigió, junto con la implementación íntegra de la **Opción 2**:
+
+1. **Diagnóstico y Corrección de Errores al Iniciar:**
+   - **Error en `/net` (`kernel/src/main.rs`):** Al arrancar en modo mono-nodo (un solo QEMU), no existen nodos pares descubiertos en `/net` hasta que otro nodo emite anuncios en el puerto UDP 4242. El código anterior forzaba la lectura de `/net/beaver-laptop/status.txt`, produciendo el fallo en rojo `* Error /net: Nodo no encontrado en la red mesh`. Se corrigió verificando primero si existen nodos descubiertos: en caso de modo autónomo, reporta limpiamente `* Red Mesh: Modo Standalone (escuchando anuncios en puerto UDP 4242) [OK]`.
+   - **Error en Instalador Universal (`kernel/src/storage/installer.rs`):** La función `probe_target_disk()` solo consultaba el controlador ATA PIO heredado (`ATA_PRIMARY_MASTER`), desconociendo el nuevo disco SATA AHCI introducido en la Opción 1. Se actualizó para interrogar a `BLOCK_DEVICE` y `AHCI_CONTROLLER`, detectando de inmediato la unidad `Unidad Serial ATA AHCI (SATA DMA) (10 MB, 20480 sectores)` y logrando que la prueba del instalador pase al 100% con `[OK]`.
+
+2. **Implementación de la Opción 2 (Pila TCP de Estado Completo y Descarga HTTP Real):**
+   - **Enrutamiento y Resolución ARP (`kernel/src/drivers/net.rs`):**
+     Implementada la función `resolve_mac_for_ip` (consulta en tabla ARP o resolución dinámica vía ARP request, con conocimiento de la MAC del gateway `52:54:00:12:34:02` en QEMU) y `send_ipv4_packet` para encapsulación estándar RFC 791.
+   - **Checksum TCP Pseudo-Cabecera (RFC 793 / RFC 1071):**
+     Implementado el cálculo estricto `calculate_tcp_checksum` abarcando IP origen, IP destino, protocolo 6, longitud de segmento y datos.
+   - **Transmisión de Segmentos TCP (`send_tcp_segment` y `send_tcp_segment_direct`):**
+     Soporte completo de flags TCP (`SYN`, `ACK`, `PSH`, `FIN`, `RST`). Mecanismo directo sin locks cruzados para responder ACK/SYN-ACK en el bucle de recepción sin producir interbloqueos (*deadlocks*).
+   - **Máquina de Estados y Despacho en `process_incoming_packet`:**
+     Recepción de paquetes `IP_PROTO_TCP`, parsing de puertos, números de secuencia y acuse (`seq`/`ack`), flags y ventana. Despacho a `handle_incoming_tcp_segment` para manejar el *3-way handshake* (`SynSent` -> `Established`), recepción de datos a `rx_buffer` con acuses incrementales, y cierre ordenado (`FIN` -> `CloseWait` / `Closed`).
+   - **Sockets BSD Nativos:**
+     `bsd_socket`, `bsd_connect` (handshake real con sondeo de hardware), `bsd_send` (segmentación MSS 1460 con PSH|ACK), `bsd_recv_timeout` y `bsd_close` (envío de FIN|ACK).
+   - **Cliente HTTP/1.1 y Parser Auténticos (`http_get` y `parse_http_response`):**
+     Eliminadas todas las cadenas simuladas y mocks hardcodeados. El cliente resuelve DNS, abre socket TCP, transmite la solicitud HTTP/1.1 (`GET`, `Host`, `User-Agent`, `Connection: close`), lee el flujo de datos por red y parsea la línea de estado, cabeceras (`Content-Type`, `Content-Length`) y cuerpo de la respuesta.
+   - **Limpieza de Comandos en Shell (`kernel/src/shell/cmd_net.rs`):**
+     Eliminados los mensajes simulados `[DEMO][CURL]`. Los comandos `curl` y `wget` operan ahora 100% sobre la pila TCP auténtica.
+   - **Pruebas de Regresión (`kernel/src/tests.rs`):**
+     Añadida la prueba `tcp_state_machine_and_http_parser`. Ejecución exitosa de **15/15 pruebas automatizadas** en QEMU con código de salida `33` ([`QemuExitCode::Success`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs#L21-L26)).
 
 ================================================================================
 

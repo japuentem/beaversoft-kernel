@@ -294,14 +294,23 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
         }
         kprintln!(") [OK]");
 
-        match vfs.read_file("/net/beaver-laptop/status.txt", 0, 0) {
-            Ok(status) => {
-                let first_line = status.lines().next().unwrap_or("");
-                kprint_color!(VgaColor::LightGreen, VgaColor::Black, "  * Lectura remota /net/beaver-laptop/status.txt: '{}' [OK]\n  [OK] Red Distribuida Beaver Mesh 100% operativa.\n\n", first_line);
+        if !net_nodes.is_empty() {
+            let first_node = &net_nodes[0].0;
+            let status_path = alloc::format!("/net/{}/status.txt", first_node);
+            match vfs.read_file(&status_path, 0, 0) {
+                Ok(status) => {
+                    let first_line = status.lines().next().unwrap_or("");
+                    kprint_color!(VgaColor::LightGreen, VgaColor::Black, "  * Lectura remota {}: '{}' [OK]\n  [OK] Red Distribuida Beaver Mesh 100% operativa.\n\n", status_path, first_line);
+                }
+                Err(e) => {
+                    kprint_color!(VgaColor::Yellow, VgaColor::Black, "  * Estado de nodo {}: {}\n\n", first_node, e);
+                }
             }
-            Err(e) => {
-                kprint_color!(VgaColor::LightRed, VgaColor::Black, "  * Error /net: {}\n\n", e);
-            }
+        } else {
+            kprint_color!(
+                VgaColor::LightGreen, VgaColor::Black,
+                "  * Red Mesh: Modo Standalone (escuchando anuncios en puerto UDP 4242) [OK]\n  [OK] Red Distribuida Beaver Mesh operativa en segundo plano.\n\n"
+            );
         }
     }
 
