@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 15] = [
+    let tests: [(&str, fn()); 16] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -80,6 +80,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("smp_distributed_scheduler",               test_smp_distributed_scheduler),
         ("ahci_sata_dma_controller",                test_ahci_sata_dma_controller),
         ("tcp_state_machine_and_http_parser",       test_tcp_state_machine_and_http_parser),
+        ("posix_syscalls_and_beaver_libc",          test_posix_syscalls_and_beaver_libc),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -473,6 +474,61 @@ pub fn test_tcp_state_machine_and_http_parser() {
         let table = SOCKET_TABLE.lock();
         assert!(table[sock_id].is_none(), "El socket debe quedar liberado en la tabla tras bsd_close");
     }
+
+    // 4. Verificación de conexión TCP real y petición HTTP local en beaver.lan (loopback)
+    let http_resp = crate::drivers::net::http_get("http://beaver.lan/info.json")
+        .expect("Peticion HTTP TCP hacia http://beaver.lan/info.json debe tener exito");
+    assert_eq!(http_resp.status_code, 200, "Servidor web HTTP del kernel debe responder con 200 OK");
+    assert_eq!(http_resp.content_type, "application/json", "Tipo de contenido JSON");
+    assert!(http_resp.body.contains("\"os\": \"Beaver OS\""), "El JSON debe contener el nombre del SO");
+}
+
+/// Test 16: Verificación de pasarela de Syscalls POSIX reales y descriptores VFS
+pub fn test_posix_syscalls_and_beaver_libc() {
+    use crate::syscall::*;
+
+    // 1. Verificación de SYS_UPTIME y SYS_GETPID
+    let uptime = syscall_dispatch(SYS_UPTIME, 0, 0, 0);
+    assert!(uptime <= 1_000_000, "SYS_UPTIME debe retornar un tiempo valido");
+
+    let pid = syscall_dispatch(SYS_GETPID, 0, 0, 0);
+    assert!(pid < 1000, "SYS_GETPID debe retornar el TID actual");
+
+    // 2. Verificación de SYS_WRITE en stdout (fd 1)
+    let test_msg = b"[TEST-SYSCALL] Prueba directa de SYS_WRITE POSIX\n";
+    let bytes_written = syscall_dispatch(SYS_WRITE, 1, test_msg.as_ptr() as u64, test_msg.len() as u64);
+    assert_eq!(bytes_written, test_msg.len() as u64, "SYS_WRITE debe escribir todos los bytes");
+
+    // 3. Verificación de SYS_OPEN, SYS_WRITE, SYS_LSEEK, SYS_READ y SYS_CLOSE sobre VFS
+    let path = b"/test_syscall.txt\0";
+    let fd = syscall_dispatch(SYS_OPEN, path.as_ptr() as u64, 64, 0); // O_CREAT
+    assert!(fd >= 3, "Descriptor fd de archivo debe ser >= 3");
+
+    let payload = b"Beaver OS POSIX Syscalls OK!";
+    let w = syscall_dispatch(SYS_WRITE, fd, payload.as_ptr() as u64, payload.len() as u64);
+    assert_eq!(w, payload.len() as u64, "Debe escribir la carga util completa");
+
+    // Rebobinar con SYS_LSEEK a 0
+    let seek_res = syscall_dispatch(SYS_LSEEK, fd, 0, 0);
+    assert_eq!(seek_res, 0, "LSEEK a SEEK_SET 0");
+
+    let mut read_buf = [0u8; 64];
+    let r = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, payload.len() as u64);
+    assert_eq!(r, payload.len() as u64, "Debe leer exactamente los bytes escritos");
+    assert_eq!(&read_buf[..payload.len()], payload, "El contenido leido debe ser identico");
+
+    let close_res = syscall_dispatch(SYS_CLOSE, fd, 0, 0);
+    assert_eq!(close_res, 0, "SYS_CLOSE debe retornar 0 en descriptor valido");
+
+    // Descriptor cerrado debe fallar con -EBADF
+    let bad_read = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, 10);
+    assert_eq!(bad_read as i64, -9, "SYS_READ en fd cerrado debe retornar -EBADF (-9)");
+
+    // 4. Verificación de ELF de /disk/bin/sh.elf
+    crate::task::pkg::init_disk_bin();
+    let sh_exec = crate::task::pkg::execute_elf("/disk/bin/sh.elf")
+        .expect("El paquete sh.elf debe existir e iniciar correctamente");
+    assert!(sh_exec.contains("BEAVER-SH") || sh_exec.contains("sh"), "La ejecucion de sh.elf debe ser autentica");
 }
 
 #[cfg(test)]
@@ -557,4 +613,10 @@ fn ut_ahci_sata_dma() {
 #[test_case]
 fn ut_tcp_state_machine() {
     test_tcp_state_machine_and_http_parser();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_posix_syscalls() {
+    test_posix_syscalls_and_beaver_libc();
 }

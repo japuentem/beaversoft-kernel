@@ -1,0 +1,9 @@
+[package]
+name = "beaver-sh"
+version = "0.1.0"
+authors = ["José Alberto Puente Maldonado <japuentem>"]
+edition = "2021"
+
+[dependencies]
+beaver-libc = { path = "../beaver-libc" }
+

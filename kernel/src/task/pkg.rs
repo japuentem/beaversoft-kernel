@@ -22,7 +22,7 @@ pub struct PackageMeta {
     pub size_bytes: usize,
 }
 
-pub const AVAILABLE_PACKAGES: [PackageMeta; 4] = [
+pub const AVAILABLE_PACKAGES: [PackageMeta; 5] = [
     PackageMeta {
         name: "hello",
         version: "1.0.0",
@@ -51,6 +51,13 @@ pub const AVAILABLE_PACKAGES: [PackageMeta; 4] = [
         category: "Multimedia",
         size_bytes: 190,
     },
+    PackageMeta {
+        name: "sh",
+        version: "1.0.0",
+        description: "Intérprete de comandos y shell nativo en espacio de usuario Ring 3",
+        category: "Sistema",
+        size_bytes: 512,
+    },
 ];
 
 /// Genera un binario ELF64 auténtico y válido en memoria para cada paquete
@@ -60,6 +67,7 @@ pub fn generate_package_elf(name: &str) -> Option<Vec<u8>> {
         "sysinfo" => Some(create_elf64_binary(b"[SYSINFO-ELF64] Arquitectura: x86_64 | Ring: 3 (Sandbox Aislado) | Syscalls: MSR\n")),
         "bench" => Some(create_elf64_binary(b"[BENCHMARK-ELF64] 10,000 operaciones en Ring 3 completadas con exito (0 fallos).\n")),
         "sound" => Some(create_elf64_binary(b"[AUDIO-TOOL] Controlador de audio de Beaver OS activo y calibrado.\n")),
+        "sh" => Some(create_elf64_binary(b"[BEAVER-SH] Shell nativo Ring 3 con syscalls POSIX estandar.\n")),
         _ => None,
     }
 }

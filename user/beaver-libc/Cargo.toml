@@ -1,0 +1,8 @@
+[package]
+name = "beaver-libc"
+version = "0.1.0"
+authors = ["José Alberto Puente Maldonado <japuentem>"]
+edition = "2021"
+
+[dependencies]
+

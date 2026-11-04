@@ -299,6 +299,11 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             }
         }
 
+        "sh" | "ring3-sh" => {
+            kprintln!("[RING3] Conmutando a Shell Nativo de Usuario (Ring 3)...");
+            crate::usermode::spawn_userland_shell();
+        }
+
         "ring3" => {
             kprintln!("[RING3] Iniciando sandbox de Ring 3 via IRETQ...");
             crate::usermode::spawn_normal_user_task();

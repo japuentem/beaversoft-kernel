@@ -1,5 +1,7 @@
 [workspace]
 members = [
-    "kernel"
+    "kernel",
+    "user/beaver-libc",
+    "user/shell"
 ]
 resolver = "2"

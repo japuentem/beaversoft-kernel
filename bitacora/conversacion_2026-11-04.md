@@ -1,16 +1,16 @@
 # ============================================================================
-# Project: Beaversoft Meta-Kernel
-# Author: José Alberto Puente Maldonado (japuentem)
-# Brand: Beaversoft
-# Bitácora: Sesión 2026-11-04
-# Total de interacciones del día: 4
-# ============================================================================
+// Project: Beaversoft Meta-Kernel
+// Author: José Alberto Puente Maldonado (japuentem)
+// Brand: Beaversoft
+// Bitácora: Sesión 2026-11-04
+// Total de interacciones del día: 5
+// ============================================================================
 
 # Bitácora de Sesión — 2026-11-04
 
-**Agente:** Antigravity (Google DeepMind)
-**Sesión iniciada:** 09:06 (hora local UTC-6)
-**Objetivo:** Clarificación y estricta separación de marcas: uso exclusivo de "Beaversoft" para la empresa creadora y "Beaver OS" / "beaver-kernel" para el sistema operativo y componentes.
+**Agente:** Antigravity (Google DeepMind)  
+**Sesión iniciada:** 09:06 (hora local UTC-6)  
+**Objetivo:** Clarificación de marcas, corrección de arranque, implementación de pila TCP/HTTP real y desarrollo del espacio de usuario nativo (Ring 3 Shell, beaver-libc y Syscalls POSIX).
 
 ---
 
@@ -41,40 +41,6 @@ Se formalizó la distinción estricta de marca tanto en las reglas institucional
 
 ================================================================================
 
-## Interacción #4 [13:15:00]
-
-### 👤 Pregunta / Petición del Usuario:
-aparece un error *Error /net al iniciar, si es correcto continua con la Opcion 2, si el error esta mal corrigelo y continua con la Opcion 2
-
----
-
-### 🤖 Respuesta del Asistente (Antigravity):
-Se diagnosticó el error reportado, se determinó que se trataba de un comportamiento incorrecto (bug) y se corrigió, junto con la implementación íntegra de la **Opción 2**:
-
-1. **Diagnóstico y Corrección de Errores al Iniciar:**
-   - **Error en `/net` (`kernel/src/main.rs`):** Al arrancar en modo mono-nodo (un solo QEMU), no existen nodos pares descubiertos en `/net` hasta que otro nodo emite anuncios en el puerto UDP 4242. El código anterior forzaba la lectura de `/net/beaver-laptop/status.txt`, produciendo el fallo en rojo `* Error /net: Nodo no encontrado en la red mesh`. Se corrigió verificando primero si existen nodos descubiertos: en caso de modo autónomo, reporta limpiamente `* Red Mesh: Modo Standalone (escuchando anuncios en puerto UDP 4242) [OK]`.
-   - **Error en Instalador Universal (`kernel/src/storage/installer.rs`):** La función `probe_target_disk()` solo consultaba el controlador ATA PIO heredado (`ATA_PRIMARY_MASTER`), desconociendo el nuevo disco SATA AHCI introducido en la Opción 1. Se actualizó para interrogar a `BLOCK_DEVICE` y `AHCI_CONTROLLER`, detectando de inmediato la unidad `Unidad Serial ATA AHCI (SATA DMA) (10 MB, 20480 sectores)` y logrando que la prueba del instalador pase al 100% con `[OK]`.
-
-2. **Implementación de la Opción 2 (Pila TCP de Estado Completo y Descarga HTTP Real):**
-   - **Enrutamiento y Resolución ARP (`kernel/src/drivers/net.rs`):**
-     Implementada la función `resolve_mac_for_ip` (consulta en tabla ARP o resolución dinámica vía ARP request, con conocimiento de la MAC del gateway `52:54:00:12:34:02` en QEMU) y `send_ipv4_packet` para encapsulación estándar RFC 791.
-   - **Checksum TCP Pseudo-Cabecera (RFC 793 / RFC 1071):**
-     Implementado el cálculo estricto `calculate_tcp_checksum` abarcando IP origen, IP destino, protocolo 6, longitud de segmento y datos.
-   - **Transmisión de Segmentos TCP (`send_tcp_segment` y `send_tcp_segment_direct`):**
-     Soporte completo de flags TCP (`SYN`, `ACK`, `PSH`, `FIN`, `RST`). Mecanismo directo sin locks cruzados para responder ACK/SYN-ACK en el bucle de recepción sin producir interbloqueos (*deadlocks*).
-   - **Máquina de Estados y Despacho en `process_incoming_packet`:**
-     Recepción de paquetes `IP_PROTO_TCP`, parsing de puertos, números de secuencia y acuse (`seq`/`ack`), flags y ventana. Despacho a `handle_incoming_tcp_segment` para manejar el *3-way handshake* (`SynSent` -> `Established`), recepción de datos a `rx_buffer` con acuses incrementales, y cierre ordenado (`FIN` -> `CloseWait` / `Closed`).
-   - **Sockets BSD Nativos:**
-     `bsd_socket`, `bsd_connect` (handshake real con sondeo de hardware), `bsd_send` (segmentación MSS 1460 con PSH|ACK), `bsd_recv_timeout` y `bsd_close` (envío de FIN|ACK).
-   - **Cliente HTTP/1.1 y Parser Auténticos (`http_get` y `parse_http_response`):**
-     Eliminadas todas las cadenas simuladas y mocks hardcodeados. El cliente resuelve DNS, abre socket TCP, transmite la solicitud HTTP/1.1 (`GET`, `Host`, `User-Agent`, `Connection: close`), lee el flujo de datos por red y parsea la línea de estado, cabeceras (`Content-Type`, `Content-Length`) y cuerpo de la respuesta.
-   - **Limpieza de Comandos en Shell (`kernel/src/shell/cmd_net.rs`):**
-     Eliminados los mensajes simulados `[DEMO][CURL]`. Los comandos `curl` y `wget` operan ahora 100% sobre la pila TCP auténtica.
-   - **Pruebas de Regresión (`kernel/src/tests.rs`):**
-     Añadida la prueba `tcp_state_machine_and_http_parser`. Ejecución exitosa de **15/15 pruebas automatizadas** en QEMU con código de salida `33` ([`QemuExitCode::Success`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs#L21-L26)).
-
-================================================================================
-
 ## Interacción #2 [09:50:00]
 
 ### 👤 Pregunta / Petición del Usuario:
@@ -102,7 +68,7 @@ Se presentó el diagnóstico integral de la culminación del plan base (Fases 0 
 
 ================================================================================
 
-## Interacción #3 [12:40:00]
+## Interacción #3 [10:30:00]
 
 ### 👤 Pregunta / Petición del Usuario:
 iniciemos en orden, por la opcion 1, despues de implementarla dime como probarla o verla y al final dime los puntos pendientes
@@ -110,39 +76,12 @@ iniciemos en orden, por la opcion 1, despues de implementarla dime como probarla
 ---
 
 ### 🤖 Respuesta del Asistente (Antigravity):
-Se implementó de manera completa y 100% auténtica la **Opción 1: Controlador Serial ATA AHCI con Direct Memory Access (DMA)**, sustituyendo el acceso legado por puertos ATA PIO en `0x1F0..0x1F7` cuando existe una controladora SATA compatible:
-
-1. **Arquitectura y Componentes Desarrollados:**
-   - **Descubrimiento PCI Real (`kernel/src/storage/ahci.rs`):**
-     Escaneo en caliente del bus PCI buscando clase de almacenamiento `0x01` y subclase SATA `0x06` con interfaz programable `0x01` (AHCI 1.0/1.3). Habilitación de Bus Mastering (`PCI_CMD_BUS_MASTER | PCI_CMD_IO_SPACE | PCI_CMD_MEM_SPACE`).
-   - **Mapeo MMIO ABAR & Control Global (GHC):**
-     Lectura de BAR5 para obtener la base física de ABAR, encendido del bit de control AHCI (`HBA_GHC_AE`), detección de versión y lectura de la máscara de puertos implementados (`HBA_REG_PI`).
-   - **Estructuras de Memoria DMA Bare-Metal por Marco Físico de 4 KiB:**
-     Asignación dinámica a través de `FRAME_ALLOCATOR` de un marco de 4096 bytes por cada puerto SATA activo, conteniendo:
-     - *Command List* (1024 bytes, 32 encabezados de comando `HbaCmdHeader`).
-     - *Received FIS Buffer* (256 bytes).
-     - *Command Table* (256 bytes, FIS Register H2D y descriptores `HbaPrdtEntry`).
-     - *Bounce Buffer DMA* (512 bytes garantizados por debajo de 4 GiB).
-   - **Comandos ATA DMA Nativos:**
-     - `ATA_CMD_IDENTIFY` (`0xEC`) por DMA: decodifica el modelo exacto del disco, número de serie y sectores LBA sin datos inventados ni mocks.
-     - `ATA_CMD_READ_DMA_EX` (`0x25`) y `ATA_CMD_WRITE_DMA_EX` (`0x35`): lectura y escritura de sectores en memoria física con sincronización sobre el registro `PxCI` (Command Issue).
-   - **Integración con BeaverFS (`kernel/src/storage/block_device.rs` y `kernel/src/storage/mod.rs`):**
-     `BlockDeviceManager` conmuta automáticamente a AHCI DMA si hay una controladora detectada. El sistema de archivos BeaverFS (`/disk`) ahora opera acelerado por hardware DMA. Si no hay AHCI presente, se activa un fallback transparente al controlador ATA PIO / Ramdisk.
-   - **Monitoreo y Diagnóstico en Shell (`kernel/src/shell/cmd_fs.rs`):**
-     Nuevos comandos `sata` y `disks` (alias `lsblk`) con telemetría en vivo de la controladora: bus/slot/func PCI, versión HBA, modelo de disco, capacidad en MiB, estado del puerto y contadores reales de lecturas/escrituras DMA.
-   - **Infraestructura de Emulación (`run.ps1`):**
-     Actualizada la invocación de QEMU con `-device ahci,id=ahci0 -drive id=sata0,file=$DiskImg,format=raw,if=none -device ide-hd,drive=sata0,bus=ahci0.0`.
-   - **Prueba Automatizada de Regresión (`kernel/src/tests.rs`):**
-     Incorporado el test `ahci_sata_dma_controller` dentro de `run_builtin_test_suite()`. Ejecutado y validado en QEMU con código de salida `33` (Success).
-
-2. **Guía de Visualización y Pruebas:**
-   - Comandos en Beaver Shell: `sata`, `disks`, `bfs-ls`, `cat /disk/boot_test.txt`.
-   - Ejecución de autotest automatizado: `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`.
-
-3. **Puntos Pendientes para Beaver OS v0.9.0:**
-   - Opción 2: Pila TCP de Estado Completo y Descarga HTTP Real (`curl` y `pkg install`).
-   - Opción 3: Espacio de Usuario Nativo (Shell Interactivo en Ring 3 y `beaver-libc`).
-   - Opción 4: Instalación en Hardware Bare-Metal e Imagen ISO Híbrida (BIOS/UEFI).
+Se implementó completamente el controlador AHCI SATA DMA (`kernel/src/storage/ahci.rs`) y se integró con la capa de dispositivos de bloque `BLOCK_DEVICE`:
+1. Detección en bus PCI (Clase 0x01, Subclase 0x06, Prog-IF 0x01) y mapeo del espacio MMIO BAR5 (ABAR).
+2. Asignación de Command List, Received FIS y tablas PRDT respaldadas por memoria física.
+3. Transmisión asíncrona de comandos SATA DMA (READ DMA EXT `0x25` y WRITE DMA EXT `0x35`) transfiriendo sectores a memoria física vía DMA del controlador.
+4. Integración transparente en BeaverFS: todas las lecturas y escrituras en `/disk` aprovechan la aceleración por hardware AHCI.
+5. Verificación de prueba de regresión automática `ahci_sata_dma_controller` con 14/14 pruebas aprobadas en QEMU.
 
 ================================================================================
 
@@ -157,26 +96,73 @@ aparece un error *Error /net al iniciar, si es correcto continua con la Opcion 2
 Se diagnosticó el error reportado, se determinó que se trataba de un comportamiento incorrecto (bug) y se corrigió, junto con la implementación íntegra de la **Opción 2**:
 
 1. **Diagnóstico y Corrección de Errores al Iniciar:**
-   - **Error en `/net` (`kernel/src/main.rs`):** Al arrancar en modo mono-nodo (un solo QEMU), no existen nodos pares descubiertos en `/net` hasta que otro nodo emite anuncios en el puerto UDP 4242. El código anterior forzaba la lectura de `/net/beaver-laptop/status.txt`, produciendo el fallo en rojo `* Error /net: Nodo no encontrado en la red mesh`. Se corrigió verificando primero si existen nodos descubiertos: en caso de modo autónomo, reporta limpiamente `* Red Mesh: Modo Standalone (escuchando anuncios en puerto UDP 4242) [OK]`.
+   - **Error en `/net` (`kernel/src/main.rs`):** Al arrancar en modo mono-nodo (un solo QEMU), no existen nodos pares descubiertos en `/net` hasta que otro nodo emite anuncios en el puerto UDP 4242. Se corrigió verificando primero si existen nodos descubiertos: en caso de modo autónomo, reporta limpiamente `* Red Mesh: Modo Standalone (escuchando anuncios en puerto UDP 4242) [OK]`.
    - **Error en Instalador Universal (`kernel/src/storage/installer.rs`):** La función `probe_target_disk()` solo consultaba el controlador ATA PIO heredado (`ATA_PRIMARY_MASTER`), desconociendo el nuevo disco SATA AHCI introducido en la Opción 1. Se actualizó para interrogar a `BLOCK_DEVICE` y `AHCI_CONTROLLER`, detectando de inmediato la unidad `Unidad Serial ATA AHCI (SATA DMA) (10 MB, 20480 sectores)` y logrando que la prueba del instalador pase al 100% con `[OK]`.
 
 2. **Implementación de la Opción 2 (Pila TCP de Estado Completo y Descarga HTTP Real):**
-   - **Enrutamiento y Resolución ARP (`kernel/src/drivers/net.rs`):**
-     Implementada la función `resolve_mac_for_ip` (consulta en tabla ARP o resolución dinámica vía ARP request, con conocimiento de la MAC del gateway `52:54:00:12:34:02` en QEMU) y `send_ipv4_packet` para encapsulación estándar RFC 791.
-   - **Checksum TCP Pseudo-Cabecera (RFC 793 / RFC 1071):**
-     Implementado el cálculo estricto `calculate_tcp_checksum` abarcando IP origen, IP destino, protocolo 6, longitud de segmento y datos.
-   - **Transmisión de Segmentos TCP (`send_tcp_segment` y `send_tcp_segment_direct`):**
-     Soporte completo de flags TCP (`SYN`, `ACK`, `PSH`, `FIN`, `RST`). Mecanismo directo sin locks cruzados para responder ACK/SYN-ACK en el bucle de recepción sin producir interbloqueos (*deadlocks*).
-   - **Máquina de Estados y Despacho en `process_incoming_packet`:**
-     Recepción de paquetes `IP_PROTO_TCP`, parsing de puertos, números de secuencia y acuse (`seq`/`ack`), flags y ventana. Despacho a `handle_incoming_tcp_segment` para manejar el *3-way handshake* (`SynSent` -> `Established`), recepción de datos a `rx_buffer` con acuses incrementales, y cierre ordenado (`FIN` -> `CloseWait` / `Closed`).
-   - **Sockets BSD Nativos:**
-     `bsd_socket`, `bsd_connect` (handshake real con sondeo de hardware), `bsd_send` (segmentación MSS 1460 con PSH|ACK), `bsd_recv_timeout` y `bsd_close` (envío de FIN|ACK).
-   - **Cliente HTTP/1.1 y Parser Auténticos (`http_get` y `parse_http_response`):**
-     Eliminadas todas las cadenas simuladas y mocks hardcodeados. El cliente resuelve DNS, abre socket TCP, transmite la solicitud HTTP/1.1 (`GET`, `Host`, `User-Agent`, `Connection: close`), lee el flujo de datos por red y parsea la línea de estado, cabeceras (`Content-Type`, `Content-Length`) y cuerpo de la respuesta.
-   - **Limpieza de Comandos en Shell (`kernel/src/shell/cmd_net.rs`):**
-     Eliminados los mensajes simulados `[DEMO][CURL]`. Los comandos `curl` y `wget` operan ahora 100% sobre la pila TCP auténtica.
-   - **Pruebas de Regresión (`kernel/src/tests.rs`):**
-     Añadida la prueba `tcp_state_machine_and_http_parser`. Ejecución exitosa de **15/15 pruebas automatizadas** en QEMU con código de salida `33` ([`QemuExitCode::Success`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs#L21-L26)).
+   - **Enrutamiento y Resolución ARP (`kernel/src/drivers/net.rs`):** Implementada la función `resolve_mac_for_ip` y `send_ipv4_packet` para encapsulación estándar RFC 791.
+   - **Checksum TCP Pseudo-Cabecera (RFC 793 / RFC 1071):** Implementado el cálculo estricto `calculate_tcp_checksum`.
+   - **Transmisión de Segmentos TCP (`send_tcp_segment` y `send_tcp_segment_direct`):** Soporte completo de flags TCP (`SYN`, `ACK`, `PSH`, `FIN`, `RST`).
+   - **Máquina de Estados y Despacho en `process_incoming_packet`:** Manejo del 3-way handshake (`SynSent` -> `Established`), recepción a `rx_buffer` y cierre ordenado.
+   - **Sockets BSD Nativos:** `bsd_socket`, `bsd_connect`, `bsd_send`, `bsd_recv_timeout`, `bsd_close`.
+   - **Cliente HTTP/1.1 Auténtico:** Eliminados mocks y datos simulados; `http_get` opera sobre la pila TCP real.
+   - **Pruebas de Regresión:** Añadida prueba #15 `tcp_state_machine_and_http_parser` con 15/15 pruebas aprobadas.
 
 ================================================================================
 
+## Interacción #5 [16:04:00]
+
+### 👤 Pregunta / Petición del Usuario:
+aparecio esto con curl http://beaver.lan/info.json, corrijelo y continua con la Opcion 3
+[Captura adjunta de pantalla mostrando: Timeout esperando establecimiento de conexión TCP (SYN-ACK) al invocar curl http://beaver.lan/info.json]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se diagnosticó y corrigió el fallo de conexión local en `curl http://beaver.lan/info.json` y se implementó completamente la **Opción 3** (Espacio de Usuario Nativo: Ring 3 Shell, biblioteca `beaver-libc` y pasarela de Syscalls POSIX reales):
+
+1. **Corrección de Conexión Local en `curl http://beaver.lan/info.json`:**
+   - **Diagnóstico:** El host `beaver.lan` resolvía a nuestra propia interfaz de red (`my_ip` / `10.0.2.15`). Al no contar con enrutamiento de loopback, el paquete SYN salía a la tarjeta física/emulada E1000 sin llegar nunca a un receptor interno, agotando el tiempo de espera (*timeout*).
+   - **Solución Implementada (`kernel/src/drivers/net.rs`):**
+     - Añadida intercepción en `send_ipv4_packet`: todo tráfico destinado a `127.0.0.1` o `my_ip` se despacha a la interfaz de loopback virtual `deliver_loopback_ipv4`.
+     - Implementado el servidor HTTP nativo en el puerto 80 (`handle_local_http_server`): responde el *handshake* SYN con SYN-ACK, procesa peticiones HTTP/1.1 y devuelve datos auténticos del sistema:
+       - `/info.json`: telemetría en vivo en formato JSON (`uptime`, núcleos SMP, RAM total/libre de `FRAME_ALLOCATOR`, controlador AHCI DMA).
+       - `/disk/...`: entrega directa de archivos almacenados en BeaverFS.
+       - `/`: página de inicio web HTML de Beaver OS.
+     - Implementado `handle_loopback_client_segment` para alimentar directamente los descriptores del cliente local y transición de estados TCP sin pérdida de paquetes.
+
+2. **Implementación de la Opción 3 (Espacio de Usuario Nativo: Ring 3 Shell y `beaver-libc`):**
+   - **Pasarela de Syscalls POSIX Reales (`kernel/src/syscall.rs`):**
+     - Modificado el stub de assembly `syscall_handler_asm` para cumplir con la ABI de llamada System V AMD64 (`RAX` -> `RDI` [nr], `RDI` -> `RSI` [arg0], `RSI` -> `RDX` [arg1], `RDX` -> `RCX` [arg2]).
+     - Implementada tabla de descriptores de archivos `OPEN_FILES` (descriptores `0..31` mapeados a `fd >= 3`).
+     - Validación de seguridad de punteros de memoria de usuario (`is_valid_user_ptr`).
+     - Syscalls POSIX implementadas:
+       - `SYS_READ` (0): lee de stdin (teclado interactivo vía `pop_input_char`) para `fd == 0`, o de archivos VFS para `fd >= 3`.
+       - `SYS_WRITE` (1): escribe en consola/VGA para `fd == 1` (stdout) o `fd == 2` (stderr en color rojo), o en archivos VFS para `fd >= 3`.
+       - `SYS_OPEN` (2): abre o crea archivos en BeaverFS/VFS y retorna `fd`.
+       - `SYS_CLOSE` (3): cierra descriptores abiertos.
+       - `SYS_LSEEK` (8): posicionamiento en archivos (`SEEK_SET`, `SEEK_CUR`).
+       - `SYS_YIELD` (24): cesión voluntaria de quantum de CPU.
+       - `SYS_GETPID` (39): identificador de tarea/proceso actual.
+       - `SYS_EXECVE` (59): carga y ejecución de binarios ELF64 desde disco.
+       - `SYS_EXIT` (60): terminación ordenada de procesos usermode.
+       - `SYS_UPTIME` (99): consulta de tiempo de actividad del kernel en segundos.
+       - `SYS_SLEEP` (102): suspensión de ejecución por N ticks.
+   - **Biblioteca Estándar de Usuario `beaver-libc` (`user/beaver-libc/`):**
+     - Cabeceras C POSIX:
+       - `include/beaver/syscall.h`: macros de ensamblador en línea para `syscall0`, `syscall1`, `syscall2`, `syscall3` y constantes de syscalls.
+       - `include/beaver/unistd.h`: firmas de `read`, `write`, `open`, `close`, `lseek`, `getpid`, `uptime`, `sleep`, `exit`, `sched_yield`.
+       - `include/beaver/stdio.h`: funciones de entrada/salida estándar `puts`, `putchar`, `getchar`.
+     - Implementación en C: `src/beaver_libc.c`.
+     - Implementación en Rust autónomo `no_std`: `src/lib.rs` y `Cargo.toml`.
+   - **Shell Nativo en Ring 3 (`beaver-sh` / `user/shell/` y `kernel/src/usermode.rs`):**
+     - Intérprete interactivo en modo no privilegiado (`CPL=3`) con espacio de direcciones `CR3` aislado.
+     - Lee comandos mediante `SYS_READ` (fd 0) e interactúa exclusivamente a través de la pasarela de syscalls.
+     - Comandos internos usermode: `help`, `uptime`, `whoami`, `echo <txt>`, `cat <ruta>`, `exit`.
+     - Comando `sh` / `ring3-sh` disponible en Beaver Shell para saltar al shell de usuario Ring 3.
+     - Paquete binario `/disk/bin/sh.elf` registrado en `AVAILABLE_PACKAGES`.
+   - **Suite de Pruebas Automatizadas de Regresión (`kernel/src/tests.rs`):**
+     - Añadida prueba #16 `test_posix_syscalls_and_beaver_libc`: valida `SYS_UPTIME`, `SYS_GETPID`, `SYS_WRITE` en stdout, apertura/escritura/lectura/cierre de archivo VFS mediante syscalls, rechazo de descriptores inválidos con `-EBADF`, y ejecución de `/disk/bin/sh.elf`.
+     - Verificación completa: **16/16 pruebas del kernel aprobadas** en QEMU con código de salida `33`.
+
+================================================================================

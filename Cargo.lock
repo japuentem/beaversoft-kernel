@@ -5,3 +5,14 @@ version = 4
 [[package]]
 name = "beaver-kernel"
 version = "0.1.0"
+
+[[package]]
+name = "beaver-libc"
+version = "0.1.0"
+
+[[package]]
+name = "beaver-sh"
+version = "0.1.0"
+dependencies = [
+ "beaver-libc",
+]

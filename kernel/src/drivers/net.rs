@@ -355,6 +355,13 @@ static IP_PACKET_ID: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU
 /// Encapsula una carga útil dentro de una cabecera IPv4 estándar (RFC 791) y la envía por Ethernet
 pub fn send_ipv4_packet(dest_ip: Ipv4Addr, proto: u8, payload: &[u8]) {
     let my_ip = NET_INTERFACE.lock().ip_address;
+
+    // Si el destino es loopback (127.0.0.1) o nuestra propia IP local, enrutar directamente por loopback
+    if dest_ip.0 == [127, 0, 0, 1] || dest_ip.0 == my_ip.0 {
+        deliver_loopback_ipv4(my_ip, dest_ip, proto, payload);
+        return;
+    }
+
     let total_len = (20 + payload.len()) as u16;
     let mut ip_hdr = Vec::with_capacity(20 + payload.len());
     ip_hdr.push(0x45); // Version 4, IHL 5 (20 bytes)
@@ -1088,6 +1095,158 @@ pub static SOCKET_TABLE: SpinLock<[Option<BsdSocket>; 16]> = SpinLock::new([
     None, None, None, None, None, None, None, None,
 ]);
 
+/// Entrega interna de datagramas IPv4 a través de la interfaz de loopback virtual
+pub fn deliver_loopback_ipv4(src_ip: Ipv4Addr, dst_ip: Ipv4Addr, proto: u8, payload: &[u8]) {
+    if proto == IP_PROTO_TCP && payload.len() >= 20 {
+        let src_port = u16::from_be_bytes([payload[0], payload[1]]);
+        let dst_port = u16::from_be_bytes([payload[2], payload[3]]);
+        let seq_num  = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+        let ack_num  = u32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
+        let data_offset = ((payload[12] >> 4) as usize) * 4;
+        let flags = payload[13];
+        let window = u16::from_be_bytes([payload[14], payload[15]]);
+        let seg_payload = if payload.len() > data_offset {
+            &payload[data_offset..]
+        } else {
+            &[]
+        };
+
+        if dst_port == 80 {
+            handle_local_http_server(src_ip, src_port, seq_num, ack_num, flags, seg_payload);
+            return;
+        }
+
+        handle_loopback_client_segment(src_ip, dst_ip, src_port, dst_port, seq_num, ack_num, flags, window, seg_payload);
+    }
+}
+
+/// Servidor HTTP/1.1 nativo del kernel de Beaver OS en el puerto 80 (telemetría y archivos)
+pub fn handle_local_http_server(
+    client_ip: Ipv4Addr,
+    client_port: u16,
+    client_seq: u32,
+    _client_ack: u32,
+    flags: u8,
+    payload: &[u8],
+) {
+    let my_ip = NET_INTERFACE.lock().ip_address;
+
+    // 1. Handshake SYN: responder SYN | ACK
+    if (flags & TCP_FLAG_SYN) != 0 {
+        let server_seq = 50_000_u32;
+        let server_ack = client_seq.wrapping_add(1);
+        send_tcp_segment(
+            my_ip, client_ip, 80, client_port,
+            server_seq, server_ack,
+            TCP_FLAG_SYN | TCP_FLAG_ACK, 64240, &[]
+        );
+        return;
+    }
+
+    // 2. Recepción de petición HTTP
+    if (flags & TCP_FLAG_PSH) != 0 && !payload.is_empty() {
+        let req_str = match core::str::from_utf8(payload) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        let mut lines = req_str.lines();
+        let request_line = lines.next().unwrap_or("");
+        let mut parts = request_line.split_whitespace();
+        let _method = parts.next().unwrap_or("GET");
+        let path = parts.next().unwrap_or("/");
+
+        let (status, content_type, body_data) = if path == "/info.json" {
+            let uptime = crate::drivers::timer::get_uptime_seconds();
+            let cores = crate::apic::SMP.lock().cores.len().max(1);
+            let total_frames = crate::memory::frame_allocator::FRAME_ALLOCATOR.total_usable_frames();
+            let free_frames = crate::memory::frame_allocator::FRAME_ALLOCATOR.free_frames_count();
+            let total_ram_mb = (total_frames * 4) / 1024;
+            let free_ram_mb = (free_frames * 4) / 1024;
+            let ahci_dma = crate::storage::block_device::BLOCK_DEVICE.lock().is_using_ahci();
+
+            let json = alloc::format!(
+                "{{\n  \"os\": \"Beaver OS\",\n  \"version\": \"0.9.0\",\n  \"brand\": \"Beaversoft\",\n  \"author\": \"José Alberto Puente Maldonado (japuentem)\",\n  \"arch\": \"x86_64\",\n  \"uptime_secs\": {},\n  \"smp_cores\": {},\n  \"ram_total_mb\": {},\n  \"ram_free_mb\": {},\n  \"storage_dma\": {}\n}}\n",
+                uptime, cores, total_ram_mb, free_ram_mb, ahci_dma
+            );
+            ("200 OK", "application/json", json.into_bytes())
+        } else if path.starts_with("/disk/") {
+            let vfs = crate::fs::vfs::VFS.lock();
+            match vfs.read_file_bytes(path, 0, 0) {
+                Ok(bytes) => ("200 OK", "text/plain", bytes),
+                Err(_) => ("404 Not Found", "text/plain", alloc::format!("Error 404: Archivo '{}' no encontrado en BeaverFS\n", path).into_bytes()),
+            }
+        } else {
+            let html = alloc::format!(
+                "<!DOCTYPE html>\n<html>\n<head><title>Beaver OS Web Server</title></head>\n<body>\n<h1>Bienvenido a Beaver OS v0.9.0</h1>\n<p>Servidor HTTP nativo en Ring 0 / x86_64 Long Mode.</p>\n<p>Prueba consultar <a href=\"/info.json\">/info.json</a> para telemetria en vivo.</p>\n</body>\n</html>\n"
+            );
+            ("200 OK", "text/html", html.into_bytes())
+        };
+
+        let resp_header = alloc::format!(
+            "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nServer: BeaverOS-Kernel-HTTP/0.9.0\r\n\r\n",
+            status, content_type, body_data.len()
+        );
+
+        let mut full_resp = resp_header.into_bytes();
+        full_resp.extend_from_slice(&body_data);
+
+        let server_seq = 50_001_u32;
+        let server_ack = client_seq.wrapping_add(payload.len() as u32);
+
+        send_tcp_segment(
+            my_ip, client_ip, 80, client_port,
+            server_seq, server_ack,
+            TCP_FLAG_PSH | TCP_FLAG_ACK | TCP_FLAG_FIN, 64240, &full_resp
+        );
+    }
+}
+
+/// Actualiza el estado del socket cliente local al recibir segmentos por loopback
+pub fn handle_loopback_client_segment(
+    _src_ip: Ipv4Addr,
+    _dst_ip: Ipv4Addr,
+    _src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    _window: u16,
+    payload: &[u8],
+) {
+    let mut table = SOCKET_TABLE.lock();
+    for slot in table.iter_mut() {
+        if let Some(ref mut sock) = slot {
+            if sock.local_port == dst_port {
+                match sock.state {
+                    SocketState::SynSent => {
+                        if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
+                            sock.ack_num = seq.wrapping_add(1);
+                            sock.seq_num = ack;
+                            sock.state = SocketState::Established;
+                            return;
+                        } else if (flags & TCP_FLAG_RST) != 0 {
+                            sock.state = SocketState::Closed;
+                            return;
+                        }
+                    }
+                    SocketState::Established => {
+                        if !payload.is_empty() {
+                            sock.rx_buffer.extend_from_slice(payload);
+                            sock.ack_num = seq.wrapping_add(payload.len() as u32);
+                        }
+                        if (flags & TCP_FLAG_FIN) != 0 {
+                            sock.state = SocketState::CloseWait;
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 /// Procesa segmentos TCP entrantes en el contexto de interrupción de red
 pub fn handle_incoming_tcp_segment(
     net: &mut NetworkInterface,
@@ -1102,6 +1261,11 @@ pub fn handle_incoming_tcp_segment(
     _window: u16,
     payload: &[u8],
 ) {
+    if dst_port == 80 {
+        handle_local_http_server(src_ip, src_port, seq, ack, flags, payload);
+        return;
+    }
+
     let mut table = SOCKET_TABLE.lock();
     for slot in table.iter_mut() {
         if let Some(ref mut sock) = slot {

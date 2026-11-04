@@ -394,6 +394,14 @@ pub fn push_input_char(ch: char) {
     }
 }
 
+pub fn pop_input_char() -> Option<char> {
+    if let Some(mut q) = INPUT_QUEUE.try_lock() {
+        q.pop()
+    } else {
+        None
+    }
+}
+
 pub fn has_pending_input() -> bool {
     if let Some(q) = INPUT_QUEUE.try_lock() {
         !q.is_empty()
