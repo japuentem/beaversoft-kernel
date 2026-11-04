@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 16
+# Total de interacciones del día: 17
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -534,5 +534,21 @@ Se implementaron en su totalidad y verificaron en QEMU los tres puntos requerido
    - Añadidas 3 nuevas pruebas unitarias: `test_spotlight_live_search`, `test_real_udp_dhcp_dns` y `test_smp_distributed_scheduler`, elevando la suite oficial a **13 pruebas automatizadas**.
    - Compilación exitosa en modo release (`x86_64-unknown-none`) con 0 advertencias y 0 errores.
    - Ejecución de `run.ps1 -Test`: las 13 pruebas pasaron exitosamente (`[SUITE OK]`) y QEMU finalizó con código `33` (`QemuExitCode::Success`).
+
+================================================================================
+
+## Interacción #17 [23:21:00]
+
+### 👤 Pregunta / Petición del Usuario:
+los cambios implementados hoy se pueden probar y visualizar?
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se detalló al usuario la guía completa paso a paso para probar y visualizar todos los avances del día en modo interactivo en QEMU y mediante la suite automatizada:
+1. **Visualización Gráfica de Spotlight:** Lanzar QEMU interactivo (`powershell -ExecutionPolicy Bypass -File run.ps1 -Uefi`), ejecutar `gui` para abrir el escritorio VESA TrueColor y pulsar el ícono de la lupa (Spotlight). Visualización del overlay con cursor interactivo `|`, escritura en vivo desde el teclado PS/2, filtrado simultáneo de aplicaciones y archivos de `/disk`, y selección con flechas (`Up`/`Down`) y `Enter`.
+2. **Topología SMP y Despacho Distribuido en APs:** Comandos `smp`/`cores` para visualizar los 4 núcleos en línea tras el trampolín `INIT-SIPI-SIPI`, la tarea en ejecución en cada core y las tareas ejecutadas concurrentemente. Comando `tasks` para visualizar la columna `Núcleo`.
+3. **Protocolos Reales DHCP y DNS sobre UDP:** Comandos `net`, `dhcp` y `dns google.com` para observar el intercambio de tramas por la tarjeta de red Intel PRO/1000 real con el servidor de QEMU.
+4. **Verificación Automatizada:** Ejecución de `.\run.ps1 -Test` para verificar las 13 pruebas de la suite oficial con reporte visual y código de salida 33.
 
 ================================================================================
