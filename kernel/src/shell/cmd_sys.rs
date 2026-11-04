@@ -448,9 +448,17 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             for core in &smp.cores {
                 let role = if core.is_bsp { "[BSP Master]" } else { "[AP Worker]" };
                 let status = if core.is_online { "ONLINE" } else { "OFFLINE" };
+                let active_task_str = {
+                    let sched = crate::task::scheduler::SCHEDULER.lock();
+                    let tid = sched.get_core_task(core.apic_id as usize);
+                    match tid {
+                        Some(id) => alloc::format!("TID #{}", id),
+                        None => alloc::string::String::from("Idle"),
+                    }
+                };
                 kprintln!(
-                    "  Core #{} (APIC ID #{}): {:<14} | Estado: {:<7} | Stack: {:#010x}",
-                    core.core_id, core.apic_id, role, status, core.stack_top
+                    "  Core #{} (APIC ID #{}): {:<14} | Estado: {:<7} | Tarea: {:<7} | Ejecutadas: {}",
+                    core.core_id, core.apic_id, role, status, active_task_str, core.tasks_executed
                 );
             }
             kprintln!("=============================================================");

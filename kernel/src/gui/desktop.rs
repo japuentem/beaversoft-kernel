@@ -477,11 +477,79 @@ pub fn handle_gui_char(ch: char) {
         return;
     }
 
-    let (is_desktop, is_note_active) = {
+    let (is_desktop, is_spot_open, is_note_active) = {
         let is_desk = GUI_TERMINAL.lock().mode == GuiViewMode::Desktop;
+        let is_spot = SPOTLIGHT.lock().is_open;
         let is_note = WINDOW_MGR.lock().is_active(WindowId::Note);
-        (is_desk, is_note)
+        (is_desk, is_spot, is_note)
     };
+
+    if is_desktop && is_spot_open {
+        match ch {
+            '\x1B' => {
+                // ESC: Cierra Spotlight
+                SPOTLIGHT.lock().is_open = false;
+                render_desktop();
+            }
+            '\n' => {
+                let target_opt = {
+                    let mut spot = SPOTLIGHT.lock();
+                    let results = get_spotlight_results(&spot.query);
+                    if !results.is_empty() {
+                        let idx = spot.selected_idx.min(results.len() - 1);
+                        spot.is_open = false;
+                        Some(results[idx].target)
+                    } else {
+                        spot.is_open = false;
+                        None
+                    }
+                };
+                if let Some(target) = target_opt {
+                    crate::drivers::audio::click_feedback();
+                    if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                        mgr.unminimize_and_focus(target);
+                    }
+                }
+                render_desktop();
+            }
+            '\x08' => {
+                // Backspace en búsqueda Spotlight
+                let mut spot = SPOTLIGHT.lock();
+                spot.query.pop();
+                spot.selected_idx = 0;
+                drop(spot);
+                render_desktop();
+            }
+            crate::drivers::keyboard::KEY_UP_ARROW => {
+                let mut spot = SPOTLIGHT.lock();
+                if spot.selected_idx > 0 {
+                    spot.selected_idx -= 1;
+                }
+                drop(spot);
+                render_desktop();
+            }
+            crate::drivers::keyboard::KEY_DOWN_ARROW => {
+                let mut spot = SPOTLIGHT.lock();
+                let count = get_spotlight_results(&spot.query).len();
+                if count > 0 && spot.selected_idx + 1 < count {
+                    spot.selected_idx += 1;
+                }
+                drop(spot);
+                render_desktop();
+            }
+            c if c >= ' ' && c <= '~' => {
+                let mut spot = SPOTLIGHT.lock();
+                if spot.query.len() < 36 {
+                    spot.query.push(c);
+                    spot.selected_idx = 0;
+                }
+                drop(spot);
+                render_desktop();
+            }
+            _ => {}
+        }
+        return;
+    }
 
     if is_desktop && is_note_active {
         match ch {
@@ -752,24 +820,32 @@ fn handle_desktop_click(mx: usize, my: usize) {
             let modal_y = 120;
 
             if mx >= modal_x && mx <= modal_x + modal_w && my >= modal_y && my <= modal_y + modal_h {
-                for i in 0..4 {
-                    let ry = modal_y + 66 + i * 40;
-                    if my >= ry && my <= ry + 34 {
-                        crate::drivers::audio::click_feedback();
-                        let target_win = match i {
-                            0 => WindowId::Photos,
-                            1 => WindowId::Calendar,
-                            2 => WindowId::Files,
-                            3 => WindowId::Sync,
-                            _ => WindowId::Files,
-                        };
-                        SPOTLIGHT.lock().is_open = false;
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(target_win);
+                let target_opt = {
+                    let spot = SPOTLIGHT.lock();
+                    let results = get_spotlight_results(&spot.query);
+                    let mut found = None;
+                    for (i, res) in results.iter().enumerate().take(4) {
+                        let ry = modal_y + 66 + i * 40;
+                        if my >= ry && my <= ry + 34 {
+                            found = Some(res.target);
+                            break;
                         }
-                        render_desktop();
-                        return;
                     }
+                    found
+                };
+
+                if let Some(target_win) = target_opt {
+                    crate::drivers::audio::click_feedback();
+                    SPOTLIGHT.lock().is_open = false;
+                    if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                        mgr.unminimize_and_focus(target_win);
+                    }
+                    render_desktop();
+                    return;
+                }
+                // Si hizo clic dentro de la caja de texto, mantener Spotlight abierto
+                if my >= modal_y + 14 && my <= modal_y + 50 {
+                    return;
                 }
                 return;
             } else {

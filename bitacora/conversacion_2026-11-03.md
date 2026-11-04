@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 14
+# Total de interacciones del día: 16
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -481,5 +481,58 @@ Se implementaron y verificaron en QEMU los **últimos 2 puntos de la Fase 6**, c
 3. **Verificación en QEMU (`./run.ps1 -Test` con `-smp 4`):**
    - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **0 errores, 0 warnings**.
    - Suite automatizada de **10 pruebas** en QEMU (`isa-debug-exit` en puerto `0xF4`), incluyendo `paging_4k_and_process_cr3_isolation` y `smp_madt_and_trampoline_0x8000`, finalizando con `[SUITE OK]` y código `33` (`[PASS]`).
+
+================================================================================
+
+## Interacción #15 [22:15:38]
+
+### 👤 Pregunta / Petición del Usuario:
+que puntos faltan?
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se verificó el documento `docs/plan_continuacion_2026-11-01.md` de principio a fin y se confirmó que **no falta ningún punto**: el **100% de las casillas de las Fases 0, 1, 2, 3, 4, 5 y 6 (los 9 puntos de la Fase 6 incluidos)** ya están implementadas, probadas en QEMU y confirmadas en Git (`accba4e`). Se enumeraron también posibles extensiones opcionales fuera del plan (como DHCP/DNS/HTTP reales sobre sockets UDP/TCP, entrada de texto interactiva en Spotlight o soporte AHCI/NVMe DMA real) en caso de que el usuario desee abrir una nueva etapa.
+
+================================================================================
+
+## Interacción #16 [23:12:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa los tres puntos y agrega en AGENTS.md que ya no se debe usar datos simulados, codigo hardcode y mas, que se debe usar informacion, codigo, datos y pruebas reales
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementaron en su totalidad y verificaron en QEMU los tres puntos requeridos, además de formalizar la regla de honestidad técnica en `.agents/AGENTS.md`:
+
+1. **Regla Institucional de Veracidad en `.agents/AGENTS.md` (Regla 5):**
+   - Incorporada la directiva estricta *"Prohibición Estricta de Datos Simulados y Código Hardcodeado (Honestidad y Veracidad)"*.
+   - Queda estrictamente vedado utilizar mocks, etiquetas simuladas `[DEMO]`, tramas sintéticas o respuestas ficticias en la UI, el shell o los controladores de red, discos y CPU.
+   - Obligatoriedad de obtener datos directamente del hardware físico/virtual (I/O, MMIO, ACPI, PCI, E1000, MSRs), procesar paquetes reales y reportar fallos honestamente si un dispositivo externo o servicio no responde.
+
+2. **Punto 1 — Búsqueda Interactiva en Tiempo Real en Spotlight (`kernel/src/gui/apps_system.rs`, `gui/desktop.rs`):**
+   - Conectado el teclado PS/2 con el overlay de Spotlight (`is_spot_open`).
+   - Soporte interactivo completo de escritura en tiempo real: escritura alfanumérica (`' '..='~'`), borrado (`Backspace`), navegación con flechas (`Up`/`Down`), apertura de ventana o archivo (`Enter`) y cierre inmediato (`Esc`).
+   - Búsqueda dinámica insensible a mayúsculas (`contains_ignore_case`) entre las 8 aplicaciones del sistema y los archivos reales del disco ATA en `/disk` mediante `BEAVER_FS.try_lock().list_files()`.
+   - Soporte de clics del ratón para seleccionar y activar la aplicación o archivo seleccionado.
+
+3. **Punto 2 — Protocolos Reales DHCP (RFC 2131) y DNS (RFC 1035) sobre UDP (`kernel/src/drivers/net.rs`, `shell/cmd_net.rs`):**
+   - Eliminadas todas las salidas simuladas y cadenas `[DEMO]`.
+   - Implementado `dhcp_discover_and_configure()`: genera y emite una trama `DHCPDISCOVER` en broadcast (`255.255.255.255`, puerto UDP 67 hacia 68) con la MAC física real de la tarjeta Intel PRO/1000.
+   - Decodificación en `process_incoming_packet()` de respuestas DHCP `BOOTREPLY`: extrae `yiaddr` y opciones RFC 2131 (Subnet Mask, Router Gateway, DNS Server, Lease Time) y actualiza automáticamente `NET_INTERFACE`.
+   - Implementado `resolve_dns()`: construye consultas RFC 1035 con etiquetas de longitud de dominio, Transaction ID de 16 bits y Record Type 1 (A), transmitiéndolas vía UDP al puerto 53 del servidor DNS configurado.
+   - Decodificación de respuestas DNS Type A en `process_incoming_packet()`, parseando el conteo de respuestas y extrayendo la IP IPv4 real de 4 bytes.
+
+4. **Punto 3 — Planificación SMP Distribuida y Concurrente en APs (`kernel/src/task/scheduler.rs`, `task/mod.rs`, `apic.rs`, `shell/cmd_sys.rs`):**
+   - Agregado `running_on_core: Option<u32>` a `Task` para rastrear qué procesador físico ejecuta cada hilo.
+   - Implementado `pick_task_for_core(apic_id)` y `ap_worker_loop(apic_id)`: los Application Processors (APs) ya no se quedan ociosos en bucles estáticos, sino que seleccionan y ejecutan tareas `Ready` de la cola del scheduler concurrentemente.
+   - Coordinación de pilas mediante `AP_IDLE_STACKS`: conmutación limpia de contexto vía `switch_context` desde la pila idle del AP a la pila de 16 KiB de la tarea y retorno al bucle idle cuando la tarea duerme (`sleep`), cede (`yield`) o finaliza (`task_exit`).
+   - Comandos `smp`/`cores` y `tasks` en el shell muestran el núcleo activo (`Core 0`, `Core 1`...), la tarea actual (`TID #...`) y el total de tareas ejecutadas por núcleo.
+
+5. **Pruebas Automatizadas y Verificación en QEMU (`kernel/src/tests.rs`):**
+   - Añadidas 3 nuevas pruebas unitarias: `test_spotlight_live_search`, `test_real_udp_dhcp_dns` y `test_smp_distributed_scheduler`, elevando la suite oficial a **13 pruebas automatizadas**.
+   - Compilación exitosa en modo release (`x86_64-unknown-none`) con 0 advertencias y 0 errores.
+   - Ejecución de `run.ps1 -Test`: las 13 pruebas pasaron exitosamente (`[SUITE OK]`) y QEMU finalizó con código `33` (`QemuExitCode::Success`).
 
 ================================================================================

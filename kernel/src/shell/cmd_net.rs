@@ -120,8 +120,7 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
 
         "dhcp" => {
             if !args.is_empty() && args[0] == "renew" {
-                kprintln!("[DEMO][DHCP] Respuesta simulada - servidor DHCP externo opcional");
-                kprintln!("[DHCP] Iniciando negociacion broadcast DHCP DISCOVER (RFC 2131)...");
+                kprintln!("[DHCP] Iniciando negociacion broadcast DHCP DISCOVER real (RFC 2131)...");
                 match crate::drivers::net::dhcp_discover_and_configure() {
                     Ok(lease) => {
                         kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[DHCP CONCESION RENOVADA EXITOSAMENTE]\n");
@@ -158,12 +157,14 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
                 return true;
             }
             let domain = args[0];
+            let dns_server = crate::drivers::net::NET_INTERFACE.lock().dns_server;
+            kprintln!("[DNS] Consultando servidor {}#53 para '{}' (RFC 1035 UDP)...", dns_server.to_string(), domain);
             match crate::drivers::net::resolve_dns(domain) {
                 Ok(ip) => {
-                    kprintln!("[DEMO] Respuesta simulada de resolucion local");
-                    kprintln!("Servidor DNS: 10.0.2.3#53");
-                    kprintln!("Nombre:       {}", domain);
-                    kprintln!("Direccion:    {}", ip.to_string());
+                    kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[DNS RESPUESTA VALIDA]\n");
+                    kprintln!("  Servidor DNS: {}#53", dns_server.to_string());
+                    kprintln!("  Nombre:       {}", domain);
+                    kprintln!("  Direccion:    {}", ip.to_string());
                 }
                 Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[DNS ERROR] {}\n", e),
             }

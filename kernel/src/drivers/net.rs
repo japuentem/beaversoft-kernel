@@ -141,6 +141,9 @@ pub static NET_INTERFACE: SpinLock<NetworkInterface> = SpinLock::new(NetworkInte
     last_ping_seq: 0,
 });
 
+pub static DHCP_PENDING_LEASE: SpinLock<Option<DhcpLease>> = SpinLock::new(None);
+pub static DNS_PENDING_RESPONSE: SpinLock<Option<(u16, Ipv4Addr)>> = SpinLock::new(None);
+
 /// Inicializa el controlador de red buscando la tarjeta Intel PRO/1000 en el bus PCI
 pub fn init() {
     let mut net = NET_INTERFACE.lock();
@@ -524,11 +527,127 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
             let src_port = u16::from_be_bytes([udp_data[0], udp_data[1]]);
             let dst_port = u16::from_be_bytes([udp_data[2], udp_data[3]]);
             let udp_len  = u16::from_be_bytes([udp_data[4], udp_data[5]]) as usize;
-            if dst_port == 4242 && udp_data.len() >= 8 {
-                let end = udp_len.min(udp_data.len());
-                let mesh_payload = &udp_data[8..end];
+            let end = udp_len.min(udp_data.len());
+            let app_payload = if end > 8 { &udp_data[8..end] } else { &[] };
+
+            if dst_port == 4242 {
                 if let Some(mut mgr) = crate::drivers::mesh::MESH_MANAGER.try_lock() {
-                    return mgr.handle_packet(src_ip, src_port, mesh_payload);
+                    return mgr.handle_packet(src_ip, src_port, app_payload);
+                }
+            } else if dst_port == 68 && app_payload.len() >= 240 {
+                // Datagrama DHCP BOOTREPLY (RFC 2131)
+                let op = app_payload[0];
+                if op == 2 {
+                    let yiaddr = Ipv4Addr::new(app_payload[16], app_payload[17], app_payload[18], app_payload[19]);
+                    let mut netmask = Ipv4Addr::new(255, 255, 255, 0);
+                    let mut gateway = src_ip;
+                    let mut dns = src_ip;
+                    let mut server_ip = src_ip;
+                    let mut lease_secs = 86400u32;
+
+                    // Opciones DHCP a partir del byte 240 (tras el magic cookie 0x63, 0x82, 0x53, 0x63)
+                    if app_payload.len() >= 240 && &app_payload[236..240] == &[0x63, 0x82, 0x53, 0x63] {
+                        let mut opt_idx = 240;
+                        while opt_idx < app_payload.len() {
+                            let opt_code = app_payload[opt_idx];
+                            if opt_code == 255 {
+                                break;
+                            } else if opt_code == 0 {
+                                opt_idx += 1;
+                                continue;
+                            }
+                            if opt_idx + 1 >= app_payload.len() { break; }
+                            let opt_len = app_payload[opt_idx + 1] as usize;
+                            let opt_start = opt_idx + 2;
+                            let opt_end = opt_start + opt_len;
+                            if opt_end > app_payload.len() { break; }
+
+                            match opt_code {
+                                1 if opt_len >= 4 => { // Mascara
+                                    netmask = Ipv4Addr::new(app_payload[opt_start], app_payload[opt_start + 1], app_payload[opt_start + 2], app_payload[opt_start + 3]);
+                                }
+                                3 if opt_len >= 4 => { // Gateway
+                                    gateway = Ipv4Addr::new(app_payload[opt_start], app_payload[opt_start + 1], app_payload[opt_start + 2], app_payload[opt_start + 3]);
+                                }
+                                6 if opt_len >= 4 => { // DNS
+                                    dns = Ipv4Addr::new(app_payload[opt_start], app_payload[opt_start + 1], app_payload[opt_start + 2], app_payload[opt_start + 3]);
+                                }
+                                51 if opt_len >= 4 => { // Lease time
+                                    lease_secs = u32::from_be_bytes([
+                                        app_payload[opt_start], app_payload[opt_start + 1],
+                                        app_payload[opt_start + 2], app_payload[opt_start + 3],
+                                    ]);
+                                }
+                                54 if opt_len >= 4 => { // Server Identifier
+                                    server_ip = Ipv4Addr::new(app_payload[opt_start], app_payload[opt_start + 1], app_payload[opt_start + 2], app_payload[opt_start + 3]);
+                                }
+                                _ => {}
+                            }
+                            opt_idx = opt_end;
+                        }
+                    }
+
+                    let lease = DhcpLease {
+                        ip: yiaddr,
+                        netmask,
+                        gateway,
+                        dns,
+                        server_ip,
+                        lease_time_secs: lease_secs,
+                    };
+                    *DHCP_PENDING_LEASE.lock() = Some(lease);
+                }
+            } else if (src_port == 53 || dst_port == 49153) && app_payload.len() >= 12 {
+                // Respuesta DNS RFC 1035
+                let tx_id = u16::from_be_bytes([app_payload[0], app_payload[1]]);
+                let flags = u16::from_be_bytes([app_payload[2], app_payload[3]]);
+                let qdcount = u16::from_be_bytes([app_payload[4], app_payload[5]]);
+                let ancount = u16::from_be_bytes([app_payload[6], app_payload[7]]);
+
+                if (flags & 0x8000) != 0 && ancount > 0 {
+                    let mut cursor = 12usize;
+                    for _ in 0..qdcount {
+                        while cursor < app_payload.len() {
+                            let len = app_payload[cursor] as usize;
+                            if len == 0 {
+                                cursor += 1;
+                                break;
+                            } else if (len & 0xC0) == 0xC0 {
+                                cursor += 2;
+                                break;
+                            } else {
+                                cursor += 1 + len;
+                            }
+                        }
+                        cursor += 4;
+                    }
+
+                    for _ in 0..ancount {
+                        if cursor >= app_payload.len() { break; }
+                        if (app_payload[cursor] & 0xC0) == 0xC0 {
+                            cursor += 2;
+                        } else {
+                            while cursor < app_payload.len() && app_payload[cursor] != 0 {
+                                cursor += 1 + app_payload[cursor] as usize;
+                            }
+                            cursor += 1;
+                        }
+                        if cursor + 10 > app_payload.len() { break; }
+                        let rtype = u16::from_be_bytes([app_payload[cursor], app_payload[cursor + 1]]);
+                        let rdlength = u16::from_be_bytes([app_payload[cursor + 8], app_payload[cursor + 9]]) as usize;
+                        cursor += 10;
+                        if rtype == 1 && rdlength == 4 && cursor + 4 <= app_payload.len() {
+                            let resolved = Ipv4Addr::new(
+                                app_payload[cursor],
+                                app_payload[cursor + 1],
+                                app_payload[cursor + 2],
+                                app_payload[cursor + 3],
+                            );
+                            *DNS_PENDING_RESPONSE.lock() = Some((tx_id, resolved));
+                            break;
+                        }
+                        cursor += rdlength;
+                    }
                 }
             }
         }
@@ -624,62 +743,59 @@ pub fn send_udp_datagram(dest_ip: Ipv4Addr, src_port: u16, dest_port: u16, data:
     send_ethernet_frame([0xFF; 6], ETHERTYPE_IPV4, &ip_hdr);
 }
 
-/// Resuelve un nombre de dominio (FQDN) a una dirección IPv4 utilizando DNS
+/// Resuelve un nombre de dominio (FQDN) a una dirección IPv4 utilizando DNS real sobre UDP puerto 53 (RFC 1035)
 pub fn resolve_dns(domain: &str) -> Result<Ipv4Addr, String> {
     let clean = domain.trim();
-    // Si ya es una dirección IP decimal con puntos, devolver directamente
     if let Some(ip) = Ipv4Addr::parse(clean) {
         return Ok(ip);
     }
+    if clean == "localhost" {
+        return Ok(Ipv4Addr::new(127, 0, 0, 1));
+    }
 
-    // Tabla de resolución de dominios conocidos y caché DNS
-    match clean {
-        "localhost" => Ok(Ipv4Addr::new(127, 0, 0, 1)),
-        "gateway" | "router" => Ok(Ipv4Addr::new(10, 0, 2, 2)),
-        "dns" | "nameserver" => Ok(Ipv4Addr::new(10, 0, 2, 3)),
-        "beaver.org" | "www.beaver.org" => Ok(Ipv4Addr::new(10, 0, 2, 2)),
-        "api.beaver.org" | "pkg.beaver.org" => Ok(Ipv4Addr::new(10, 0, 2, 2)),
-        "google.com" | "www.google.com" => Ok(Ipv4Addr::new(142, 250, 190, 46)),
-        "github.com" | "raw.githubusercontent.com" => Ok(Ipv4Addr::new(185, 199, 108, 133)),
-        _ => {
-            // Emisión de datagrama UDP DNS Query (RFC 1035) hacia el DNS Server
-            let _dns_server = NET_INTERFACE.lock().dns_server;
-            let mut udp_dns_pkt = Vec::with_capacity(64);
-            // Cabecera DNS: ID (0x1234), Flags (0x0100 standard query), QDCOUNT=1, ANCOUNT=0, NSCOUNT=0, ARCOUNT=0
-            udp_dns_pkt.extend_from_slice(&0x1234_u16.to_be_bytes());
-            udp_dns_pkt.extend_from_slice(&0x0100_u16.to_be_bytes());
-            udp_dns_pkt.extend_from_slice(&1_u16.to_be_bytes());
-            udp_dns_pkt.extend_from_slice(&[0; 6]);
+    *DNS_PENDING_RESPONSE.lock() = None;
 
-            // Formatear etiquetas de dominio (3www6google3com0)
-            for part in clean.split('.') {
-                if !part.is_empty() {
-                    udp_dns_pkt.push(part.len() as u8);
-                    udp_dns_pkt.extend_from_slice(part.as_bytes());
-                }
+    let dns_server = NET_INTERFACE.lock().dns_server;
+    let tx_id = ((crate::drivers::timer::get_ticks() & 0x7FFF) as u16) ^ 0x4200;
+
+    let mut udp_dns_pkt = Vec::with_capacity(64);
+    // Header DNS RFC 1035: ID, Flags (0x0100 Recursion Desired), QDCOUNT=1, ANCOUNT=0, NSCOUNT=0, ARCOUNT=0
+    udp_dns_pkt.extend_from_slice(&tx_id.to_be_bytes());
+    udp_dns_pkt.extend_from_slice(&0x0100_u16.to_be_bytes());
+    udp_dns_pkt.extend_from_slice(&1_u16.to_be_bytes());
+    udp_dns_pkt.extend_from_slice(&[0; 6]);
+
+    // Formatear etiquetas de dominio (3www6google3com0)
+    for part in clean.split('.') {
+        if !part.is_empty() {
+            if part.len() > 63 {
+                return Err(String::from("Etiqueta DNS excede 63 bytes"));
             }
-            udp_dns_pkt.push(0); // Terminador
-            udp_dns_pkt.extend_from_slice(&1_u16.to_be_bytes()); // Tipo A (IPv4)
-            udp_dns_pkt.extend_from_slice(&1_u16.to_be_bytes()); // Clase IN (Internet)
-
-            // Cabecera UDP (8 bytes: SrcPort, DstPort=53, Length, Checksum)
-            let udp_len = (8 + udp_dns_pkt.len()) as u16;
-            let mut udp_hdr = Vec::with_capacity(8);
-            udp_hdr.extend_from_slice(&49153_u16.to_be_bytes()); // Puerto efímero origen
-            udp_hdr.extend_from_slice(&53_u16.to_be_bytes());    // Puerto DNS destino
-            udp_hdr.extend_from_slice(&udp_len.to_be_bytes());
-            udp_hdr.extend_from_slice(&0_u16.to_be_bytes());
-
-            let mut ip_payload = udp_hdr;
-            ip_payload.extend_from_slice(&udp_dns_pkt);
-
-            // Transmitir trama Ethernet/IPv4 hacia el DNS Server
-            send_ethernet_frame([0xFF; 6], ETHERTYPE_IPV4, &ip_payload);
-
-            // Simulación de resolución determinista hacia la red virtual de Beaver OS
-            Ok(Ipv4Addr::new(10, 0, 2, 2))
+            udp_dns_pkt.push(part.len() as u8);
+            udp_dns_pkt.extend_from_slice(part.as_bytes());
         }
     }
+    udp_dns_pkt.push(0); // Terminador
+    udp_dns_pkt.extend_from_slice(&1_u16.to_be_bytes()); // Tipo A (IPv4)
+    udp_dns_pkt.extend_from_slice(&1_u16.to_be_bytes()); // Clase IN (Internet)
+
+    // Enviar datagrama UDP real al puerto 53 del servidor DNS
+    send_udp_datagram(dns_server, 49153, 53, &udp_dns_pkt);
+
+    // Sondeo de hardware con timeout esperando la respuesta real de la red
+    for _ in 0..40_000 {
+        net_poll_rx();
+        if let Some((resp_id, ip)) = *DNS_PENDING_RESPONSE.lock() {
+            if resp_id == tx_id {
+                return Ok(ip);
+            }
+        }
+        for _ in 0..200 {
+            core::hint::spin_loop();
+        }
+    }
+
+    Err(format!("Timeout esperando resolucion DNS de '{}' desde servidor {}", clean, dns_server.to_string()))
 }
 
 /// Cliente HTTP/1.1 de alto rendimiento para descargar contenido web mediante TCP
@@ -761,13 +877,16 @@ pub fn dhcp_discover_and_configure() -> Result<DhcpLease, &'static str> {
         net.mac_address
     };
 
+    *DHCP_PENDING_LEASE.lock() = None;
+
     // 1. Construir datagrama DHCPDISCOVER (BOOTREQUEST op=1, htype=1, hlen=6)
     let mut dhcp_pkt = Vec::with_capacity(300);
     dhcp_pkt.push(1); // op: BOOTREQUEST
     dhcp_pkt.push(1); // htype: Ethernet
     dhcp_pkt.push(6); // hlen: 6 bytes MAC
     dhcp_pkt.push(0); // hops
-    dhcp_pkt.extend_from_slice(&0xBEA50F71_u32.to_be_bytes()); // xid (Transaction ID)
+    let xid = 0xBEA50F71_u32;
+    dhcp_pkt.extend_from_slice(&xid.to_be_bytes()); // xid (Transaction ID)
     dhcp_pkt.extend_from_slice(&0_u16.to_be_bytes()); // secs
     dhcp_pkt.extend_from_slice(&0x8000_u16.to_be_bytes()); // flags: Broadcast
     dhcp_pkt.extend_from_slice(&[0; 16]); // ciaddr, yiaddr, siaddr, giaddr (0.0.0.0)
@@ -802,34 +921,52 @@ pub fn dhcp_discover_and_configure() -> Result<DhcpLease, &'static str> {
     udp_hdr.extend_from_slice(&68_u16.to_be_bytes());
     udp_hdr.extend_from_slice(&67_u16.to_be_bytes());
     udp_hdr.extend_from_slice(&udp_len.to_be_bytes());
-    udp_hdr.extend_from_slice(&0_u16.to_be_bytes()); // Checksum opcional en IPv4
+    udp_hdr.extend_from_slice(&0_u16.to_be_bytes()); // Checksum
 
-    let mut ip_payload = udp_hdr;
-    ip_payload.extend_from_slice(&dhcp_pkt);
+    // Cabecera IPv4 Broadcast (255.255.255.255)
+    let total_len = (20 + udp_hdr.len() + dhcp_pkt.len()) as u16;
+    let mut ip_hdr = Vec::with_capacity(20);
+    ip_hdr.push(0x45);
+    ip_hdr.push(0x00);
+    ip_hdr.extend_from_slice(&total_len.to_be_bytes());
+    ip_hdr.extend_from_slice(&0_u16.to_be_bytes());
+    ip_hdr.extend_from_slice(&0_u16.to_be_bytes());
+    ip_hdr.push(64);
+    ip_hdr.push(IP_PROTO_UDP);
+    ip_hdr.extend_from_slice(&0_u16.to_be_bytes());
+    ip_hdr.extend_from_slice(&[0, 0, 0, 0]); // Origen 0.0.0.0 antes de recibir IP
+    ip_hdr.extend_from_slice(&[255, 255, 255, 255]); // Broadcast
+    let ip_csum = internet_checksum(&ip_hdr);
+    ip_hdr[10] = (ip_csum >> 8) as u8;
+    ip_hdr[11] = (ip_csum & 0xFF) as u8;
+
+    let mut full_payload = ip_hdr;
+    full_payload.extend_from_slice(&udp_hdr);
+    full_payload.extend_from_slice(&dhcp_pkt);
 
     // Transmitir trama broadcast hacia la red física o virtual
-    send_ethernet_frame([0xFF; 6], ETHERTYPE_IPV4, &ip_payload);
+    send_ethernet_frame([0xFF; 6], ETHERTYPE_IPV4, &full_payload);
 
-    // Concesión de red asignada por el router o servidor DHCP (SLIRP QEMU / LAN)
-    let lease = DhcpLease {
-        ip: Ipv4Addr::new(10, 0, 2, 15),
-        netmask: Ipv4Addr::new(255, 255, 255, 0),
-        gateway: Ipv4Addr::new(10, 0, 2, 2),
-        dns: Ipv4Addr::new(10, 0, 2, 3),
-        server_ip: Ipv4Addr::new(10, 0, 2, 2),
-        lease_time_secs: 86400, // 24 horas
-    };
-
-    // Actualizar dinámicamente la interfaz de red del kernel
-    {
-        let mut net = NET_INTERFACE.lock();
-        net.ip_address = lease.ip;
-        net.netmask = lease.netmask;
-        net.gateway = lease.gateway;
-        net.dns_server = lease.dns;
+    // 2. Esperar respuesta real (DHCPOFFER o DHCPACK) sondeando el hardware
+    for _ in 0..30_000 {
+        net_poll_rx();
+        if let Some(lease) = DHCP_PENDING_LEASE.lock().take() {
+            // Actualizar dinámicamente la interfaz de red del kernel con datos reales
+            {
+                let mut net = NET_INTERFACE.lock();
+                net.ip_address = lease.ip;
+                net.netmask = lease.netmask;
+                net.gateway = lease.gateway;
+                net.dns_server = lease.dns;
+            }
+            return Ok(lease);
+        }
+        for _ in 0..500 {
+            core::hint::spin_loop();
+        }
     }
 
-    Ok(lease)
+    Err("Timeout: sin respuesta del servidor DHCP en la red (RFC 2131)")
 }
 
 // ============================================================================

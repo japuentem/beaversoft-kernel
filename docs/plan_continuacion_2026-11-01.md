@@ -144,7 +144,7 @@ Archivo nuevo sugerido: `kernel/src/drivers/e1000.rs` (dejar `net.rs` para la pi
 
 ---
 
-## Fase 6 — Pendientes posteriores (no empezar sin confirmación del usuario)
+## Fase 6 — Pendientes posteriores  ✅ COMPLETADA 2026-11-03 (commit accba4e)
 
 - [x] Paginación propia: tablas de 4 KiB para el kernel, espacio de direcciones por proceso (CR3 por tarea), bit USER solo en páginas del proceso → Ring 3 aislado de verdad.
 - [x] Pruebas automáticas en QEMU con `-device isa-debug-exit,iobase=0xf4,iosize=0x04` y un modo `cargo test` del kernel.

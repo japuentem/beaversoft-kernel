@@ -9,6 +9,7 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use crate::sync::SpinMutex;
 use crate::gui::canvas::{Canvas, Color};
 use crate::gui::window::{WINDOW_MGR, WindowId};
@@ -19,11 +20,13 @@ use crate::memory::frame_allocator::FRAME_ALLOCATOR;
 pub struct SpotlightState {
     pub is_open: bool,
     pub query: String,
+    pub selected_idx: usize,
 }
 
 pub static SPOTLIGHT: SpinMutex<SpotlightState> = SpinMutex::new(SpotlightState {
     is_open: false,
     query: String::new(),
+    selected_idx: 0,
 });
 
 pub fn draw_monitor_window() {
@@ -394,6 +397,109 @@ pub fn handle_sync_click(mx: usize, my: usize, wx: usize, wy: usize) {
     }
 }
 
+#[derive(Clone)]
+pub struct SpotlightResult {
+    pub title: String,
+    pub desc: String,
+    pub target: WindowId,
+}
+
+pub fn get_spotlight_results(query: &str) -> Vec<SpotlightResult> {
+    use alloc::vec::Vec;
+    let mut results = Vec::new();
+    let q = query.trim();
+
+    let all_apps: [(&str, &str, WindowId); 8] = [
+        ("Terminal / Consola", "Interprete de comandos y shell interactivo", WindowId::Terminal),
+        ("Monitor de Recursos", "Telemetria de memoria, CPU y tareas en tiempo real", WindowId::Monitor),
+        ("BeaverFiles", "Explorador de archivos VFS (/disk, /net, /sys)", WindowId::Files),
+        ("BeaverSync", "Malla de dispositivos y sincronizacion UDP real", WindowId::Sync),
+        ("BeaverAudio", "Reproductor y sintetizador PCM sin punto flotante", WindowId::Player),
+        ("BeaverPhotos", "Galeria de imagenes y visor grafico VESA", WindowId::Photos),
+        ("BeaverCalendar", "Calendario mensual en tiempo real (RTC UTC-6)", WindowId::Calendar),
+        ("BeaverNote", "Editor de notas persistente (/disk/notas.txt)", WindowId::Note),
+    ];
+
+    if q.is_empty() {
+        for &(title, desc, win_id) in &all_apps[..4] {
+            results.push(SpotlightResult {
+                title: String::from(title),
+                desc: String::from(desc),
+                target: win_id,
+            });
+        }
+        return results;
+    }
+
+    // Coincidencias en aplicaciones
+    for &(title, desc, win_id) in &all_apps {
+        if contains_ignore_case(title, q) || contains_ignore_case(desc, q) {
+            results.push(SpotlightResult {
+                title: String::from(title),
+                desc: String::from(desc),
+                target: win_id,
+            });
+            if results.len() >= 4 {
+                return results;
+            }
+        }
+    }
+
+    // Coincidencias en archivos reales de BeaverFS (/disk)
+    if let Some(fs) = crate::storage::beaverfs::BEAVER_FS.try_lock() {
+        if let Ok(files) = fs.list_files() {
+            for (filename, size, _) in files {
+                if contains_ignore_case(&filename, q) {
+                    let desc = format!("Archivo en disco ATA (/disk/{}) - {} bytes", filename, size);
+                    let target = if filename.ends_with(".wav") {
+                        WindowId::Player
+                    } else if filename.ends_with(".txt") || filename.contains("nota") {
+                        WindowId::Note
+                    } else {
+                        WindowId::Files
+                    };
+                    results.push(SpotlightResult {
+                        title: format!("/disk/{}", filename),
+                        desc,
+                        target,
+                    });
+                    if results.len() >= 4 {
+                        return results;
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
+fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let h_bytes = haystack.as_bytes();
+    let n_bytes = needle.as_bytes();
+    if n_bytes.len() > h_bytes.len() {
+        return false;
+    }
+    for i in 0..=(h_bytes.len() - n_bytes.len()) {
+        let mut matches = true;
+        for j in 0..n_bytes.len() {
+            let h = h_bytes[i + j].to_ascii_lowercase();
+            let n = n_bytes[j].to_ascii_lowercase();
+            if h != n {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn draw_spotlight_overlay(screen_w: usize, _screen_h: usize) {
     let spot = SPOTLIGHT.lock();
     if !spot.is_open {
@@ -411,22 +517,36 @@ pub fn draw_spotlight_overlay(screen_w: usize, _screen_h: usize) {
 
     Canvas::fill_rounded_rect(modal_x + 14, modal_y + 14, modal_w - 28, 36, 8, 0x1E293B);
     draw_sidebar_icon(modal_x + 22, modal_y + 24, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
-    Canvas::draw_string_prop(modal_x + 46, modal_y + 24, "Accesos rapidos (busqueda por texto: pendiente)", Color::WHITE, None);
+
+    if spot.query.is_empty() {
+        Canvas::draw_string_prop(modal_x + 46, modal_y + 24, "Escribe para buscar archivos o apps...", Color::SLATE_400, None);
+    } else {
+        let mut query_display = spot.query.clone();
+        query_display.push('|'); // Cursor interactivo
+        Canvas::draw_string_prop(modal_x + 46, modal_y + 24, &query_display, Color::WHITE, None);
+    }
 
     Canvas::draw_line_h(modal_x + 14, modal_y + 58, modal_w - 28, Color::SLATE_700);
 
-    let results = [
-        ("BeaverPhotos", "Galeria de ejemplo con miniaturas generadas", WindowId::Photos),
-        ("BeaverCalendar", "Calendario mensual con hora local del RTC", WindowId::Calendar),
-        ("BeaverFiles", "Explorador VFS (/disk, /net, /home, /sys)", WindowId::Files),
-        ("BeaverSync", "Malla de dispositivos (descubrimiento UDP real)", WindowId::Sync),
-    ];
+    let results = get_spotlight_results(&spot.query);
 
-    for (i, (title, desc, _win_id)) in results.iter().enumerate() {
-        let ry = modal_y + 66 + i * 40;
-        Canvas::fill_rounded_rect(modal_x + 14, ry, modal_w - 28, 34, 6, 0x151E2E);
-        Canvas::draw_string_prop(modal_x + 24, ry + 4, title, Color::BEAVER_AMBER, None);
-        Canvas::draw_string_prop(modal_x + 24, ry + 18, desc, Color::SLATE_400, None);
+    if results.is_empty() {
+        Canvas::fill_rounded_rect(modal_x + 14, modal_y + 70, modal_w - 28, 40, 6, 0x151E2E);
+        Canvas::draw_string_prop(modal_x + 24, modal_y + 82, "No se encontraron coincidencias en apps ni archivos.", Color::SLATE_400, None);
+    } else {
+        for (i, res) in results.iter().enumerate().take(4) {
+            let ry = modal_y + 66 + i * 40;
+            let is_selected = i == spot.selected_idx;
+            let bg_col = if is_selected { 0x1E293B } else { 0x151E2E };
+            let border_col = if is_selected { Color::BEAVER_AMBER } else { Color::SLATE_700 };
+
+            Canvas::fill_rounded_rect(modal_x + 14, ry, modal_w - 28, 34, 6, bg_col);
+            if is_selected {
+                Canvas::draw_rounded_rect(modal_x + 14, ry, modal_w - 28, 34, 6, border_col);
+            }
+            Canvas::draw_string_prop(modal_x + 24, ry + 4, &res.title, if is_selected { Color::WHITE } else { Color::BEAVER_AMBER }, None);
+            Canvas::draw_string_prop(modal_x + 24, ry + 18, &res.desc, Color::SLATE_400, None);
+        }
     }
 }
 

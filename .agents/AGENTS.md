@@ -58,6 +58,11 @@ En cada sesión de trabajo, el agente de IA **DEBE registrar todas las interacci
      ```
    - No eliminar comentarios explicativos existentes.
 
+5. **Prohibición Estricta de Datos Simulados y Código Hardcodeado (Honestidad y Veracidad):**
+   - Queda terminantemente prohibido utilizar datos simulados, mocks o código hardcodeado para fingir funcionalidades.
+   - Todo subsistema (red, almacenamiento, SMP, procesos, memoria, GUI, telemetría) DEBE operar con información, controladores de hardware, paquetes de red, tablas ACPI/MADT y estructuras reales del sistema.
+   - Las pruebas, comandos de diagnóstico y suites de verificación deben medir y certificar el comportamiento auténtico en ejecución sobre hardware o QEMU.
+
 ---
 
 ## 3. Roles Especializados de Agencia (.agents/rules/)

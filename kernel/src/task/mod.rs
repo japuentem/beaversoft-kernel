@@ -44,6 +44,7 @@ pub struct Task {
     pub uid: Uid,
     pub gid: Gid,
     pub username: &'static str,
+    pub running_on_core: Option<u32>,
 }
 
 // Seguridad de memoria en hilos
@@ -91,11 +92,12 @@ impl Task {
             uid: ROOT_UID,
             gid: ROOT_GID,
             username: "root",
+            running_on_core: None,
         }
     }
 
     pub fn new_main() -> Self {
-        // Tarea 0 representa el hilo principal ya en ejecución
+        // Tarea 0 representa el hilo principal ya en ejecución en el BSP (Core 0)
         Self {
             id: 0,
             name: "main_shell",
@@ -107,6 +109,7 @@ impl Task {
             uid: ROOT_UID,
             gid: ROOT_GID,
             username: "root",
+            running_on_core: Some(0),
         }
     }
 }

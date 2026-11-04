@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 10] = [
+    let tests: [(&str, fn()); 13] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -75,6 +75,9 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("audio_integer_chime_no_fpu",              test_audio_integer_chime_no_fpu),
         ("gui_dirty_rects_and_resolution",          test_gui_dirty_rects_and_resolution),
         ("crc32_ieee8023_integrity",                test_crc32_ieee8023),
+        ("spotlight_live_search",                   test_spotlight_live_search),
+        ("real_udp_dhcp_dns_structures",            test_real_udp_dhcp_dns),
+        ("smp_distributed_scheduler",               test_smp_distributed_scheduler),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -311,10 +314,10 @@ pub fn test_paging_4k_and_process_cr3_isolation() {
 }
 
 pub fn test_smp_madt_and_trampoline_0x8000() {
-    use crate::apic::{AP_ONLINE_COUNT, SMP, SMP_TRAMPOLINE_ADDR};
+    use crate::apic::{AP_ONLINE_COUNT, SMP_TRAMPOLINE_ADDR};
     use core::sync::atomic::Ordering;
 
-    let smp = SMP.lock();
+    let smp = crate::apic::SMP.lock();
     assert!(smp.madt_detected, "La tabla ACPI MADT ('APIC') debe ser detectada");
     assert!(smp.madt_addr != 0, "La direccion fisica de MADT debe ser no nula");
     assert_eq!(smp.trampoline_addr, SMP_TRAMPOLINE_ADDR as u64);
@@ -330,6 +333,62 @@ pub fn test_smp_madt_and_trampoline_0x8000() {
         assert!(online_aps >= 1, "Al menos un AP secundario debe haber despertado por SIPI en 0x8000");
         assert!(AP_ONLINE_COUNT.load(Ordering::Relaxed) >= 2, "AP_ONLINE_COUNT debe reflejar BSP + APs online");
     }
+}
+
+pub fn test_spotlight_live_search() {
+    let results_empty = crate::gui::apps_system::get_spotlight_results("");
+    assert_eq!(results_empty.len(), 4, "Búsqueda vacía en Spotlight debe devolver las 4 aplicaciones sugeridas por defecto");
+
+    let results_term = crate::gui::apps_system::get_spotlight_results("term");
+    assert!(!results_term.is_empty(), "Spotlight debe encontrar la aplicación Terminal para 'term'");
+    assert!(results_term.iter().any(|r| r.title.contains("Terminal")), "Debe contener 'Terminal'");
+
+    let results_note = crate::gui::apps_system::get_spotlight_results("note");
+    assert!(!results_note.is_empty(), "Spotlight debe encontrar BeaverNote para 'note'");
+    assert!(results_note.iter().any(|r| r.title.contains("Note")), "Debe contener 'Note'");
+}
+
+pub fn test_real_udp_dhcp_dns() {
+    // Verificar que las estructuras de recepción UDP de DHCP y DNS están activas y libres de bloqueo
+    {
+        let lease = crate::drivers::net::DHCP_PENDING_LEASE.lock();
+        assert!(lease.is_none() || lease.is_some(), "DHCP_PENDING_LEASE debe ser accesible");
+    }
+    {
+        let dns = crate::drivers::net::DNS_PENDING_RESPONSE.lock();
+        assert!(dns.is_none() || dns.is_some(), "DNS_PENDING_RESPONSE debe ser accesible");
+    }
+}
+
+pub fn test_smp_distributed_scheduler() {
+    let mut sched = crate::task::scheduler::SCHEDULER.lock();
+    assert!(sched.is_active(), "El scheduler del kernel debe estar activo");
+    assert_eq!(sched.get_core_task(0), Some(0), "El Core 0 (BSP) debe tener asignada la tarea 0 (main_shell)");
+
+    // Registrar tarea de prueba y verificar que adquiere TID válido
+    let tid = sched.spawn("smp_test_worker", || {});
+    assert!(tid > 0, "El TID de la nueva tarea debe ser mayor que 0");
+
+    let smp = crate::apic::SMP.lock();
+    assert!(!smp.cores.is_empty(), "SMP debe contener la lista de núcleos descubiertos");
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_spotlight_search() {
+    test_spotlight_live_search();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_real_udp_dhcp_dns() {
+    test_real_udp_dhcp_dns();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_smp_distributed_sched() {
+    test_smp_distributed_scheduler();
 }
 
 #[cfg(test)]

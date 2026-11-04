@@ -631,17 +631,10 @@ pub extern "C" fn ap_kernel_entry() -> ! {
         core::ptr::write_volatile(TRAMPOLINE_ACK_ADDR as *mut u32, 1);
         id
     };
-    let _ = apic_id;
-
     // 3. Notificar atómicamente al BSP que este AP ya está online en modo de 64 bits
     AP_ONLINE_COUNT.fetch_add(1, Ordering::SeqCst);
     AP_BOOT_FLAG.store(true, Ordering::Release);
 
-    // 4. Bucle de reposo del AP con baja latencia
-    loop {
-        // SAFETY: `hlt` suspende el núcleo secundario en Ring 0 hasta recibir una interrupción.
-        unsafe {
-            core::arch::asm!("hlt");
-        }
-    }
+    // 4. Bucle distribuido de ejecución de tareas de Beaver OS en este Application Processor
+    crate::task::scheduler::ap_worker_loop(apic_id);
 }
