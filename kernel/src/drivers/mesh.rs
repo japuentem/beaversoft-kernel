@@ -20,10 +20,12 @@ use crate::drivers::timer::{get_uptime_seconds, get_ticks};
 pub const MESH_PORT: u16 = 4242;
 pub const MESH_MAGIC: &[u8; 8] = b"BEAVMESH";
 
-pub const MSG_ANNOUNCE: u8 = 0x01;
-pub const MSG_QUERY:    u8 = 0x02;
-pub const MSG_RESPONSE: u8 = 0x03;
-pub const MSG_HEARTBEAT:u8 = 0x04;
+pub const MSG_ANNOUNCE:  u8 = 0x01;
+pub const MSG_QUERY:     u8 = 0x02;
+pub const MSG_RESPONSE:  u8 = 0x03;
+pub const MSG_HEARTBEAT: u8 = 0x04;
+pub const MSG_FILE_SYNC: u8 = 0x05;
+pub const MSG_FILE_ACK:  u8 = 0x06;
 
 /// Ticks equivalentes a 10 segundos (PIT a 100 Hz → 100 ticks/s)
 const NODE_TIMEOUT_TICKS: u64 = 1000;
@@ -51,13 +53,17 @@ pub struct MeshNode {
 }
 
 pub struct MeshManager {
-    pub local_name:     String,
-    pub nodes:          Vec<MeshNode>,
-    pub announce_seq:   u32,
-    pub sync_count:     u64,
-    pub sync_logs:      Vec<String>,
+    pub local_name:             String,
+    pub nodes:                  Vec<MeshNode>,
+    pub announce_seq:           u32,
+    pub sync_count:             u64,
+    pub sync_logs:              Vec<String>,
     /// Ticks en que se envio el ultimo anuncio
-    pub last_announce:  u64,
+    pub last_announce:          u64,
+    /// Paquetes pendientes de enviar fuera del lock (dst_ip, payload)
+    pub pending_tx:             Vec<(Ipv4Addr, Vec<u8>)>,
+    /// Contenido recibido de /disk/notas.txt pendiente de escribir en VFS fuera del lock
+    pub pending_received_notas: Option<Vec<u8>>,
 }
 
 impl MeshManager {
@@ -65,12 +71,14 @@ impl MeshManager {
         // Fase 5: sin nodos hardcodeados.
         // El nombre local se fija en init_mesh() derivandolo de la MAC.
         Self {
-            local_name:    String::from("beaver-local"),
-            nodes:         Vec::new(),
-            announce_seq:  0,
-            sync_count:    0,
-            sync_logs:     Vec::new(),
-            last_announce: 0,
+            local_name:             String::from("beaver-local"),
+            nodes:                  Vec::new(),
+            announce_seq:           0,
+            sync_count:             0,
+            sync_logs:              Vec::new(),
+            last_announce:          0,
+            pending_tx:             Vec::new(),
+            pending_received_notas: None,
         }
     }
 
@@ -146,6 +154,36 @@ impl MeshManager {
         pkt
     }
 
+    /// Construye el paquete de sincronizacion de `/disk/notas.txt` (MSG_FILE_SYNC)
+    pub fn build_file_sync_packet(&self, seq: u32, content: &[u8]) -> Vec<u8> {
+        let clamped_len = content.len().min(1200);
+        let name_bytes = self.local_name.as_bytes();
+        let mut pkt = Vec::with_capacity(20 + name_bytes.len() + clamped_len);
+        pkt.extend_from_slice(MESH_MAGIC);              // [0..8]
+        pkt.push(MSG_FILE_SYNC);                        // [8]
+        pkt.push(1);                                    // [9] version
+        pkt.extend_from_slice(&seq.to_be_bytes());      // [10..14] seq
+        pkt.push(name_bytes.len() as u8);               // [14] name_len
+        pkt.extend_from_slice(name_bytes);              // [15..15+name_len]
+        pkt.extend_from_slice(&(clamped_len as u16).to_be_bytes()); // [after_name..+2]
+        pkt.extend_from_slice(&content[..clamped_len]);
+        pkt
+    }
+
+    /// Construye el paquete de confirmacion de archivo sincronizado (MSG_FILE_ACK)
+    pub fn build_file_ack_packet(&self, seq: u32, acked_bytes: u16) -> Vec<u8> {
+        let name_bytes = self.local_name.as_bytes();
+        let mut pkt = Vec::with_capacity(20 + name_bytes.len());
+        pkt.extend_from_slice(MESH_MAGIC);              // [0..8]
+        pkt.push(MSG_FILE_ACK);                         // [8]
+        pkt.push(1);                                    // [9] version
+        pkt.extend_from_slice(&seq.to_be_bytes());      // [10..14] seq
+        pkt.push(name_bytes.len() as u8);               // [14] name_len
+        pkt.extend_from_slice(name_bytes);              // [15..15+name_len]
+        pkt.extend_from_slice(&acked_bytes.to_be_bytes());
+        pkt
+    }
+
     /// Prepara un anuncio incrementando secuencia y devolviendo el datagrama
     pub fn prepare_announce(&mut self) -> Vec<u8> {
         self.announce_seq = self.announce_seq.wrapping_add(1);
@@ -172,8 +210,8 @@ impl MeshManager {
     // -----------------------------------------------------------------------
 
     /// Procesa datagramas entrantes en el puerto 4242.
-    /// Devuelve `true` si recibio un `MSG_QUERY` y el llamador debe enviar un anuncio
-    /// una vez liberado el lock de `NET_INTERFACE`.
+    /// Devuelve `true` si hay acciones diferidas (anuncio, escritura VFS o envio de ACK)
+    /// que deben ejecutarse mediante `flush_mesh_pending_actions()` fuera del lock de red.
     pub fn handle_packet(&mut self, src_ip: Ipv4Addr, _src_port: u16, payload: &[u8]) -> bool {
         if payload.len() < 10 || &payload[0..8] != MESH_MAGIC {
             return false;
@@ -266,8 +304,81 @@ impl MeshManager {
                 false
             }
             MSG_QUERY => {
-                // Indicar al llamador que envie nuestro anuncio fuera del lock de red
+                // Encolar anuncio de respuesta para enviar fuera del lock de red
+                let pkt = self.prepare_announce();
+                self.pending_tx.push((Ipv4Addr::new(255, 255, 255, 255), pkt));
                 true
+            }
+            MSG_FILE_SYNC => {
+                if payload.len() < 15 {
+                    return false;
+                }
+                let seq = u32::from_be_bytes([payload[10], payload[11], payload[12], payload[13]]);
+                let name_len = payload[14] as usize;
+                let after_name = 15 + name_len;
+                if payload.len() < after_name + 2 {
+                    return false;
+                }
+                let sender_name = match core::str::from_utf8(&payload[15..after_name]) {
+                    Ok(s) => String::from(s),
+                    Err(_) => return false,
+                };
+                if sender_name == self.local_name {
+                    return false;
+                }
+                let content_len = u16::from_be_bytes([payload[after_name], payload[after_name + 1]]) as usize;
+                if payload.len() < after_name + 2 + content_len {
+                    return false;
+                }
+                let content_bytes = payload[after_name + 2..after_name + 2 + content_len].to_vec();
+                let now = get_ticks();
+
+                if let Some(existing) = self.nodes.iter_mut().find(|n| n.ip.0 == src_ip.0) {
+                    existing.status = "Online";
+                    existing.last_seen = now;
+                    existing.sync_percent = 100;
+                    existing.last_sync_file = "/disk/notas.txt";
+                }
+                self.pending_received_notas = Some(content_bytes);
+                let ack_pkt = self.build_file_ack_packet(seq, content_len as u16);
+                self.pending_tx.push((src_ip, ack_pkt));
+                self.push_log(format!(
+                    "[SYNC] /disk/notas.txt recibido de {} ({} B, seq #{}) -> ACK enviado.",
+                    sender_name, content_len, seq
+                ));
+                true
+            }
+            MSG_FILE_ACK => {
+                if payload.len() < 15 {
+                    return false;
+                }
+                let seq = u32::from_be_bytes([payload[10], payload[11], payload[12], payload[13]]);
+                let name_len = payload[14] as usize;
+                let after_name = 15 + name_len;
+                if payload.len() < after_name + 2 {
+                    return false;
+                }
+                let responder_name = match core::str::from_utf8(&payload[15..after_name]) {
+                    Ok(s) => String::from(s),
+                    Err(_) => return false,
+                };
+                if responder_name == self.local_name {
+                    return false;
+                }
+                let acked_bytes = u16::from_be_bytes([payload[after_name], payload[after_name + 1]]);
+                let now = get_ticks();
+
+                if let Some(existing) = self.nodes.iter_mut().find(|n| n.ip.0 == src_ip.0) {
+                    existing.status = "Online";
+                    existing.last_seen = now;
+                    existing.sync_percent = 100;
+                    existing.last_sync_file = "/disk/notas.txt";
+                }
+                self.push_log(format!(
+                    "[SYNC] ACK de {} ({}): /disk/notas.txt (100% confirmado, {} B, seq #{}).",
+                    responder_name, src_ip.to_string(), acked_bytes, seq
+                ));
+                false
             }
             _ => false,
         }
@@ -311,25 +422,29 @@ impl MeshManager {
     }
 
     // -----------------------------------------------------------------------
-    // Sincronizacion manual (boton GUI)
+    // Sincronizacion manual (boton GUI y comando sync)
     // -----------------------------------------------------------------------
 
-    /// Registra la sincronizacion manual y prepara los paquetes (query, announce)
-    pub fn prepare_sync_packets(&mut self) -> (Vec<u8>, Vec<u8>) {
+    /// Registra la sincronizacion manual y prepara los paquetes (query, announce, file_sync)
+    pub fn prepare_sync_packets_with_file(&mut self, notas_content: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         self.sync_count += 1;
+        let seq = self.sync_count as u32;
         let query_pkt = self.build_query_packet();
         let announce_pkt = self.prepare_announce();
+        let file_pkt = self.build_file_sync_packet(seq, notas_content);
         let n = self.nodes.iter().filter(|x| x.status == "Online").count();
         self.push_log(format!(
-            "[SYNC #{}] MSG_QUERY + MSG_ANNOUNCE enviados. Nodos online: {}.",
-            self.sync_count, n
+            "[SYNC #{}] Enviando /disk/notas.txt ({} B) + QUERY a {} nodo(s) online.",
+            self.sync_count, notas_content.len(), n
         ));
-        (query_pkt, announce_pkt)
+        (query_pkt, announce_pkt, file_pkt)
     }
 
     /// Dispara una query + anuncio inmediato (para llamadas desde shell cuando NET_INTERFACE esta libre)
     pub fn trigger_sync(&mut self) {
-        let (q, a) = self.prepare_sync_packets();
+        self.sync_count += 1;
+        let q = self.build_query_packet();
+        let a = self.prepare_announce();
         send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &q);
         send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &a);
     }
@@ -351,21 +466,25 @@ impl MeshManager {
         self.nodes.iter().filter(|n| n.status == "Online").count()
     }
 
-    /// Simulacion de lectura de archivos remotos (mantiene compatibilidad con VFS /net)
+    /// Lectura de archivos remotos sincronizados en VFS /net
     pub fn read_node_file(&self, node_name: &str, subpath: &str) -> Result<String, &'static str> {
         let node = self.get_node(node_name).ok_or("Nodo no encontrado en la red mesh")?;
         let clean = subpath.trim_start_matches('/');
         if clean == "status.txt" || clean == "status" || clean.is_empty() {
             return Ok(format!(
-                "=== NODO BEAVER MESH: {} ===\nIP: {}\nEstado: {}\nOS: {}\nCores: {}\nRAM: {} MB\nUptime: {} s\n",
+                "=== NODO BEAVER MESH: {} ===\nIP: {}\nEstado: {}\nOS: {}\nCores: {}\nRAM: {} MB\nUptime: {} s\nSincronizacion: {}% ({})\n",
                 node.name, node.ip.to_string(), node.status,
-                node.os_version, node.cores, node.ram_mb, node.uptime_secs
+                node.os_version, node.cores, node.ram_mb, node.uptime_secs,
+                node.sync_percent, node.last_sync_file
             ));
         }
-        if clean == "disk/notas.txt" {
+        if clean == "disk/notas.txt" || clean == "notas.txt" {
+            let local_copy = crate::fs::vfs::VFS.lock()
+                .read_file("/disk/notas.txt", 0, 0)
+                .unwrap_or_else(|_| String::from("(sin contenido)"));
             return Ok(format!(
-                "=== NOTAS DE {} ===\n(archivo compartido via BeaverSync)\n",
-                node.name
+                "=== NOTAS SINCRONIZADAS CON {} ({}%) ===\n{}",
+                node.name, node.sync_percent, local_copy
             ));
         }
         Err("Archivo remoto no encontrado")
@@ -377,12 +496,14 @@ impl MeshManager {
 // ---------------------------------------------------------------------------
 
 pub static MESH_MANAGER: SpinLock<MeshManager> = SpinLock::new(MeshManager {
-    local_name:    String::new(),
-    nodes:         Vec::new(),
-    announce_seq:  0,
-    sync_count:    0,
-    sync_logs:     Vec::new(),
-    last_announce: 0,
+    local_name:             String::new(),
+    nodes:                  Vec::new(),
+    announce_seq:           0,
+    sync_count:             0,
+    sync_logs:              Vec::new(),
+    last_announce:          0,
+    pending_tx:             Vec::new(),
+    pending_received_notas: None,
 });
 
 /// Inicializa la malla derivando el hostname de la MAC real
@@ -408,14 +529,49 @@ pub fn send_mesh_announce_now() {
     }
 }
 
-/// Dispara la sincronizacion de la malla (query + announce) desacoplando el lock de la red
+/// Procesa acciones diferidas encoladas durante `handle_packet` (fuera de NET_INTERFACE y MESH_MANAGER locks)
+pub fn flush_mesh_pending_actions() {
+    let (tx_list, rx_notas) = if let Some(mut mgr) = MESH_MANAGER.try_lock() {
+        let tx = core::mem::take(&mut mgr.pending_tx);
+        let notas = mgr.pending_received_notas.take();
+        (tx, notas)
+    } else {
+        return;
+    };
+
+    if let Some(notas_bytes) = rx_notas {
+        let _ = crate::fs::vfs::VFS.lock().create_file("/disk/notas.txt", &notas_bytes, 0, 0);
+        if let Some(mut note) = crate::gui::note::BEAVER_NOTE.try_lock() {
+            let _ = note.load_from_disk();
+        }
+    }
+
+    for (dst_ip, pkt) in tx_list {
+        send_udp_datagram(dst_ip, MESH_PORT, MESH_PORT, &pkt);
+    }
+}
+
+/// Dispara la sincronizacion completa de la malla (query + announce + `/disk/notas.txt` con ACK)
 pub fn trigger_mesh_sync() {
-    let (query_pkt, announce_pkt) = {
+    let notas_bytes = crate::fs::vfs::VFS.lock()
+        .read_file_bytes("/disk/notas.txt", 0, 0)
+        .unwrap_or_default();
+
+    let (query_pkt, announce_pkt, file_pkt) = {
         let mut mgr = MESH_MANAGER.lock();
-        mgr.prepare_sync_packets()
+        mgr.prepare_sync_packets_with_file(&notas_bytes)
     };
     send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &query_pkt);
     send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &announce_pkt);
+    send_udp_datagram(Ipv4Addr::new(255, 255, 255, 255), MESH_PORT, MESH_PORT, &file_pkt);
+
+    // Sondear RX brevemente para recoger MSG_FILE_ACK de nodos activos en la subred
+    for _ in 0..8_000 {
+        for _ in 0..500 {
+            core::hint::spin_loop();
+        }
+        crate::drivers::net::net_poll_rx();
+    }
 }
 
 /// Llamar desde el bucle principal del kernel para mantener la malla viva

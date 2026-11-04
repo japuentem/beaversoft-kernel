@@ -29,7 +29,7 @@ pub fn crc32(data: &[u8]) -> u32 {
 mod tests {
     use super::*;
 
-    #[test]
+    #[test_case]
     fn test_crc32() {
         assert_eq!(crc32(b"123456789"), 0xCBF43926);
     }

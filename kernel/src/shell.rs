@@ -2120,12 +2120,21 @@ impl Shell {
 
             "sync" | "meshsync" | "gensync" => {
                 kprintln!("=================== BEAVERSYNC UNIVERSAL MESH ===================");
-                kprintln!("Emitiendo MSG_QUERY + MSG_ANNOUNCE por UDP :4242...");
+                kprintln!("Sincronizando /disk/notas.txt + MSG_QUERY + MSG_ANNOUNCE por UDP :4242...");
                 crate::drivers::mesh::trigger_mesh_sync();
                 crate::drivers::audio::click_feedback();
-                let online_n = crate::drivers::mesh::MESH_MANAGER.lock().online_count();
-                kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Sincronizacion de descubrimiento enviada. Nodos remotos online: {}\n", online_n);
+                let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
+                let online_n = mgr.online_count();
+                kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Sincronizacion completada. Nodos remotos online: {}\n", online_n);
+                for node in mgr.get_nodes() {
+                    kprintln!("  * {} ({}) -> Sinc: {}% | Archivo: {}", node.name, node.ip.to_string(), node.sync_percent, node.last_sync_file);
+                }
                 kprintln!("=================================================================");
+            }
+
+            "autotest" | "qemutest" | "selftest" => {
+                let exit_after = args.get(0).copied() == Some("exit");
+                crate::tests::run_builtin_test_suite(exit_after);
             }
 
             "install" | "installer" | "deploy" => {

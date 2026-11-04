@@ -721,7 +721,7 @@ pub fn draw_sync_window() {
         let icon_col = if node.status == "Online" { Color::BEAVER_TEAL } else { Color::SLATE_400 };
         draw_device_icon(x + 20, dy + 4, DeviceKind::Pc, icon_col);
 
-        let line1 = format!("{} [{}]", node.name, node.status);
+        let line1 = format!("{} [{}] | Sinc: {}% ({})", node.name, node.status, node.sync_percent, node.last_sync_file);
         Canvas::draw_string_prop(x + 48, dy + 4, &line1, Color::BEAVER_TEXT_DARK, None);
         let line2 = format!("IP: {} | {} Core(s) | {} MB | Uptime: {}s",
             node.ip.to_string(), node.cores, node.ram_mb, node.uptime_secs

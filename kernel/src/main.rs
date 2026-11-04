@@ -8,6 +8,9 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![cfg_attr(test, feature(custom_test_frameworks))]
+#![cfg_attr(test, test_runner(crate::tests::test_runner))]
+#![cfg_attr(test, reexport_test_harness_main = "test_main")]
 
 extern crate alloc;
 
@@ -31,6 +34,7 @@ pub mod ipc;
 pub mod elf;
 pub mod apic;
 pub mod crypto;
+pub mod tests;
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -299,6 +303,9 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
         }
     }
 
+    #[cfg(test)]
+    test_main();
+
     // 13. Mensaje de bienvenida al Shell interactivo
     kprint_color!(
         VgaColor::Cyan, VgaColor::Black,
@@ -346,6 +353,8 @@ fn panic(info: &PanicInfo) -> ! {
          ============================================================\n",
         info
     );
+
+    crate::tests::exit_qemu(crate::tests::QemuExitCode::Failed);
 
     loop {
         unsafe {

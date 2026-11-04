@@ -12,6 +12,7 @@ param(
     [switch]$NoGui,
     [switch]$Clean,
     [switch]$Uefi,
+    [switch]$Test,
     # -Node A: escucha :5555  MAC ..:BE:A0:01  IP 10.0.0.1
     # -Node B: conecta :5555  MAC ..:BE:A0:02  IP 10.0.0.2
     [string]$Node = ''
@@ -150,5 +151,58 @@ if ($Node -eq 'A') {
     $QemuArgs += @("-device", "e1000,netdev=n0,mac=52:54:00:BE:A0:02")
     Write-Host "[NET] Nodo B: conectando a 127.0.0.1:5555 (IP estatica 10.0.0.2)" -ForegroundColor Cyan
 }
+if ($Test) {
+    Write-Host "[TEST] Modo de pruebas automaticas QEMU (isa-debug-exit 0xF4) activado..." -ForegroundColor Cyan
+    $LLD = "C:\Users\japue\.rustup\toolchains\nightly-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\bin\rust-lld.exe"
+    & rustc +nightly --target x86_64-pc-windows-msvc -C panic=abort -O --emit=obj "boot\uefi\src\main.rs" -o "target\bootx64-test.obj"
+    & $LLD -flavor link /NODEFAULTLIB /ENTRY:efi_main /SUBSYSTEM:EFI_APPLICATION "target\bootx64-test.obj" /OUT:"target\BOOTX64-TEST.EFI"
+
+    $UefiRoot = "target\uefi_autotest"
+    $UefiDir = "$UefiRoot\EFI\BOOT"
+    New-Item -ItemType Directory -Path $UefiDir -Force | Out-Null
+    Copy-Item "target\BOOTX64-TEST.EFI" -Destination "$UefiDir\BOOTX64.EFI" -Force
+    Copy-Item $KernelBin -Destination "$UefiRoot\KERNEL.ELF" -Force
+
+    $OvmfFirmware = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
+    $LogFile = "target\autotest_serial.log"
+    if (Test-Path $LogFile) { Remove-Item $LogFile -Force }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "C:\Program Files\qemu\qemu-system-x86_64.exe"
+    $psi.WorkingDirectory = (Get-Location).Path
+    $psi.Arguments = "-drive `"if=pflash,format=raw,readonly=on,file=$OvmfFirmware`" -drive file=$DiskImg,format=raw,index=0,media=disk -drive file=fat:rw:$UefiRoot,format=raw,index=1,media=disk -nic model=e1000 -m 512M -device isa-debug-exit,iobase=0xf4,iosize=0x04 -chardev stdio,id=char0,logfile=$LogFile,signal=off -serial chardev:char0 -display none"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    $proc.Start() | Out-Null
+    $proc.BeginOutputReadLine()
+    $proc.BeginErrorReadLine()
+
+    for ($i = 0; $i -lt 50; $i++) {
+        if ((Test-Path $LogFile) -and ((Get-Content $LogFile -Raw -ErrorAction SilentlyContinue) -match "root@beaver:/#")) {
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    $proc.StandardInput.WriteLine("autotest exit")
+    $exited = $proc.WaitForExit(15000)
+    if (-not $exited) {
+        $proc.Kill()
+        Write-Error "[FAIL] Timeout esperando salida isa-debug-exit de QEMU."
+        exit 1
+    }
+    Get-Content $LogFile | Select-Object -Last 20
+    if ($proc.ExitCode -eq 33) {
+        Write-Host "[PASS] QEMU finalizo con codigo 33 (QemuExitCode::Success = 0x10 en puerto 0xF4)." -ForegroundColor Green
+        exit 0
+    } else {
+        Write-Error "[FAIL] QEMU finalizo con codigo inesperado: $($proc.ExitCode)"
+        exit 1
+    }
+}
+
 Write-Host "[INFO] Ejecutando: qemu-system-x86_64 $($QemuArgs -join ' ')" -ForegroundColor DarkGray
 & qemu-system-x86_64 @QemuArgs

@@ -527,27 +527,43 @@ pub fn create_beaver_chime_wav() -> Vec<u8> {
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&data_size.to_le_bytes());
 
-    // 4. Síntesis armónica del Acorde Beaver en 16-bit signed stereo
-    // Armónicos: C5 (523 Hz), E5 (659 Hz), G5 (784 Hz), C6 (1046 Hz)
-    for i in 0..num_samples {
-        let t = i as f32 / sample_rate as f32;
+    // 4. Síntesis armónica del Acorde Beaver en 16-bit signed stereo (100% punto fijo entero, sin f32/f64)
+    // Armónicos: C5 (523.25 Hz), E5 (659.25 Hz), G5 (784.00 Hz), C6 (1046.50 Hz)
+    // Escala de fase: 0..44100 equivale a [0, 2*pi)
+    let sr = sample_rate as i64; // 44100
+    let attack_samples: i64 = 220; // ~5 ms a 44.1 kHz
+    let decay_samples: i64 = (num_samples as i64) - attack_samples; // 15215 muestras
 
-        // Envolvente de decaimiento suave (Attack rápido de 5ms, Decay exponencial)
-        let envelope = if t < 0.005 {
-            t / 0.005
+    for i in 0..num_samples {
+        let idx = i as i64;
+
+        // Envolvente en escala 0..1024 (Attack lineal 5ms, Decay cuadrático)
+        let env_q10: i64 = if idx < attack_samples {
+            (idx * 1024) / attack_samples
         } else {
-            let remain = 1.0 - (t - 0.005) / 0.345;
-            remain * remain
+            let rem = decay_samples - (idx - attack_samples);
+            let lin = (rem * 1024) / decay_samples;
+            (lin * lin) >> 10
         };
 
-        // Aproximación polinómica bare-metal de seno para pureza sonora sin std
-        let sample_c5 = approx_sin(523.25 * t * 6.283185);
-        let sample_e5 = approx_sin(659.25 * t * 6.283185);
-        let sample_g5 = approx_sin(783.99 * t * 6.283185);
-        let sample_c6 = approx_sin(1046.50 * t * 6.283185);
+        // Fase en milésimas de ciclo (0..44100) usando frecuencias x4 para cuarto de Hz exacto:
+        // C5: 2093/4 Hz, E5: 2637/4 Hz, G5: 3136/4 Hz, C6: 4186/4 Hz
+        let phase_c5 = ((idx * 2093) / 4) % sr;
+        let phase_e5 = ((idx * 2637) / 4) % sr;
+        let phase_g5 = ((idx * 3136) / 4) % sr;
+        let phase_c6 = ((idx * 4186) / 4) % sr;
 
-        let mixed = (sample_c5 * 0.35 + sample_e5 * 0.25 + sample_g5 * 0.25 + sample_c6 * 0.15) * envelope;
-        let sample_i16 = (mixed * 24000.0) as i16;
+        // approx_sin_q12 devuelve [-4096, 4096]
+        let s_c5 = approx_sin_q12(phase_c5, sr);
+        let s_e5 = approx_sin_q12(phase_e5, sr);
+        let s_g5 = approx_sin_q12(phase_g5, sr);
+        let s_c6 = approx_sin_q12(phase_c6, sr);
+
+        // Mezcla ponderada (35%, 25%, 25%, 15%) -> suma de pesos = 100
+        let mixed_q12 = (s_c5 * 35 + s_e5 * 25 + s_g5 * 25 + s_c6 * 15) / 100;
+        // Aplicar envolvente (env_q10 / 1024) y escalar a amplitud máxima 24000
+        let sample_val = (mixed_q12 * env_q10 * 24000) >> 22;
+        let sample_i16 = sample_val.clamp(-32767, 32767) as i16;
 
         // Canal Izquierdo y Canal Derecho (Estéreo)
         wav.extend_from_slice(&sample_i16.to_le_bytes());
@@ -557,19 +573,28 @@ pub fn create_beaver_chime_wav() -> Vec<u8> {
     wav
 }
 
-/// Función auxiliar para aproximar seno bare-metal
-fn approx_sin(mut x: f32) -> f32 {
-    let two_pi = 6.2831853;
-    x = x % two_pi;
-    if x < 0.0 {
-        x += two_pi;
+/// Aproximación parabólica entera de seno en punto fijo Q12 (rango [-4096, 4096])
+/// `phase` está en `0..period` (donde `period` representa 2*pi). Sin uso de f32/f64.
+fn approx_sin_q12(mut phase: i64, period: i64) -> i64 {
+    if phase < 0 {
+        phase = (phase % period) + period;
+    } else if phase >= period {
+        phase %= period;
     }
-    // Aproximación parabólica de Bhaskara I
-    let pi = 3.1415926;
-    if x > pi {
-        -approx_sin(x - pi)
+    let half = period / 2;
+    let sign = if phase >= half {
+        phase -= half;
+        -1_i64
     } else {
-        (16.0 * x * (pi - x)) / (5.0 * pi * pi - 4.0 * x * (pi - x))
+        1_i64
+    };
+    // Parábola 4 * x * (half - x) / (half / 2)^2 escalada a 4096
+    let num = 16 * phase * (half - phase) * 4096;
+    let den = half * half;
+    if den == 0 {
+        0
+    } else {
+        sign * (num / den)
     }
 }
 

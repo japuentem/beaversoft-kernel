@@ -586,9 +586,9 @@ pub fn net_poll_rx() {
         }
     }
 
-    // Si recibimos MSG_QUERY, enviar anuncio fuera de NET_INTERFACE lock
+    // Si recibimos MSG_QUERY o MSG_FILE_SYNC, procesar acciones diferidas fuera de NET_INTERFACE lock
     if need_mesh_announce {
-        crate::drivers::mesh::send_mesh_announce_now();
+        crate::drivers::mesh::flush_mesh_pending_actions();
     }
 }
 
