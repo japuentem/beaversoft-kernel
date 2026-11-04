@@ -13,7 +13,7 @@ Beaver OS cuenta con un cargador de arranque universal nativo para firmware **UE
 A diferencia de los sistemas operativos convencionales que requieren cargadores de múltiples etapas (Stage 1, Stage 2, GRUB2, Shim, etc.), Beaver OS implementa un cargador monolítico autónomo de alto rendimiento:
 
 1. **Protocolo GOP (Graphics Output Protocol):** Detecta la resolución nativa de la pantalla de la computadora o laptop (por ejemplo 1024x768 o superior en 32 bits BGR/RGB) y pasa la dirección física del Linear Framebuffer (`fb_base`, `fb_size`, `fb_pitch`) al kernel mediante la estructura `UefiBootInfo` en la dirección física fija `0x8000`.
-2. **Carga y Desempaquetado ELF64:** Asigna páginas de memoria convencional física en `0x100000` (1 MB) y mapea los segmentos `PT_LOAD` del kernel Beaver compilado en Rust (`beaversoft-kernel`).
+2. **Carga y Desempaquetado ELF64:** Asigna páginas de memoria convencional física en `0x100000` (1 MB) y mapea los segmentos `PT_LOAD` del kernel Beaver compilado en Rust (`beaver-kernel`).
 3. **Firma y Handshake `BEAVUEFI`:** Valida la firma de 64 bits en el código del kernel y extrae el punto de entrada directo de 64 bits (`uefi_entry`).
 4. **Cierre de Servicios de Firmware (`ExitBootServices`):** Finaliza la capa de firmware de la placa madre y transfiere el control absoluto de la CPU y la memoria al kernel en **Modo Largo de 64 bits (Ring 0)**.
 

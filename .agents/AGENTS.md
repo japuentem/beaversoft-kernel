@@ -63,6 +63,16 @@ En cada sesión de trabajo, el agente de IA **DEBE registrar todas las interacci
    - Todo subsistema (red, almacenamiento, SMP, procesos, memoria, GUI, telemetría) DEBE operar con información, controladores de hardware, paquetes de red, tablas ACPI/MADT y estructuras reales del sistema.
    - Las pruebas, comandos de diagnóstico y suites de verificación deben medir y certificar el comportamiento auténtico en ejecución sobre hardware o QEMU.
 
+6. **Distinción Estricta de Marca ('Beaversoft' vs 'Beaver OS' / 'beaver-kernel'):**
+   - El término **Beaversoft** se reserva EXCLUSIVAMENTE para referirse a la empresa, firma creadora o marca comercial (por ejemplo: *Brand: Beaversoft*, *Creado por Beaversoft*, *Desarrollado por José Alberto Puente Maldonado (japuentem) para Beaversoft*).
+   - Para el sistema operativo, binarios, subsistemas, componentes técnicos, interfaz de usuario y herramientas se debe utilizar siempre la denominación de producto:
+     - Sistema Operativo: **Beaver OS** (nunca Beaversoft OS).
+     - Binario y paquete del kernel: **beaver-kernel** (nunca beaversoft-kernel).
+     - Sistema de archivos: **BeaverFS**.
+     - Entorno de ventanas y aplicaciones: **Beaver Desktop**, **BeaverFiles**, **BeaverNote**, **BeaverAudio**, **BeaverSync**, **BeaverPhotos**, **BeaverCalendar**.
+     - Intérprete y comandos de consola: **Beaver Shell** / prompt `root@beaver:/#`.
+     - Motor de scripting: **BeaverScript** (`.bs`).
+
 ---
 
 ## 3. Roles Especializados de Agencia (.agents/rules/)

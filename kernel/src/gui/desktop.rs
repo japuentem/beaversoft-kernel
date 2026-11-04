@@ -2,7 +2,7 @@
 // Project: Beaversoft Meta-Kernel
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
-// Description: Beaversoft Universal GUI Desktop & Window Compositor
+// Description: Beaver OS Universal GUI Desktop & Window Compositor
 // ============================================================================
 
 extern crate alloc;
