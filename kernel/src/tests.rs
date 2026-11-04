@@ -346,10 +346,22 @@ pub fn test_spotlight_live_search() {
     let results_note = crate::gui::apps_system::get_spotlight_results("note");
     assert!(!results_note.is_empty(), "Spotlight debe encontrar BeaverNote para 'note'");
     assert!(results_note.iter().any(|r| r.title.contains("Note")), "Debe contener 'Note'");
+
+    let results_foto = crate::gui::apps_system::get_spotlight_results("foto");
+    assert!(!results_foto.is_empty(), "Spotlight debe encontrar Fotos / Galería para 'foto'");
+    assert!(results_foto.iter().any(|r| r.title.contains("Photos") || r.title.contains("Foto")), "Debe contener 'Photos' o 'Foto'");
 }
 
 pub fn test_real_udp_dhcp_dns() {
-    // Verificar que las estructuras de recepción UDP de DHCP y DNS están activas y libres de bloqueo
+    // Verificar resolución estática local para nombres del sistema
+    let localhost_ip = crate::drivers::net::resolve_dns("localhost").expect("localhost debe resolver a 127.0.0.1");
+    assert_eq!(localhost_ip.0, [127, 0, 0, 1]);
+
+    let beaver_ip = crate::drivers::net::resolve_dns("beaver.lan").expect("beaver.lan debe resolver a la IP local del sistema");
+    let my_ip = crate::drivers::net::NET_INTERFACE.lock().ip_address;
+    assert_eq!(beaver_ip.0, my_ip.0);
+
+    // Verificar que los buzones de recepción UDP de DHCP y DNS están activos
     {
         let lease = crate::drivers::net::DHCP_PENDING_LEASE.lock();
         assert!(lease.is_none() || lease.is_some(), "DHCP_PENDING_LEASE debe ser accesible");

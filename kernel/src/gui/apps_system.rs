@@ -409,35 +409,85 @@ pub fn get_spotlight_results(query: &str) -> Vec<SpotlightResult> {
     let mut results = Vec::new();
     let q = query.trim();
 
-    let all_apps: [(&str, &str, WindowId); 8] = [
-        ("Terminal / Consola", "Interprete de comandos y shell interactivo", WindowId::Terminal),
-        ("Monitor de Recursos", "Telemetria de memoria, CPU y tareas en tiempo real", WindowId::Monitor),
-        ("BeaverFiles", "Explorador de archivos VFS (/disk, /net, /sys)", WindowId::Files),
-        ("BeaverSync", "Malla de dispositivos y sincronizacion UDP real", WindowId::Sync),
-        ("BeaverAudio", "Reproductor y sintetizador PCM sin punto flotante", WindowId::Player),
-        ("BeaverPhotos", "Galeria de imagenes y visor grafico VESA", WindowId::Photos),
-        ("BeaverCalendar", "Calendario mensual en tiempo real (RTC UTC-6)", WindowId::Calendar),
-        ("BeaverNote", "Editor de notas persistente (/disk/notas.txt)", WindowId::Note),
+    struct AppEntry {
+        title: &'static str,
+        desc: &'static str,
+        target: WindowId,
+        keywords: &'static [&'static str],
+    }
+
+    let all_apps: [AppEntry; 8] = [
+        AppEntry {
+            title: "Terminal / Consola",
+            desc: "Interprete de comandos y shell interactivo CLI",
+            target: WindowId::Terminal,
+            keywords: &["term", "terminal", "consola", "shell", "cli", "bash", "cmd"],
+        },
+        AppEntry {
+            title: "Monitor de Recursos",
+            desc: "Telemetria de memoria, CPU y tareas en tiempo real",
+            target: WindowId::Monitor,
+            keywords: &["mon", "monitor", "recursos", "cpu", "mem", "top", "dashboard", "ram"],
+        },
+        AppEntry {
+            title: "BeaverFiles",
+            desc: "Explorador de archivos VFS (/disk, /net, /sys)",
+            target: WindowId::Files,
+            keywords: &["file", "files", "archivo", "archivos", "disco", "vfs", "carpeta", "disk"],
+        },
+        AppEntry {
+            title: "BeaverSync",
+            desc: "Malla de dispositivos y sincronizacion UDP real",
+            target: WindowId::Sync,
+            keywords: &["sync", "malla", "mesh", "red", "nodos", "udp", "compartir"],
+        },
+        AppEntry {
+            title: "BeaverAudio",
+            desc: "Reproductor y sintetizador PCM sin punto flotante",
+            target: WindowId::Player,
+            keywords: &["audio", "musica", "sonido", "wav", "player", "chime", "sound", "reproductor"],
+        },
+        AppEntry {
+            title: "Fotos / Galería (BeaverPhotos)",
+            desc: "Visor de imágenes BMP, galería de fotos y gráficos VESA",
+            target: WindowId::Photos,
+            keywords: &["foto", "fotos", "photo", "photos", "galeria", "imagen", "imagenes", "bmp", "pic", "visor"],
+        },
+        AppEntry {
+            title: "Calendario (BeaverCalendar)",
+            desc: "Calendario mensual en tiempo real (RTC UTC-6)",
+            target: WindowId::Calendar,
+            keywords: &["cal", "calendario", "calendar", "fecha", "reloj", "mes", "dia", "time"],
+        },
+        AppEntry {
+            title: "Editor de Notas (BeaverNote)",
+            desc: "Editor de notas persistente (/disk/notas.txt)",
+            target: WindowId::Note,
+            keywords: &["note", "nota", "notas", "editor", "texto", "bloc", "escribir", "txt"],
+        },
     ];
 
     if q.is_empty() {
-        for &(title, desc, win_id) in &all_apps[..4] {
+        for app in &all_apps[..4] {
             results.push(SpotlightResult {
-                title: String::from(title),
-                desc: String::from(desc),
-                target: win_id,
+                title: String::from(app.title),
+                desc: String::from(app.desc),
+                target: app.target,
             });
         }
         return results;
     }
 
     // Coincidencias en aplicaciones
-    for &(title, desc, win_id) in &all_apps {
-        if contains_ignore_case(title, q) || contains_ignore_case(desc, q) {
+    for app in &all_apps {
+        let matches = contains_ignore_case(app.title, q)
+            || contains_ignore_case(app.desc, q)
+            || app.keywords.iter().any(|&k| contains_ignore_case(k, q) || contains_ignore_case(q, k));
+        if matches {
             results.push(SpotlightResult {
-                title: String::from(title),
-                desc: String::from(desc),
-                target: win_id,
+                title: String::from(app.title),
+                desc: String::from(app.desc),
+                target: app.target,
             });
             if results.len() >= 4 {
                 return results;

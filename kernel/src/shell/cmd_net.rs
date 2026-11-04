@@ -14,7 +14,7 @@ use super::Shell;
 
 pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
     match cmd {
-        "ifconfig" | "ip" => {
+        "ifconfig" | "ip" | "net" => {
             let net = crate::drivers::net::NET_INTERFACE.lock();
             kprintln!("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500");
             kprintln!("        inet {}  netmask {}  broadcast 10.0.2.255", net.ip_address.to_string(), net.netmask.to_string());
@@ -166,7 +166,11 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
                     kprintln!("  Nombre:       {}", domain);
                     kprintln!("  Direccion:    {}", ip.to_string());
                 }
-                Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[DNS ERROR] {}\n", e),
+                Err(e) => {
+                    kprint_color!(VgaColor::LightRed, VgaColor::Black, "[DNS ERROR] {}\n", e);
+                    kprintln!("  Nota: Dominios de Internet (ej. google.com, cloudflare.com) requieren salida WAN activa.");
+                    kprintln!("        Hostnames locales (ej. localhost, beaver.lan, router.lan) se resuelven internamente.");
+                }
             }
         }
 

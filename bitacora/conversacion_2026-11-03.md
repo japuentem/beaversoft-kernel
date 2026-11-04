@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 17
+# Total de interacciones del día: 18
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -550,5 +550,41 @@ Se detalló al usuario la guía completa paso a paso para probar y visualizar to
 2. **Topología SMP y Despacho Distribuido en APs:** Comandos `smp`/`cores` para visualizar los 4 núcleos en línea tras el trampolín `INIT-SIPI-SIPI`, la tarea en ejecución en cada core y las tareas ejecutadas concurrentemente. Comando `tasks` para visualizar la columna `Núcleo`.
 3. **Protocolos Reales DHCP y DNS sobre UDP:** Comandos `net`, `dhcp` y `dns google.com` para observar el intercambio de tramas por la tarjeta de red Intel PRO/1000 real con el servidor de QEMU.
 4. **Verificación Automatizada:** Ejecución de `.\run.ps1 -Test` para verificar las 13 pruebas de la suite oficial con reporte visual y código de salida 33.
+
+================================================================================
+
+## Interacción #18 [23:40:00]
+
+### 👤 Pregunta / Petición del Usuario:
+-Esc no cierra Spotlight
+-en Spotlight escribi foto y no aparecio nada
+-escribi net y aparecio "Comando desconocido: 'net'"
+-escribi dns beaver.lan y aparecio error
+[Adjunta captura de pantalla mostrando terminal interactivo con `dns google.com` resolviendo exitosamente a 142.250.189.14 y `dns beaver.lan` con timeout]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se diagnosticaron y solucionaron los 4 puntos reportados por el usuario:
+
+1. **Cierre de Spotlight con ESC (`kernel/src/gui/desktop.rs`):**
+   - **Causa raíz:** En `handle_gui_char()`, la condición `if ch == '\x1b'` se encontraba en el encabezado de la función alternando a `FullScreenCli` antes de verificar si Spotlight estaba abierto.
+   - **Corrección:** Se reordenó la lógica dando prioridad absoluta a `if is_desktop && is_spot_open`: ahora pulsar `ESC` cierra Spotlight de inmediato (`is_open = false`) y redibuja el escritorio sin alterar la vista.
+
+2. **Búsqueda de "foto" en Spotlight (`kernel/src/gui/apps_system.rs`):**
+   - **Causa raíz:** La aplicación estaba registrada exclusivamente como `"BeaverPhotos"` con descripción en inglés/técnico, sin coincidencias para la palabra en español `"foto"`.
+   - **Corrección:** Se reestructuró `all_apps` con una estructura `AppEntry` que incluye una lista de palabras clave y sinónimos en español e inglés (`keywords: &["foto", "fotos", "photo", "photos", "galeria", "imagen", "bmp", ...]`). Ahora escribir "foto", "fotos", "imagen" o "galeria" encuentra y resalta de inmediato a `Fotos / Galería (BeaverPhotos)`.
+
+3. **Comando `net` no reconocido (`kernel/src/shell/cmd_net.rs`):**
+   - **Causa raíz:** El comando estaba registrado como `"ifconfig" | "ip"`.
+   - **Corrección:** Se añadió el alias `"net"` a `"ifconfig" | "ip" | "net" =>`, permitiendo que `net` muestre la IP, máscara, gateway, MAC física de la Intel PRO/1000 y contadores reales RX/TX de paquetes.
+
+4. **Error en `dns beaver.lan` (`kernel/src/drivers/net.rs`, `shell/cmd_net.rs`):**
+   - **Diagnóstico:** Como demostró la captura del usuario, `dns google.com` funcionó con total éxito y veracidad resolviendo a `142.250.189.14` mediante UDP :53 sobre la E1000 real. Sin embargo, `beaver.lan` no existe en los servidores DNS públicos de Internet a los que delega QEMU.
+   - **Corrección:** Se implementó en `resolve_dns()` la tabla de resolución local del sistema (análoga a `/etc/hosts`), resolviendo de forma instantánea nombres locales como `localhost` (`127.0.0.1`), `beaver.lan` / `beaver` (a la IP real de la máquina `10.0.2.15`), y `gateway` / `router.lan` (a la puerta de enlace). Para nombres externos, continúa realizando la consulta UDP RFC 1035 real hacia Internet.
+
+5. **Verificación:**
+   - `cargo check --target x86_64-unknown-none`: 0 advertencias, 0 errores.
+   - `run.ps1 -Test`: las 13 pruebas automatizadas del kernel pasaron exitosamente (`[SUITE OK]`, código QEMU `33`).
 
 ================================================================================

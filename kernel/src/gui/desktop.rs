@@ -463,20 +463,6 @@ pub fn render_fullscreen_cli() {
 }
 
 pub fn handle_gui_char(ch: char) {
-    if ch == '\x1b' {
-        let mut state = GUI_TERMINAL.lock();
-        if state.mode == GuiViewMode::Desktop {
-            state.mode = GuiViewMode::FullScreenCli;
-            drop(state);
-            render_fullscreen_cli();
-        } else {
-            state.mode = GuiViewMode::Desktop;
-            drop(state);
-            render_desktop();
-        }
-        return;
-    }
-
     let (is_desktop, is_spot_open, is_note_active) = {
         let is_desk = GUI_TERMINAL.lock().mode == GuiViewMode::Desktop;
         let is_spot = SPOTLIGHT.lock().is_open;
@@ -484,10 +470,11 @@ pub fn handle_gui_char(ch: char) {
         (is_desk, is_spot, is_note)
     };
 
+    // Prioridad 1: Si Spotlight está abierto, capturar sus eventos con prioridad absoluta
     if is_desktop && is_spot_open {
         match ch {
             '\x1B' => {
-                // ESC: Cierra Spotlight
+                // ESC: Cierra Spotlight inmediatamente
                 SPOTLIGHT.lock().is_open = false;
                 render_desktop();
             }
@@ -547,6 +534,21 @@ pub fn handle_gui_char(ch: char) {
                 render_desktop();
             }
             _ => {}
+        }
+        return;
+    }
+
+    // Prioridad 2: Alternar entre Escritorio y FullScreenCli con tecla ESC si Spotlight no está activo
+    if ch == '\x1b' {
+        let mut state = GUI_TERMINAL.lock();
+        if state.mode == GuiViewMode::Desktop {
+            state.mode = GuiViewMode::FullScreenCli;
+            drop(state);
+            render_fullscreen_cli();
+        } else {
+            state.mode = GuiViewMode::Desktop;
+            drop(state);
+            render_desktop();
         }
         return;
     }

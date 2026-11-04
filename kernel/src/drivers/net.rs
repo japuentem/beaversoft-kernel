@@ -749,8 +749,17 @@ pub fn resolve_dns(domain: &str) -> Result<Ipv4Addr, String> {
     if let Some(ip) = Ipv4Addr::parse(clean) {
         return Ok(ip);
     }
-    if clean == "localhost" {
+    if clean.eq_ignore_ascii_case("localhost") {
         return Ok(Ipv4Addr::new(127, 0, 0, 1));
+    }
+    // Resolución local de nombres del sistema Beaver (tabla estática tipo /etc/hosts)
+    if clean.eq_ignore_ascii_case("beaver.lan") || clean.eq_ignore_ascii_case("beaver") {
+        let my_ip = NET_INTERFACE.lock().ip_address;
+        return Ok(my_ip);
+    }
+    if clean.eq_ignore_ascii_case("router.lan") || clean.eq_ignore_ascii_case("gateway") {
+        let gw = NET_INTERFACE.lock().gateway;
+        return Ok(gw);
     }
 
     *DNS_PENDING_RESPONSE.lock() = None;
