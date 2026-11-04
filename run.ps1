@@ -64,7 +64,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$KernelBin = "target\$Target\$Mode\beaversoft-kernel"
+$KernelBin = "target\$Target\$Mode\beaver-kernel"
 if (-not (Test-Path $KernelBin)) {
     Write-Error "[ERROR] No se encontró el binario generado en $KernelBin"
     exit 1

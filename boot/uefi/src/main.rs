@@ -10,7 +10,7 @@
 
 use core::panic::PanicInfo;
 
-static KERNEL_ELF: &[u8] = include_bytes!("../../../target/x86_64-unknown-none/release/beaversoft-kernel");
+static KERNEL_ELF: &[u8] = include_bytes!("../../../target/x86_64-unknown-none/release/beaver-kernel");
 
 pub const UEFI_BOOT_INFO_ADDR: u64 = 0x9000; // Movido de 0x8000: reservamos 0x8000 para futuro trampolines SMP de 16 bits
 pub const UEFI_BOOT_MAGIC: u32 = 0xBEA0B007;

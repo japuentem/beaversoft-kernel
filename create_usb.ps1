@@ -175,7 +175,7 @@ $BootDir = Join-Path $MountPath "boot"
 if (-not (Test-Path $BootDir)) {
     New-Item -ItemType Directory -Path $BootDir -Force | Out-Null
 }
-Copy-Item "target\x86_64-unknown-none\release\beaversoft-kernel" -Destination (Join-Path $BootDir "beaver-kernel.elf") -Force
+Copy-Item "target\x86_64-unknown-none\release\beaver-kernel" -Destination (Join-Path $BootDir "beaver-kernel.elf") -Force
 
 # Crear archivo README en la raíz de la USB con instrucciones claras
 $ReadmeContent = @"

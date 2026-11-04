@@ -63,7 +63,7 @@ pub fn draw_player_window() {
     Canvas::draw_line_h(list_x, y + 54, list_w, Color::BEAVER_BORDER_LIGHT);
 
     let tracks = [
-        ("1", "Beaver Chime (PCM Startup)",  "BeaverSoft Audio Lab", "0:03"),
+        ("1", "Beaver Chime (PCM Startup)",  "Beaver Audio Lab",     "0:03"),
         ("2", "Northern Lights (Ring3)",    "The Sample Band",      "3:45"),
         ("3", "Silicon Dawn (Waves DSP)",   "MSR Audio Engine",     "4:12"),
         ("4", "Kernel Harmony (HDA Dual)",  "Beaver Core Driver",   "2:30"),

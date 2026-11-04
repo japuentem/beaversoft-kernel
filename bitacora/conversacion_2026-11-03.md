@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 18
+# Total de interacciones del día: 19
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -586,5 +586,41 @@ Se diagnosticaron y solucionaron los 4 puntos reportados por el usuario:
 5. **Verificación:**
    - `cargo check --target x86_64-unknown-none`: 0 advertencias, 0 errores.
    - `run.ps1 -Test`: las 13 pruebas automatizadas del kernel pasaron exitosamente (`[SUITE OK]`, código QEMU `33`).
+
+================================================================================
+
+## Interacción #19 [23:49:00]
+
+### 👤 Pregunta / Petición del Usuario:
+aun veo que aparece la palabra Beaversoft
+Compiling beaversoft-kernel
+
+y se tenia que dejar como
+beaaver-kernel
+
+y asi aotras que puedan aparecer en los log o al iniciar el sitema
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se renombró de forma integral el paquete del kernel y sus referencias de compilación y arranque de `beaversoft-kernel` a `beaver-kernel`:
+
+1. **Renombrado del Paquete Cargo (`kernel/Cargo.toml`):**
+   - Cambiado `name = "beaversoft-kernel"` a `name = "beaver-kernel"`.
+   - Ahora `cargo build` y `cargo check` emiten de forma unificada:
+     `Compiling beaver-kernel v0.1.0` / `Checking beaver-kernel v0.1.0`.
+
+2. **Rutas de Binarios y Enlace del Cargador UEFI (`boot/uefi/src/main.rs`, `run.ps1`, `Makefile`, `create_usb.ps1`):**
+   - Actualizado `include_bytes!` en `boot/uefi/src/main.rs` para embeber `target/x86_64-unknown-none/release/beaver-kernel`.
+   - Actualizado `run.ps1` para buscar y cargar `$KernelBin = "target\$Target\$Mode\beaver-kernel"`.
+   - Actualizados `Makefile` y `create_usb.ps1` con la ruta al binario `beaver-kernel`.
+
+3. **Limpieza de Cadenas en UI / Aplicaciones (`kernel/src/gui/apps_media.rs`):**
+   - En el reproductor de audio (`apps_media.rs`), se corrigió `"BeaverSoft Audio Lab"` a `"Beaver Audio Lab"`.
+   - Banners de inicio en serial y VGA verificados: muestran limpiamente `BEAVER OS v0.8.0`.
+
+4. **Verificación:**
+   - `cargo build --release --target x86_64-unknown-none`: generó `target\x86_64-unknown-none\release\beaver-kernel`.
+   - `run.ps1 -Test`: ejecución limpia de las 13 pruebas automatizadas con código QEMU 33 (`[PASS]`).
 
 ================================================================================

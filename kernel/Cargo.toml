@@ -1,5 +1,5 @@
 [package]
-name = "beaversoft-kernel"
+name = "beaver-kernel"
 version = "0.1.0"
 authors = ["José Alberto Puente Maldonado <japuentem>"]
 edition = "2021"

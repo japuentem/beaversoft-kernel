@@ -7,7 +7,7 @@
 
 TARGET ?= x86_64-unknown-none
 CARGO_TARGET_DIR ?= target
-KERNEL_BIN = $(CARGO_TARGET_DIR)/$(TARGET)/release/beaversoft-kernel
+KERNEL_BIN = $(CARGO_TARGET_DIR)/$(TARGET)/release/beaver-kernel
 
 .PHONY: all clean run run-nographic build
 
