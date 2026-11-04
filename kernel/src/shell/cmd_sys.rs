@@ -436,20 +436,23 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
 
         "smp" | "cores" => {
             let smp = crate::apic::SMP.lock();
+            let online_count = crate::apic::AP_ONLINE_COUNT.load(core::sync::atomic::Ordering::Relaxed);
             kprintln!("======================= TOPOLOGIA SMP ======================");
-            kprintln!("  [DEMO] SMP multinucleo deshabilitado - arranque uniprocessor");
             kprintln!("  Local APIC Base:     {:#010x} (MSR 0x1B)", smp.lapic_base);
+            kprintln!("  Tabla ACPI MADT:     {} ({:#010x})", if smp.madt_detected { "Detectada [APIC]" } else { "No detectada" }, smp.madt_addr);
+            kprintln!("  Trampolin 16->64 bit:{:#06x} (Vector SIPI 0x{:02x})", smp.trampoline_addr, crate::apic::SMP_SIPI_VECTOR);
             kprintln!("  Temporizador LAPIC:  Activo en modo Periodico (Vector 48 @ 100 Hz)");
             kprintln!("  Bootstrap Core (BSP):APIC ID #{}", smp.bsp_apic_id);
-            kprintln!("  Nucleos Activos:     {} (solo BSP - SMP pendiente de implementacion)", smp.cores.len());
+            kprintln!("  Nucleos Online:      {} / {} detectados en MADT", online_count, smp.cores.len());
             kprintln!("-------------------------------------------------------------");
             for core in &smp.cores {
                 let role = if core.is_bsp { "[BSP Master]" } else { "[AP Worker]" };
                 let status = if core.is_online { "ONLINE" } else { "OFFLINE" };
-                kprintln!("  Core #{} (APIC ID #{}): {:<14} | Estado: {}", core.core_id, core.apic_id, role, status);
+                kprintln!(
+                    "  Core #{} (APIC ID #{}): {:<14} | Estado: {:<7} | Stack: {:#010x}",
+                    core.core_id, core.apic_id, role, status, core.stack_top
+                );
             }
-            kprintln!("  Planificador:        Time-Slicing cooperativo (1 core)");
-            kprintln!("  Pendiente:           MADT/ACPI + trampolines 16-bit + stacks AP");
             kprintln!("=============================================================");
         }
 

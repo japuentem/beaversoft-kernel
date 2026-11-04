@@ -64,15 +64,17 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 8] = [
-        ("spinmutex_owner_and_reentrancy_guard", test_spinmutex_owner_and_reentrancy_guard),
-        ("frame_allocator_alloc_and_free",       test_frame_allocator_alloc_and_free),
-        ("heap_dynamic_allocations",             test_heap_dynamic_allocations),
-        ("vfs_beaverfs_read_write",              test_vfs_beaverfs_read_write),
-        ("mesh_file_sync_and_ack",               test_mesh_file_sync_and_ack),
-        ("audio_integer_chime_no_fpu",           test_audio_integer_chime_no_fpu),
-        ("gui_dirty_rects_and_resolution",       test_gui_dirty_rects_and_resolution),
-        ("crc32_ieee8023_integrity",             test_crc32_ieee8023),
+    let tests: [(&str, fn()); 10] = [
+        ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
+        ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
+        ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
+        ("paging_4k_and_process_cr3_isolation",     test_paging_4k_and_process_cr3_isolation),
+        ("smp_madt_and_trampoline_0x8000",          test_smp_madt_and_trampoline_0x8000),
+        ("vfs_beaverfs_read_write",                 test_vfs_beaverfs_read_write),
+        ("mesh_file_sync_and_ack",                  test_mesh_file_sync_and_ack),
+        ("audio_integer_chime_no_fpu",              test_audio_integer_chime_no_fpu),
+        ("gui_dirty_rects_and_resolution",          test_gui_dirty_rects_and_resolution),
+        ("crc32_ieee8023_integrity",                test_crc32_ieee8023),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -243,6 +245,103 @@ pub fn test_gui_dirty_rects_and_resolution() {
     let dirty = Canvas::take_dirty_rect().expect("Debe existir region sucia acumulada");
     assert_eq!(dirty, (100, 80, 200, 80));
     assert_eq!(Canvas::take_dirty_rect(), None, "Debe limpiarse tras take_dirty_rect");
+}
+
+pub fn test_paging_4k_and_process_cr3_isolation() {
+    use crate::memory::frame_allocator::FRAME_ALLOCATOR;
+    use crate::memory::paging::{self, KERNEL_FINE_PAGES_COUNT, USER_ELF_VADDR};
+
+    let k_cr3 = paging::kernel_cr3();
+    assert!(k_cr3 != 0, "KERNEL_CR3 debe estar inicializado");
+    assert_eq!(
+        paging::fine_4k_pages_count(),
+        KERNEL_FINE_PAGES_COUNT,
+        "El kernel debe tener 16,384 paginas finas de 4 KiB mapeadas"
+    );
+
+    // 1. Verificar que el código del kernel (0x100000) y el heap (0x400000) estén en páginas de 4 KiB con PAGE_USER = 0
+    let (phys_k, is_4k_k, is_user_k) = paging::query_mapping(k_cr3, 0x0010_0000).expect("0x100000 debe estar mapeado");
+    assert_eq!(phys_k, 0x0010_0000);
+    assert!(is_4k_k, "La imagen del kernel debe usar tablas de 4 KiB");
+    assert!(!is_user_k, "Las paginas del kernel NO deben tener el bit PAGE_USER");
+
+    let (phys_h, is_4k_h, is_user_h) = paging::query_mapping(k_cr3, 0x0040_0000).expect("0x400000 debe estar mapeado");
+    assert_eq!(phys_h, 0x0040_0000);
+    assert!(is_4k_h, "El heap del kernel debe usar tablas de 4 KiB");
+    assert!(!is_user_h, "El heap del kernel NO debe tener el bit PAGE_USER");
+
+    // 2. Crear dos espacios de direcciones independientes (CR3_A y CR3_B) y mapear la misma vaddr a distintos marcos físicos
+    let cr3_a = paging::create_process_address_space().expect("Debe crear CR3 para Proceso A");
+    let cr3_b = paging::create_process_address_space().expect("Debe crear CR3 para Proceso B");
+    assert_ne!(cr3_a, cr3_b);
+
+    let frame_a = FRAME_ALLOCATOR.allocate_frame().expect("Marco para Proceso A") as u64;
+    let frame_b = FRAME_ALLOCATOR.allocate_frame().expect("Marco para Proceso B") as u64;
+    assert_ne!(frame_a, frame_b);
+
+    paging::map_user_page(cr3_a, USER_ELF_VADDR, frame_a, true).expect("Mapear vaddr en CR3_A");
+    paging::map_user_page(cr3_b, USER_ELF_VADDR, frame_b, true).expect("Mapear vaddr en CR3_B");
+
+    // 3. Verificar que en CR3_A y CR3_B solo la página del proceso tenga PAGE_USER = true y el kernel siga PAGE_USER = false
+    let (mapped_a, is_4k_a, is_user_a) = paging::query_mapping(cr3_a, USER_ELF_VADDR).unwrap();
+    assert_eq!(mapped_a, frame_a);
+    assert!(is_4k_a && is_user_a, "La pagina del proceso A debe ser de 4 KiB con PAGE_USER=1");
+
+    let (_, _, k_in_a_user) = paging::query_mapping(cr3_a, 0x0010_0000).unwrap();
+    assert!(!k_in_a_user, "El kernel dentro de CR3_A debe mantener PAGE_USER=0");
+
+    // 4. Conmutar CR3 a Proceso A y Proceso B y comprobar aislamiento real de datos en la misma dirección virtual
+    // SAFETY: `cr3_a` y `cr3_b` contienen los mapeos supervisores del kernel y `USER_ELF_VADDR` está mapeado a marcos válidos.
+    unsafe {
+        paging::write_cr3(cr3_a);
+        core::ptr::write_volatile(USER_ELF_VADDR as *mut u64, 0xBEAF_1111_2222_3333);
+
+        paging::write_cr3(cr3_b);
+        core::ptr::write_volatile(USER_ELF_VADDR as *mut u64, 0xCAFE_4444_5555_6666);
+        let val_b = core::ptr::read_volatile(USER_ELF_VADDR as *const u64);
+        assert_eq!(val_b, 0xCAFE_4444_5555_6666);
+
+        paging::write_cr3(cr3_a);
+        let val_a = core::ptr::read_volatile(USER_ELF_VADDR as *const u64);
+        assert_eq!(val_a, 0xBEAF_1111_2222_3333);
+
+        paging::switch_to_kernel_cr3();
+    }
+    assert_eq!(paging::read_cr3(), k_cr3);
+}
+
+pub fn test_smp_madt_and_trampoline_0x8000() {
+    use crate::apic::{AP_ONLINE_COUNT, SMP, SMP_TRAMPOLINE_ADDR};
+    use core::sync::atomic::Ordering;
+
+    let smp = SMP.lock();
+    assert!(smp.madt_detected, "La tabla ACPI MADT ('APIC') debe ser detectada");
+    assert!(smp.madt_addr != 0, "La direccion fisica de MADT debe ser no nula");
+    assert_eq!(smp.trampoline_addr, SMP_TRAMPOLINE_ADDR as u64);
+
+    // Verificar que los primeros bytes del trampolín de 16 bits estén instalados en 0x8000 (cli; cld; xor ax, ax)
+    // SAFETY: Lectura de los primeros 4 bytes en la página física `0x8000` reservada para el trampolín SMP.
+    let trampoline_head = unsafe { core::slice::from_raw_parts(SMP_TRAMPOLINE_ADDR as *const u8, 4) };
+    assert_eq!(trampoline_head, &[0xFA, 0xFC, 0x31, 0xC0]);
+
+    // Si QEMU se lanzó con múltiples núcleos (-smp > 1), verificar que los APs despertaron realmente
+    if smp.cores.len() > 1 {
+        let online_aps = smp.cores.iter().filter(|c| !c.is_bsp && c.is_online).count();
+        assert!(online_aps >= 1, "Al menos un AP secundario debe haber despertado por SIPI en 0x8000");
+        assert!(AP_ONLINE_COUNT.load(Ordering::Relaxed) >= 2, "AP_ONLINE_COUNT debe reflejar BSP + APs online");
+    }
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_paging_4k_isolation() {
+    test_paging_4k_and_process_cr3_isolation();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_smp_madt_trampoline() {
+    test_smp_madt_and_trampoline_0x8000();
 }
 
 #[cfg(test)]

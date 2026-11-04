@@ -10,6 +10,7 @@
 pub mod frame_allocator;
 pub mod heap;
 pub mod memmap;
+pub mod paging;
 
 pub use memmap::MemMap;
 
@@ -61,6 +62,9 @@ pub fn init_memory(memmap: &MemMap) {
     //    NO hay cast *const → *mut, NO hay UB.
     FRAME_ALLOCATOR.init_from_memmap(memmap);
 
+    // 2.1 Construir y activar tablas de paginación propias del kernel (16,384 páginas de 4 KiB con PAGE_USER = 0)
+    let kernel_cr3 = paging::init_kernel_paging();
+
     // 3. Imprimir estado de memoria (sin f32, solo KiB y MiB enteros)
     let k_size_kib  = k_size / 1024;
     let heap_kib    = HEAP_SIZE / 1024;
@@ -76,6 +80,11 @@ pub fn init_memory(memmap: &MemMap) {
         VgaColor::White, VgaColor::Black,
         "[MEM] Kernel Heap:  {:#x} - {:#x} ({} KiB)\n",
         HEAP_START, HEAP_START + HEAP_SIZE, heap_kib
+    );
+    kprint_color!(
+        VgaColor::LightCyan, VgaColor::Black,
+        "[MEM] Paging 4 KiB: CR3={:#x} | {} paginas de 4 KiB (Supervisor Ring 0)\n",
+        kernel_cr3, paging::fine_4k_pages_count()
     );
     kprint_color!(
         VgaColor::LightGreen, VgaColor::Black,

@@ -160,3 +160,17 @@ pub fn set_tss_rsp0(stack_top: u64) {
     }
 }
 
+/// Carga la GDT principal del kernel en un núcleo secundario (AP) tras completar el trampolín de 16->64 bits.
+pub fn load_gdt_on_ap() {
+    // SAFETY: `GDT` ya fue inicializada por el BSP antes de enviar SIPI; el AP solo carga `GDTR` y selectores de Ring 0.
+    unsafe {
+        let gdt_ptr_raw = addr_of_mut!(GDT) as *mut u64;
+        let gdt_ptr = DescriptorTablePointer {
+            limit: (size_of::<[u64; 7]>() - 1) as u16,
+            base: gdt_ptr_raw as u64,
+        };
+        asm!("lgdt [{}]", in(reg) &gdt_ptr, options(readonly, nostack, preserves_flags));
+    }
+}
+
+

@@ -29,10 +29,10 @@ unsafe impl<T: Send> Sync for SpinMutex<T> {}
 // SAFETY: Un `SpinMutex<T>` puede enviarse entre hilos de forma segura si el dato protegido `T` implementa `Send`.
 unsafe impl<T: Send> Send for SpinMutex<T> {}
 
-/// Obtiene un identificador ligero del núcleo actual (0 en modo uniprocesador BSP).
+/// Obtiene el identificador de hardware (Local APIC ID) del núcleo actual (0 antes de activar LAPIC).
 #[inline(always)]
 fn current_cpu_id() -> u32 {
-    0
+    crate::apic::current_apic_id()
 }
 
 impl<T> SpinMutex<T> {

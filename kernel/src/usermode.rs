@@ -22,16 +22,14 @@
 
 use core::arch::asm;
 use crate::gdt::{SELECTOR_USER_CODE, SELECTOR_USER_DATA, set_tss_rsp0};
+use crate::memory::frame_allocator::{FRAME_ALLOCATOR, PAGE_SIZE};
+use crate::memory::paging::{
+    self, USER_CODE_VADDR, USER_STACK_PAGES, USER_STACK_VADDR,
+};
 use crate::syscall::{SYS_WRITE, SYS_GETPID, SYS_SLEEP, SYS_EXIT};
+use crate::task::scheduler::SCHEDULER;
 use crate::vga::VgaColor;
 use crate::kprint_color;
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Pila de usuario (privada por tarea Ring 3)
-// ──────────────────────────────────────────────────────────────────────────────
-const USER_STACK_SIZE: usize = 4096 * 4; // 16 KiB
-static mut USER_STACK_A: [u8; USER_STACK_SIZE] = [0u8; USER_STACK_SIZE];
-static mut USER_STACK_B: [u8; USER_STACK_SIZE] = [0u8; USER_STACK_SIZE];
 
 // Pila de kernel que el procesador usa cuando la tarea Ring 3 recibe una
 // interrupción (se actualiza en el TSS.RSP0 antes de cada IRETQ)
@@ -179,19 +177,58 @@ extern "C" fn userland_crash_task() {
 // Estas son las que se pasan a task::spawn() o se llaman directamente.
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Prepara un espacio de direcciones (`CR3`) dedicado para la tarea de usuario actual,
+/// mapeando su código en `USER_CODE_VADDR` (solo lectura/ejecución `PAGE_USER`) y su pila
+/// privada de 16 KiB en `USER_STACK_VADDR` (`PAGE_USER | PAGE_WRITABLE`).
+fn prepare_isolated_user_space(fn_ptr: *const u8) -> (u64, u64, u64) {
+    let proc_cr3 = paging::create_process_address_space()
+        .expect("[RING3] Sin memoria para crear tabla CR3 de proceso");
+
+    let code_frame = FRAME_ALLOCATOR
+        .allocate_frame()
+        .expect("[RING3] Sin marcos fisicos para codigo de usuario");
+
+    // SAFETY: Se copian los primeros 256 bytes de instrucciones máquina de la función Ring 3 al marco físico privado recién asignado.
+    unsafe {
+        core::ptr::copy_nonoverlapping(fn_ptr, code_frame as *mut u8, 256);
+    }
+
+    paging::map_user_page(proc_cr3, USER_CODE_VADDR, code_frame as u64, false)
+        .expect("[RING3] Error mapeando pagina de codigo USER_CODE_VADDR");
+
+    for i in 0..USER_STACK_PAGES {
+        let stack_frame = FRAME_ALLOCATOR
+            .allocate_frame()
+            .expect("[RING3] Sin marcos fisicos para pila de usuario");
+        let vaddr = USER_STACK_VADDR + (i * PAGE_SIZE) as u64;
+        paging::map_user_page(proc_cr3, vaddr, stack_frame as u64, true)
+            .expect("[RING3] Error mapeando pagina de pila USER_STACK_VADDR");
+    }
+
+    let user_stack_top = USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
+    SCHEDULER.lock().set_current_cr3(proc_cr3);
+
+    // SAFETY: `proc_cr3` contiene los mapeos supervisores del kernel (`PAGE_USER = 0`) y las páginas de usuario aisladas (`PAGE_USER = 1`).
+    unsafe {
+        paging::write_cr3(proc_cr3);
+    }
+
+    (proc_cr3, USER_CODE_VADDR, user_stack_top)
+}
+
 /// Worker que corre la tarea normal de userland en Ring 3
 pub fn spawn_normal_user_task() {
-    let entry = userland_normal_task as *const () as u64;
-    let user_stack_top = core::ptr::addr_of!(USER_STACK_A) as u64 + USER_STACK_SIZE as u64;
+    let (proc_cr3, entry, user_stack_top) =
+        prepare_isolated_user_space(userland_normal_task as *const u8);
 
     kprint_color!(
         VgaColor::Yellow, VgaColor::Black,
-        "\n[RING3] Lanzando proceso normal en Ring 3 via IRETQ...\n"
+        "\n[RING3] Lanzando proceso normal en Ring 3 via IRETQ (CR3 aislado)...\n"
     );
     kprint_color!(
         VgaColor::LightCyan, VgaColor::Black,
-        "  Entry:  {:#x}\n  Stack:  {:#x}\n  CPL:    Ring 3 (User Mode)\n",
-        entry, user_stack_top
+        "  CR3:    {:#x} (PAGE_USER solo en proceso)\n  Entry:  {:#x}\n  Stack:  {:#x}\n  CPL:    Ring 3 (User Mode)\n",
+        proc_cr3, entry, user_stack_top
     );
 
     jump_to_ring3(entry, user_stack_top);
@@ -199,16 +236,17 @@ pub fn spawn_normal_user_task() {
 
 /// Worker que corre la tarea de crash de userland en Ring 3 (demuestra aislamiento)
 pub fn spawn_crash_user_task() {
-    let entry = userland_crash_task as *const () as u64;
-    let user_stack_top = core::ptr::addr_of!(USER_STACK_B) as u64 + USER_STACK_SIZE as u64;
+    let (proc_cr3, entry, user_stack_top) =
+        prepare_isolated_user_space(userland_crash_task as *const u8);
 
     kprint_color!(
         VgaColor::LightRed, VgaColor::Black,
-        "\n[RING3-CRASH] Lanzando proceso crasheador en Ring 3 (Anti-BSOD test)...\n"
+        "\n[RING3-CRASH] Lanzando proceso crasheador en Ring 3 (CR3={:#x}, Anti-BSOD test)...\n",
+        proc_cr3
     );
     kprint_color!(
         VgaColor::Yellow, VgaColor::Black,
-        "  El proceso intentara una NULL deref -> #PF desde Ring 3\n  El kernel deberia matar solo este proceso.\n"
+        "  El proceso intentara leer 0x0 (Supervisor PAGE_USER=0) -> #PF desde Ring 3\n  El kernel deberia matar solo este proceso.\n"
     );
 
     jump_to_ring3(entry, user_stack_top);

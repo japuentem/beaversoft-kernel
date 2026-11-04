@@ -110,6 +110,19 @@ pub fn init_idt() {
     }
 }
 
+/// Carga la IDT ya inicializada por el BSP en un núcleo secundario (AP).
+pub fn load_idt_on_ap() {
+    // SAFETY: `IDT` ya fue poblada por el BSP antes de iniciar el arranque SMP; `lidt` solo registra el puntero en el AP actual.
+    unsafe {
+        let idt_raw = addr_of_mut!(IDT) as *mut IdtEntry;
+        let idtr = IdtPointer {
+            limit: (core::mem::size_of::<[IdtEntry; 256]>() - 1) as u16,
+            base: idt_raw as u64,
+        };
+        asm!("lidt [{}]", in(reg) &idtr, options(readonly, nostack, preserves_flags));
+    }
+}
+
 // SAFETY: El llamador debe garantizar que `index < 256` y que no hay acceso concurrente a `IDT`.
 unsafe fn set_entry(index: usize, handler_addr: u64, ist: u8) {
     let idt_raw = addr_of_mut!(IDT) as *mut IdtEntry;

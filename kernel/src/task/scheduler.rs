@@ -104,6 +104,22 @@ impl Scheduler {
         }
     }
 
+    /// Asigna un espacio de direcciones (CR3) dedicado a la tarea actualmente en ejecución
+    pub fn set_current_cr3(&mut self, cr3: u64) {
+        if let Some(t) = self.tasks.get_mut(self.current_idx) {
+            t.cr3 = cr3;
+        }
+    }
+
+    /// Devuelve el CR3 asociado a la tarea actualmente en ejecución
+    pub fn current_cr3(&self) -> u64 {
+        if let Some(t) = self.tasks.get(self.current_idx) {
+            t.cr3
+        } else {
+            crate::memory::paging::kernel_cr3()
+        }
+    }
+
     /// Termina una tarea por su identificador de tarea (TID)
     pub fn kill_task(&mut self, id: TaskId) -> Result<(), &'static str> {
         if id == 0 {
@@ -175,10 +191,17 @@ pub fn schedule() {
 
         let prev_sp = &mut sched.tasks[prev_idx].stack_ptr as *mut *mut u8;
         let next_sp = sched.tasks[next_idx].stack_ptr;
-        Some((prev_sp, next_sp))
+        let next_cr3 = sched.tasks[next_idx].cr3;
+        Some((prev_sp, next_sp, next_cr3))
     }; // <-- ¡EL CERROJO DEL SCHEDULER SE LIBERA AQUÍ MISMO!
 
-    if let Some((prev_sp, next_sp)) = context_switch_args {
+    if let Some((prev_sp, next_sp, next_cr3)) = context_switch_args {
+        if next_cr3 != 0 && crate::memory::paging::read_cr3() != next_cr3 {
+            // SAFETY: `next_cr3` es una tabla PML4 válida de tarea que incluye los mapeos supervisores del kernel.
+            unsafe {
+                crate::memory::paging::write_cr3(next_cr3);
+            }
+        }
         // SAFETY: `prev_sp` y `next_sp` apuntan a pilas de kernel válidas de tareas registradas y el cerrojo `SCHEDULER` ya fue liberado.
         unsafe {
             switch_context(prev_sp, next_sp);
@@ -208,8 +231,10 @@ pub fn mark_finished_and_yield() {
         let curr = sched.current_idx;
         if curr < sched.tasks.len() {
             sched.tasks[curr].state = TaskState::Finished;
+            sched.tasks[curr].cr3 = crate::memory::paging::kernel_cr3();
         }
     }
+    crate::memory::paging::switch_to_kernel_cr3();
     schedule();
 }
 

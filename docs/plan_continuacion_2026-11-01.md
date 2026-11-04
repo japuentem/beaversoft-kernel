@@ -146,9 +146,9 @@ Archivo nuevo sugerido: `kernel/src/drivers/e1000.rs` (dejar `net.rs` para la pi
 
 ## Fase 6 — Pendientes posteriores (no empezar sin confirmación del usuario)
 
-- [ ] Paginación propia: tablas de 4 KiB para el kernel, espacio de direcciones por proceso (CR3 por tarea), bit USER solo en páginas del proceso → Ring 3 aislado de verdad.
+- [x] Paginación propia: tablas de 4 KiB para el kernel, espacio de direcciones por proceso (CR3 por tarea), bit USER solo en páginas del proceso → Ring 3 aislado de verdad.
 - [x] Pruebas automáticas en QEMU con `-device isa-debug-exit,iobase=0xf4,iosize=0x04` y un modo `cargo test` del kernel.
-- [ ] Trampolín SMP real (MADT + código de 16 bits en 0x8000).
+- [x] Trampolín SMP real (MADT + código de 16 bits en 0x8000).
 - [x] Sincronización real de archivos entre nodos (`/disk/notas.txt`) sobre UDP con confirmaciones.
 - [x] Partir `shell.rs` (2348 líneas) y `desktop.rs` (1769) en módulos por app/comando.
 - [x] GUI independiente de la resolución (usar `vbe.width/height` en todos los hit-tests) y redibujo por regiones sucias (dirty rects).

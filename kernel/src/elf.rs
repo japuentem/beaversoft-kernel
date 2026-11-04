@@ -9,6 +9,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use crate::memory::frame_allocator::{FRAME_ALLOCATOR, PAGE_SIZE};
+use crate::memory::paging::{self, USER_ELF_VADDR, USER_STACK_PAGES, USER_STACK_VADDR};
+use crate::task::scheduler::SCHEDULER;
 use crate::usermode::jump_to_ring3;
 use crate::vga::VgaColor;
 use crate::{kprintln, kprint_color};
@@ -112,12 +114,16 @@ impl<'a> ElfBinary<'a> {
         list
     }
 
-    /// Carga el binario en memoria física dedicada y salta a Ring 3
+    /// Carga el binario en un espacio de direcciones `CR3` dedicado y salta a Ring 3
     pub fn load_and_execute(&self) -> Result<(), &'static str> {
         let entry_rip = self.header.entry;
         let ph_count = self.header.ph_num;
 
+        let proc_cr3 = paging::create_process_address_space()
+            .ok_or("No hay marcos libres para crear el espacio de direcciones (CR3) del proceso ELF")?;
+
         kprintln!("==================== CARGADOR DE BINARIOS ELF64 ====================");
+        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Espacio de Proceso CR3: {:#010x} (PAGE_USER aislado)\n", proc_cr3);
         kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Punto de Entrada (RIP): {:#010x}\n", entry_rip);
         kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Cantidad Segmentos   : {}\n", ph_count);
 
@@ -140,15 +146,40 @@ impl<'a> ElfBinary<'a> {
                     return Err("El segmento excede los límites del archivo ELF");
                 }
 
-                // Copiar el contenido del segmento en la dirección destino
-                // SAFETY: Se validó `file_offset + file_sz <= self.data.len()` y `target_vaddr` apunta a la región de usuario mapeada para el ejecutable.
-                unsafe {
-                    let dest = target_vaddr as *mut u8;
-                    core::ptr::copy_nonoverlapping(self.data.as_ptr().add(file_offset), dest, file_sz);
-                    if mem_sz > file_sz {
-                        core::ptr::write_bytes(dest.add(file_sz), 0, mem_sz - file_sz);
+                // Mapear páginas físicas dedicadas de 4 KiB en `proc_cr3` con bit PAGE_USER
+                let vaddr_start = target_vaddr & !0xFFF;
+                let vaddr_end = (target_vaddr + (mem_sz as u64).max(1) + 0xFFF) & !0xFFF;
+                let writable = (flags & PF_W) != 0;
+
+                let mut page_vaddr = vaddr_start;
+                while page_vaddr < vaddr_end {
+                    let phys_frame = FRAME_ALLOCATOR
+                        .allocate_frame()
+                        .ok_or("Sin marcos físicos para segmento PT_LOAD del ELF")?;
+
+                    // Calcular qué porción del segmento cae en esta página de 4 KiB
+                    let page_end = page_vaddr + PAGE_SIZE as u64;
+                    let copy_start_vaddr = target_vaddr.max(page_vaddr);
+                    let copy_end_vaddr = (target_vaddr + file_sz as u64).min(page_end);
+
+                    if copy_start_vaddr < copy_end_vaddr {
+                        let page_off = (copy_start_vaddr - page_vaddr) as usize;
+                        let data_off = file_offset + (copy_start_vaddr - target_vaddr) as usize;
+                        let copy_len = (copy_end_vaddr - copy_start_vaddr) as usize;
+                        // SAFETY: `phys_frame` es un marco de 4 KiB recién puesto a cero y `data_off + copy_len <= self.data.len()`.
+                        unsafe {
+                            core::ptr::copy_nonoverlapping(
+                                self.data.as_ptr().add(data_off),
+                                (phys_frame + page_off) as *mut u8,
+                                copy_len,
+                            );
+                        }
                     }
+
+                    paging::map_user_page(proc_cr3, page_vaddr, phys_frame as u64, writable)?;
+                    page_vaddr += PAGE_SIZE as u64;
                 }
+
                 loaded_count += 1;
             }
         }
@@ -157,13 +188,25 @@ impl<'a> ElfBinary<'a> {
             return Err("El archivo ELF no contiene segmentos cargables PT_LOAD");
         }
 
-        // Asignar página de pila privada de usuario de 4 KiB en Ring 3
-        let stack_frame = FRAME_ALLOCATOR.allocate_frame().ok_or("No hay marcos libres para la pila de usuario")?;
-        let user_stack_top = (stack_frame + PAGE_SIZE) as u64;
+        // Asignar pila privada de usuario de 16 KiB (4 páginas de 4 KiB) en `USER_STACK_VADDR` con bit PAGE_USER
+        for i in 0..USER_STACK_PAGES {
+            let stack_frame = FRAME_ALLOCATOR
+                .allocate_frame()
+                .ok_or("No hay marcos libres para la pila de usuario")?;
+            let stack_vaddr = USER_STACK_VADDR + (i * PAGE_SIZE) as u64;
+            paging::map_user_page(proc_cr3, stack_vaddr, stack_frame as u64, true)?;
+        }
+        let user_stack_top = USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
+
+        SCHEDULER.lock().set_current_cr3(proc_cr3);
+        // SAFETY: `proc_cr3` incluye las tablas supervisoras del kernel (`PAGE_USER = 0`) y los segmentos del ELF (`PAGE_USER = 1`).
+        unsafe {
+            paging::write_cr3(proc_cr3);
+        }
 
         kprint_color!(
             VgaColor::LightGreen, VgaColor::Black,
-            "[OK] Segmentos mapeados con éxito. Transfiriendo control a Ring 3...\n"
+            "[OK] Segmentos mapeados en CR3 aislado. Transfiriendo control a Ring 3...\n"
         );
         kprint_color!(
             VgaColor::Yellow, VgaColor::Black,
@@ -188,7 +231,7 @@ pub fn generate_sample_elf_binary() -> Vec<u8> {
         elf_type: ELF_TYPE_EXEC,
         machine: ELF_MACHINE_X86_64,
         version: 1,
-        entry: 0x400000 + 0x1000, // Punto de entrada en 0x401000
+        entry: USER_ELF_VADDR,     // Punto de entrada en 0x0800_1000 (Espacio de Usuario aislado)
         ph_offset: 64,             // Inmediatamente tras la cabecera ELF
         sh_offset: 0,
         flags: 0,
@@ -211,8 +254,8 @@ pub fn generate_sample_elf_binary() -> Vec<u8> {
         seg_type: PT_LOAD,
         flags: PF_R | PF_W | PF_X,
         offset: 0x1000,            // Offset en archivo
-        vaddr: 0x400000 + 0x1000,  // Dirección virtual destino (0x401000)
-        paddr: 0x400000 + 0x1000,
+        vaddr: USER_ELF_VADDR,     // Dirección virtual destino (0x0800_1000)
+        paddr: USER_ELF_VADDR,
         file_size: 32,             // 32 bytes de código máquina
         mem_size: 32,
         align: 0x1000,

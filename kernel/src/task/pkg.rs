@@ -78,7 +78,7 @@ fn create_elf64_binary(message: &[u8]) -> Vec<u8> {
     elf.extend_from_slice(&2_u16.to_le_bytes()); // e_type: ET_EXEC (2)
     elf.extend_from_slice(&0x3E_u16.to_le_bytes()); // e_machine: x86-64 (0x3E)
     elf.extend_from_slice(&1_u32.to_le_bytes()); // e_version: 1
-    elf.extend_from_slice(&0x00400080_u64.to_le_bytes()); // e_entry: punto de entrada virtual
+    elf.extend_from_slice(&0x08000080_u64.to_le_bytes()); // e_entry: punto de entrada virtual en espacio de usuario aislado
     elf.extend_from_slice(&64_u64.to_le_bytes()); // e_phoff: cabecera de programas en offset 64
     elf.extend_from_slice(&0_u64.to_le_bytes()); // e_shoff: sin section header
     elf.extend_from_slice(&0_u32.to_le_bytes()); // e_flags
@@ -96,8 +96,8 @@ fn create_elf64_binary(message: &[u8]) -> Vec<u8> {
     elf.extend_from_slice(&1_u32.to_le_bytes()); // p_type: PT_LOAD (1)
     elf.extend_from_slice(&(1 | 4_u32).to_le_bytes()); // p_flags: PF_X | PF_R (5)
     elf.extend_from_slice(&code_offset.to_le_bytes()); // p_offset
-    elf.extend_from_slice(&0x00400080_u64.to_le_bytes()); // p_vaddr
-    elf.extend_from_slice(&0x00400080_u64.to_le_bytes()); // p_paddr
+    elf.extend_from_slice(&0x08000080_u64.to_le_bytes()); // p_vaddr
+    elf.extend_from_slice(&0x08000080_u64.to_le_bytes()); // p_paddr
     elf.extend_from_slice(&code_size.to_le_bytes()); // p_filesz
     elf.extend_from_slice(&code_size.to_le_bytes()); // p_memsz
     elf.extend_from_slice(&4096_u64.to_le_bytes()); // p_align: 4 KiB

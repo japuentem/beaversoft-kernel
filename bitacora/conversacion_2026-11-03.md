@@ -3,7 +3,7 @@
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
 # Bitácora: Sesión 2026-11-03
-# Total de interacciones del día: 13
+# Total de interacciones del día: 14
 # ============================================================================
 
 # Bitácora de Sesión — 2026-11-03
@@ -451,5 +451,35 @@ Se implementaron y verificaron en paralelo **3 puntos adicionales de la Fase 6**
 4. **Verificación:**
    - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none` sin errores ni advertencias (`0 warnings`).
    - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test` ejecutó las **8 pruebas automatizadas** en QEMU, terminando con código `33` (`[PASS]`).
+
+================================================================================
+
+## Interacción #14 [21:35:52]
+
+### 👤 Pregunta / Petición del Usuario:
+procede con los 2 puntos
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementaron y verificaron en QEMU los **últimos 2 puntos de la Fase 6**, completando el **100% de todas las fases (Fases 0 a 6)** del plan `docs/plan_continuacion_2026-11-01.md`:
+
+1. **Paginación propia de 4 KiB y aislamiento real de Ring 3 por proceso (`CR3` por tarea) (`kernel/src/memory/paging.rs`, `memory/mod.rs`, `task/mod.rs`, `task/scheduler.rs`, `usermode.rs`, `elf.rs`, `task/pkg.rs`):**
+   - Creado `kernel/src/memory/paging.rs`:
+     - `init_kernel_paging()`: construye la jerarquía maestra de 4 niveles del kernel (`KERNEL_CR3`) mapeando los primeros 64 MiB (`0x0000_0000 .. 0x0400_0000`) mediante **32 tablas PT de 512 entradas = 16,384 páginas finas de 4 KiB** con `PAGE_USER = 0` (estrictamente Supervisor Ring 0), y el resto de los 4 GiB (incluyendo MMIO VBE, E1000 y Local APIC) como páginas supervisoras sin `PAGE_USER`.
+     - `create_process_address_space()`: asigna tablas `PML4`, `PDPT` y `PD[0]` privadas por proceso, clonando las referencias supervisoras del kernel con `PAGE_USER = 0` (para que interrupciones, excepciones y `syscall` en Ring 0 funcionen sin fallos, pero Ring 3 tenga prohibido por MMU acceder al kernel).
+     - `map_user_page()` / `map_page_in()`: mapea marcos físicos de 4 KiB con `PAGE_USER = 1` únicamente en las páginas del proceso (`USER_CODE_VADDR = 0x0800_0000`, `USER_ELF_VADDR = 0x0800_1000`, `USER_STACK_VADDR = 0x0840_0000`), clonando o dividiendo automáticamente cualquier tabla `PT` para que las 511 páginas hermanas conserven `PAGE_USER = 0`.
+   - Añadido `pub cr3: u64` a `Task` (`task/mod.rs`) y conmutación automática de `CR3` en `scheduler::schedule()` y restauración de `KERNEL_CR3` en `mark_finished_and_yield()`.
+   - Actualizados `usermode.rs`, `elf.rs` y `task/pkg.rs` para ejecutar cada tarea Ring 3 y binario ELF64 dentro de su propio `CR3` aislado.
+
+2. **Trampolín SMP real (Descubrimiento ACPI MADT + código de 16->64 bits en `0x8000` + `INIT-SIPI-SIPI`) (`kernel/src/apic.rs`, `gdt.rs`, `interrupts/mod.rs`, `sync.rs`, `shell/cmd_sys.rs`):**
+   - `discover_madt_cores()` escanea el puntero ACPI `RSDP` (`"RSD PTR "`) tanto en regiones BIOS (EBDA y `0xE0000..0x100000`) como en regiones `ACPIReclaimMemory` de OVMF UEFI, recorre `RSDT`/`XSDT` hasta localizar la tabla `"APIC"` (**MADT**) y extrae la lista real de `apic_id` habilitados.
+   - `install_trampoline()` instala en la página física `0x8000` (vector `SIPI = 0x08`, libre gracias a que `UefiBootInfo` se movió a `0x9000`) el código máquina de transición `16-bit Real Mode -> PAE/CR3/EFER.LME/CR0.PG -> 64-bit Long Mode` (`AP_TRAMPOLINE_CODE`), junto con su GDT temporal en `0x8100`, `GDTR` en `0x8120` y buzón en `0x8F00..0x8F20`.
+   - `wake_secondary_cores()` asigna una pila física dedicada de 16 KiB (`allocate_contiguous(4)`) para cada AP, envía la secuencia `INIT` + `SIPI` (y segundo `SIPI` de respaldo), y espera confirmación atómica en `AP_BOOT_FLAG` y `AP_ONLINE_COUNT` desde `ap_kernel_entry()` antes de marcar cada núcleo como `ONLINE`.
+   - `SpinMutex::current_cpu_id()` ahora consulta `apic::current_apic_id()` para distinguir dueños por núcleo de hardware real.
+
+3. **Verificación en QEMU (`./run.ps1 -Test` con `-smp 4`):**
+   - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **0 errores, 0 warnings**.
+   - Suite automatizada de **10 pruebas** en QEMU (`isa-debug-exit` en puerto `0xF4`), incluyendo `paging_4k_and_process_cr3_isolation` y `smp_madt_and_trampoline_0x8000`, finalizando con `[SUITE OK]` y código `33` (`[PASS]`).
 
 ================================================================================
