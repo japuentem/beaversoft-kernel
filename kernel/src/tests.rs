@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 13] = [
+    let tests: [(&str, fn()); 14] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -78,6 +78,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("spotlight_live_search",                   test_spotlight_live_search),
         ("real_udp_dhcp_dns_structures",            test_real_udp_dhcp_dns),
         ("smp_distributed_scheduler",               test_smp_distributed_scheduler),
+        ("ahci_sata_dma_controller",                test_ahci_sata_dma_controller),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -385,6 +386,43 @@ pub fn test_smp_distributed_scheduler() {
     assert!(!smp.cores.is_empty(), "SMP debe contener la lista de núcleos descubiertos");
 }
 
+pub fn test_ahci_sata_dma_controller() {
+    let ahci = crate::storage::ahci::AHCI_CONTROLLER.lock();
+    if ahci.detected {
+        let is_dma = crate::storage::block_device::BLOCK_DEVICE.lock().is_using_ahci();
+        assert!(is_dma, "BLOCK_DEVICE debe tener activado el backend AHCI DMA");
+        let active_port_idx = ahci.active_sata_port.expect("Debe existir un puerto SATA activo") as usize;
+        assert!(ahci.ports[active_port_idx].active, "El puerto activo de AHCI debe estar marcado");
+
+        drop(ahci);
+
+        // Probar escritura y lectura DMA real en sector seguro (LBA 10000, fuera de BeaverFS)
+        let test_lba = 10000u32;
+        let mut write_buf = [0u8; 512];
+        for (i, b) in write_buf.iter_mut().enumerate() {
+            *b = ((i * 7 + 0x5A) & 0xFF) as u8;
+        }
+
+        let mut dev = crate::storage::block_device::BLOCK_DEVICE.lock();
+        let write_res = dev.write_sector(test_lba, &write_buf);
+        assert!(write_res.is_ok(), "Escritura DMA por AHCI debe ser exitosa");
+
+        let mut read_buf = [0u8; 512];
+        let read_res = dev.read_sector(test_lba, &mut read_buf);
+        assert!(read_res.is_ok(), "Lectura DMA por AHCI debe ser exitosa");
+        assert_eq!(&read_buf[..], &write_buf[..], "Los datos leidos por AHCI DMA deben coincidir con lo escrito");
+
+        let ahci_post = crate::storage::ahci::AHCI_CONTROLLER.lock();
+        let active_port = &ahci_post.ports[active_port_idx];
+        assert!(active_port.dma_reads > 0, "Debe registrarse al menos una lectura DMA");
+        assert!(active_port.dma_writes > 0, "Debe registrarse al menos una escritura DMA");
+    } else {
+        // Modo fallback (ATA PIO / Ramdisk)
+        let is_dma = crate::storage::block_device::BLOCK_DEVICE.lock().is_using_ahci();
+        assert!(!is_dma, "BLOCK_DEVICE debe operar en modo fallback cuando no hay AHCI");
+    }
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -455,4 +493,10 @@ fn ut_mesh_sync_ack() {
 #[test_case]
 fn ut_audio_integer() {
     test_audio_integer_chime_no_fpu();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_ahci_sata_dma() {
+    test_ahci_sata_dma_controller();
 }

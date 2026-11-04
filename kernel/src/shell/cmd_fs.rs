@@ -332,15 +332,31 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             kprintln!("============================================================");
             kprintln!("  UNIDADES DE ALMACENAMIENTO DETECTADAS (BARE-METAL / QEMU) ");
             kprintln!("============================================================");
-            let info = crate::storage::installer::BeaverInstaller::probe_target_disk();
-            if info.is_present {
-                kprintln!("  [Disco 0] Primary Master ATA/IDE (Puertos 0x1F0..0x1F7)");
-                kprintln!("    * Estado:     CONECTADO Y OPERATIVO");
-                kprintln!("    * Modelo:     {}", info.model);
-                kprintln!("    * Capacidad:  {} MB ({} sectores de 512 bytes)", info.size_mb, info.total_sectors);
-                kprintln!("    * Particion:  BeaverFS en LBA 256 (Ranura A: LBA 64, Ranura B: LBA 1024)");
+            let bdev = crate::storage::block_device::BLOCK_DEVICE.lock();
+            kprintln!("  Medio Activo de BeaverFS: {}", bdev.get_storage_medium_name());
+
+            if bdev.is_using_ahci() {
+                let ahci = crate::storage::ahci::AHCI_CONTROLLER.lock();
+                if let Some(port) = ahci.active_sata_port {
+                    let model = ahci.get_port_model(port);
+                    let mb = ahci.get_port_capacity_mb(port);
+                    kprintln!("  [Disco SATA 0] Controladora AHCI Port {} (SATA III DMA)", port);
+                    kprintln!("    * Estado:     CONECTADO Y OPERATIVO POR DMA");
+                    kprintln!("    * Modelo:     {}", model);
+                    kprintln!("    * Capacidad:  {} MB", mb);
+                    kprintln!("    * Particion:  BeaverFS en LBA 256 (Ranura A: LBA 64, Ranura B: LBA 1024)");
+                }
             } else {
-                kprintln!("  [AVISO] No se detecto disco duro ATA primario.");
+                let info = crate::storage::installer::BeaverInstaller::probe_target_disk();
+                if info.is_present {
+                    kprintln!("  [Disco 0] Primary Master ATA/IDE (Puertos 0x1F0..0x1F7)");
+                    kprintln!("    * Estado:     CONECTADO Y OPERATIVO (PIO)");
+                    kprintln!("    * Modelo:     {}", info.model);
+                    kprintln!("    * Capacidad:  {} MB ({} sectores de 512 bytes)", info.size_mb, info.total_sectors);
+                    kprintln!("    * Particion:  BeaverFS en LBA 256 (Ranura A: LBA 64, Ranura B: LBA 1024)");
+                } else {
+                    kprintln!("  [AVISO] No se detecto disco duro ATA primario.");
+                }
             }
             kprintln!("============================================================");
         }

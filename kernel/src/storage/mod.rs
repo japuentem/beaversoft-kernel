@@ -22,9 +22,31 @@ use crate::vga::VgaColor;
 use crate::{kprint, kprint_color};
 
 pub fn init_storage() {
-    kprint!("[INIT] Detectando bus de almacenamiento ATA/IDE primario...    ");
+    // 1. Detectar e inicializar aceleración Serial ATA AHCI moderna en el bus PCI
+    kprint!("[INIT] Detectando controladora PCI Serial ATA AHCI...          ");
+    let ahci_detected = ahci::init();
 
-    {
+    let mut storage_configured = false;
+
+    if ahci_detected {
+        let ahci = ahci::AHCI_CONTROLLER.lock();
+        if let Some(port) = ahci.active_sata_port {
+            let model = ahci.get_port_model(port);
+            let mb = ahci.get_port_capacity_mb(port);
+            kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] SATA Port {} DMA ({}, {} MB)\n", port, model, mb);
+            drop(ahci);
+            BLOCK_DEVICE.lock().set_use_ahci(true, port);
+            storage_configured = true;
+        } else {
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "[INFO] Controladora presente sin discos SATA activos\n");
+        }
+    } else {
+        kprint_color!(VgaColor::Yellow, VgaColor::Black, "[INFO] Sin AHCI en bus PCI -> Verificando ATA/IDE legado\n");
+    }
+
+    // 2. Si no hay unidad SATA AHCI activa, recurrir al controlador legado ATA/IDE PIO
+    if !storage_configured {
+        kprint!("[INIT] Detectando bus de almacenamiento ATA/IDE primario...    ");
         let mut ata = ATA_PRIMARY_MASTER.lock();
         let detected = unsafe { ata.init() };
 
@@ -50,11 +72,9 @@ pub fn init_storage() {
     // Marcar el arranque actual como exitoso
     BOOT_SLOT_MANAGER.lock().mark_boot_successful();
 
-    // 9.0 Inicializar y montar sistema de archivos persistente BeaverFS en disco ATA
+    // Inicializar y montar sistema de archivos persistente BeaverFS
     beaverfs::init_beaverfs();
 
-    // 9.1 Inicializar Controladores de Almacenamiento Moderno (AHCI, NVMe y GPT)
-    ahci::init();
     gpt::init();
     nvme::init();
 }
