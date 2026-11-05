@@ -626,6 +626,7 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
                 return true;
             }
             drop(vbe);
+            crate::gui::splash::show_boot_splash();
             crate::gui::render_desktop();
         }
 

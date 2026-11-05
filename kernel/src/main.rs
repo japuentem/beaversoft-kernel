@@ -371,11 +371,12 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     );
     SHELL.lock().prompt();
 
-    // 13.1 En arranque nativo UEFI (GOP presente), inicializar y lanzar de inmediato el entorno de escritorio
+    // 13.1 En arranque nativo UEFI (GOP presente), mostrar splash screen y lanzar entorno de escritorio
     if crate::drivers::vbe::UefiBootInfo::get().is_some() {
         let mut vbe = crate::drivers::vbe::VBE.lock();
         let _ = vbe.set_mode(1024, 768, 32);
         drop(vbe);
+        crate::gui::splash::show_boot_splash();
         crate::gui::desktop::render_desktop();
     }
 

@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-05
-// Total de interacciones del día: 14
+// Total de interacciones del día: 15
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-05
@@ -425,5 +425,33 @@ Se evaluó la viabilidad técnica y estética del logotipo generado:
 
 2. **Acción Realizada:**
    - Se guardó el activo en el repositorio en [`assets/beaver_os_cyber_banner.png`](file:///d:/proyectos_personales/beaversoft-kernel/assets/beaver_os_cyber_banner.png) (859x169 RGBA) preservando la transparencia nativa.
+
+================================================================================
+
+## Interacción #15 [17:35:00]
+
+### 👤 Pregunta / Petición del Usuario:
+en ambas opciones
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se integró el nuevo logotipo estilizado cyberpunk de **Beaver OS** en ambos entornos solicitados:
+
+1. **Como Portada Principal de la Documentación (`README.md`):**
+   - Se creó el archivo maestro `README.md` con la imagen [`assets/beaver_os_cyber_banner.png`](file:///d:/proyectos_personales/beaversoft-kernel/assets/beaver_os_cyber_banner.png) encabezando el repositorio.
+   - Se incorporaron insignias oficiales (Rust bare-metal, x86_64 Long Mode, UEFI GOP, Ring 3 Syscalls, Versión v0.9.0), diagrama de arquitectura, comparativa de benchmarks vs Linux 6.8 y FreeBSD 14.1, e instrucciones rápidas de booteo y despliegue USB.
+
+2. **Como Pantalla Gráfica de Arranque (*Splash Screen*) en Silicio UEFI GOP:**
+   - Se generó el mapa RLE ultracompacto `assets/splash_banner.bin` (76 KB para 859x169 píxeles).
+   - Se implementó el módulo [`kernel/src/gui/splash.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/splash.rs) con la función `show_boot_splash()`, dibujando el logotipo centrado sobre un gradiente obsidiana cósmico, subtítulos informativos del microkernel y barra de carga sutil antes de transicionar al escritorio.
+   - Se conectó en [`kernel/src/main.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/main.rs) para el arranque nativo UEFI y en [`kernel/src/shell/cmd_sys.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/shell/cmd_sys.rs) para el comando `gui`.
+
+3. **Recompilación y Actualización de Hash Criptográfico de Medios:**
+   - Reconstrucción de imágenes oficiales de instalación con `scripts/build_iso.ps1`:
+     - ISO: `1BDFBC43C7EE32B12C76EC6C179422188079767175B47777AD2C884F7E1C5AEA`
+     - IMG: `9467D933660DB0E7C767276C8FB364D0C0EA0BF5A3E02DFFC02D31DEF3D4AD27`
+   - Sincronización en `docs/RELEASE_NOTES_v0.9.0.md` y `docs/QUICKSTART.md`.
+   - Se actualizó la etiqueta oficial de versión `v0.9.0` en Git.
 
 ================================================================================

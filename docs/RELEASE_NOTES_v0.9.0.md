@@ -30,8 +30,8 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 
 | Archivo de Imagen | Tamaño | Formato | Suma de Comprobación Criptográfica (SHA-256) |
 |---|---|---|---|
-| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `6F4055C1C24F00584B4978CA13FF8BEE51400DE05C6DDC5B009A021511CF5475` |
-| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `25ED9BDA215B00BD66CF6012E2D75D78D832CF454259BF10540E27A8FEB74F43` |
+| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `1BDFBC43C7EE32B12C76EC6C179422188079767175B47777AD2C884F7E1C5AEA` |
+| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `9467D933660DB0E7C767276C8FB364D0C0EA0BF5A3E02DFFC02D31DEF3D4AD27` |
 
 > **Verificación en PowerShell:**
 > ```powershell
