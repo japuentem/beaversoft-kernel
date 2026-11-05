@@ -30,8 +30,8 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 
 | Archivo de Imagen | Tamaño | Formato | Suma de Comprobación Criptográfica (SHA-256) |
 |---|---|---|---|
-| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `1AB5014B61E7654B2492BCEEC1A29EE777D31444EB5F53807BA22CE535A8C4EB` |
-| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `BED065E8E1F40EA14CECC52C95CE270CFE082F4DF279207F3D3EFCB77E4BE66E` |
+| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `E0039E532FA180554646B5A516C52F8FD0ACCCC607A796CEB1BAAD17DC307F95` |
+| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `EEAE62CA5295772594E5610706056B095C3EE69BC3CEC31C8D87A772501FECA0` |
 
 > **Verificación en PowerShell:**
 > ```powershell
@@ -77,6 +77,7 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 ### 5. Entorno Gráfico y Aplicaciones Nativas: Beaver Desktop
 - **Escritorio Multiventana:** Gestor de ventanas con arrastre dinámico, minimización, barras de título y cursor de ratón PS/2 acelerado.
 - **Suite de Aplicaciones Oficiales:**
+  - **Terminal Interactivo:** Consola gráfica integrada con canalización interactiva de teclado PS/2, buffer de 128 caracteres, historial de comandos accesible con Flechas Arriba/Abajo, autocompletado mediante tecla TAB y ejecución directa de binarios en Ring 3 (`exec`, `sh`).
   - **BeaverFiles:** Explorador visual de carpetas y archivos en particiones BeaverFS.
   - **BeaverNote:** Bloc de notas de texto plano para edición rápida.
   - **BeaverAudio:** Monitor de reproducción de sonido y sintetizador de ondas.

@@ -287,6 +287,8 @@ pub struct GuiTerminalState {
     pub lines: Vec<String>,
     pub input_buffer: String,
     pub current_line: String,
+    pub history: Vec<String>,
+    pub history_idx: usize,
 }
 
 impl GuiTerminalState {
@@ -296,15 +298,97 @@ impl GuiTerminalState {
             lines: Vec::new(),
             input_buffer: String::new(),
             current_line: String::new(),
+            history: Vec::new(),
+            history_idx: 0,
         }
     }
 
     pub fn init_defaults(&mut self) {
         if self.lines.is_empty() {
-            self.lines.push(String::from("Beaver Graphical Shell v0.8.0 (x86_64 Long Mode)"));
-            self.lines.push(String::from("Motor de comandos unificado: Escribe 'help' para ver los 40+ comandos."));
+            self.lines.push(String::from("Beaver Graphical Shell v0.9.0 (Ring 3 MSR Syscalls Ready)"));
+            self.lines.push(String::from("Motor interactivo: Escribe 'help', 'exec /disk/bin/hello.elf' o 'sh'."));
             self.lines.push(String::from("Escribe 'cli' o presiona ESC para pasar a consola completa."));
         }
+    }
+
+    pub fn push_history(&mut self, cmd: &str) {
+        if cmd.is_empty() {
+            return;
+        }
+        if self.history.last().map(|s| s.as_str()) != Some(cmd) {
+            self.history.push(cmd.to_string());
+            if self.history.len() > 50 {
+                self.history.remove(0);
+            }
+        }
+        self.history_idx = self.history.len();
+    }
+
+    pub fn history_up(&mut self) -> bool {
+        if self.history.is_empty() {
+            return false;
+        }
+        if self.history_idx > 0 {
+            self.history_idx -= 1;
+            self.input_buffer = self.history[self.history_idx].clone();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn history_down(&mut self) -> bool {
+        if self.history.is_empty() {
+            return false;
+        }
+        if self.history_idx + 1 < self.history.len() {
+            self.history_idx += 1;
+            self.input_buffer = self.history[self.history_idx].clone();
+            true
+        } else {
+            self.history_idx = self.history.len();
+            self.input_buffer.clear();
+            true
+        }
+    }
+
+    pub fn autocomplete(&mut self) -> bool {
+        let prefix = self.input_buffer.trim_start();
+        if prefix.is_empty() {
+            return false;
+        }
+
+        if prefix.starts_with("exec ") || prefix.starts_with("run ") {
+            let sub = if prefix.starts_with("exec ") { &prefix[5..] } else { &prefix[4..] };
+            let candidates = [
+                "/disk/bin/hello.elf",
+                "/disk/bin/bench.elf",
+                "/disk/bin/sh.elf",
+                "/disk/bin/sysinfo.elf",
+                "/disk/bin/sound.elf",
+            ];
+            for cand in candidates {
+                if cand.starts_with(sub) {
+                    let cmd_prefix = if prefix.starts_with("exec ") { "exec " } else { "run " };
+                    self.input_buffer = format!("{}{}", cmd_prefix, cand);
+                    return true;
+                }
+            }
+        }
+
+        let candidates = [
+            "help", "sys", "exec", "sh", "curl", "net", "ping", "calc", "clear",
+            "ls", "cat", "uptime", "whoami", "dashboard", "fetch", "logo",
+            "desktop", "cli", "exit", "ring3", "ring3-crash", "bench", "slots", "install"
+        ];
+
+        for cand in candidates {
+            if cand.starts_with(prefix) && cand != prefix {
+                self.input_buffer = format!("{} ", cand);
+                return true;
+            }
+        }
+        false
     }
 
     pub fn append_str(&mut self, s: &str) {
@@ -352,7 +436,12 @@ pub fn draw_terminal_window() {
         }
     };
 
-    Canvas::draw_window(x, y, w, h, "Terminal Interactivo Beaver (Ring 3 Ready)", is_active);
+    let title = if is_active {
+        "Terminal Interactivo Beaver (Ring 3 Ready) [ACTIVO]"
+    } else {
+        "Terminal Interactivo Beaver (Ring 3 Ready)"
+    };
+    Canvas::draw_window(x, y, w, h, title, is_active);
     GUI_TERMINAL.lock().init_defaults();
 
     Canvas::fill_rounded_rect(x + 6, y + 34, w.saturating_sub(12), h.saturating_sub(40), 6, Color::SLATE_900);
@@ -386,8 +475,14 @@ pub fn draw_terminal_window() {
     }
 
     let cwd = crate::shell::get_current_dir();
-    let prompt_str = format!("{}@beaver:{}{} {}_", curr_user, cwd, prompt_symbol, state.input_buffer);
-    let prompt_display = if prompt_str.len() > max_chars { &prompt_str[..max_chars] } else { &prompt_str };
+    let prompt_prefix = format!("{}@beaver:{}{} ", curr_user, cwd, prompt_symbol);
+    let cursor_char = if is_active { '_' } else { ' ' };
+    let full_prompt = format!("{}{}{}", prompt_prefix, state.input_buffer, cursor_char);
+    let prompt_display = if full_prompt.len() > max_chars {
+        &full_prompt[full_prompt.len() - max_chars..]
+    } else {
+        &full_prompt
+    };
     Canvas::draw_string(x + 14, line_y.min(y + h - 22), prompt_display, Color::BEAVER_GREEN, None);
 }
 
@@ -585,6 +680,7 @@ pub fn handle_gui_char(ch: char) {
                 let prompt_symbol = if curr_uid == 0 { '#' } else { '$' };
                 let cwd = crate::shell::get_current_dir();
                 state.lines.push(format!("{}@beaver:{}{} {}", curr_user, cwd, prompt_symbol, cmd));
+                state.push_history(&cmd);
                 state.input_buffer.clear();
                 cmd
             };
@@ -606,6 +702,21 @@ pub fn handle_gui_char(ch: char) {
                         state.lines.push(String::from("[INFO] Restaurando entorno de escritorio multi-ventana..."));
                         state.mode = GuiViewMode::Desktop;
                         mode_changed = true;
+                    }
+                    "sh" | "ring3-sh" => {
+                        {
+                            let mut state = GUI_TERMINAL.lock();
+                            state.lines.push(String::from("[RING3] Conmutando a Shell Nativo de Usuario (Ring 3)..."));
+                            state.lines.push(String::from("[RING3] Modo no privilegiado (CPL=3). Escribe 'exit' para salir."));
+                            state.flush_current_line();
+                        }
+                        render_terminal_window();
+                        crate::usermode::spawn_userland_shell();
+                        {
+                            let mut state = GUI_TERMINAL.lock();
+                            state.lines.push(String::from("[RING3] Sesion de usuario finalizada. Retornando a Beaver Desktop."));
+                            state.flush_current_line();
+                        }
                     }
                     "exit" | "quit" => {
                         let mut state = GUI_TERMINAL.lock();
@@ -659,9 +770,42 @@ pub fn handle_gui_char(ch: char) {
                 GuiViewMode::FullScreenCli => render_fullscreen_cli(),
             }
         }
+        crate::drivers::keyboard::KEY_UP_ARROW => {
+            let mut state = GUI_TERMINAL.lock();
+            if state.history_up() {
+                let mode = state.mode;
+                drop(state);
+                match mode {
+                    GuiViewMode::Desktop => render_terminal_window(),
+                    GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                }
+            }
+        }
+        crate::drivers::keyboard::KEY_DOWN_ARROW => {
+            let mut state = GUI_TERMINAL.lock();
+            if state.history_down() {
+                let mode = state.mode;
+                drop(state);
+                match mode {
+                    GuiViewMode::Desktop => render_terminal_window(),
+                    GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                }
+            }
+        }
+        '\t' => {
+            let mut state = GUI_TERMINAL.lock();
+            if state.autocomplete() {
+                let mode = state.mode;
+                drop(state);
+                match mode {
+                    GuiViewMode::Desktop => render_terminal_window(),
+                    GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                }
+            }
+        }
         c if c >= ' ' && c <= '~' => {
             let mut state = GUI_TERMINAL.lock();
-            let limit = if state.mode == GuiViewMode::FullScreenCli { 90 } else { 36 };
+            let limit = 120;
             if state.input_buffer.len() < limit {
                 state.input_buffer.push(c);
                 let mode = state.mode;
@@ -985,24 +1129,17 @@ fn handle_desktop_click(mx: usize, my: usize) {
     }
 
     // Clic en el área de fondo del escritorio
-    if let Some(mut state) = GUI_TERMINAL.try_lock() {
-        if state.lines.len() > 50 {
-            state.lines.remove(0);
-        }
-        state.lines.push(format!("[MOUSE] Clic en fondo ({}, {})", mx, my));
-        drop(state);
-        let terminal_active = {
-            if let Some(mgr) = WINDOW_MGR.try_lock() {
-                mgr.is_active(WindowId::Terminal)
-            } else {
-                false
-            }
-        };
-        if terminal_active {
-            render_terminal_window();
+    let terminal_active = {
+        if let Some(mgr) = WINDOW_MGR.try_lock() {
+            mgr.is_active(WindowId::Terminal)
         } else {
-            render_desktop();
+            false
         }
+    };
+    if terminal_active {
+        render_terminal_window();
+    } else {
+        render_desktop();
     }
 }
 

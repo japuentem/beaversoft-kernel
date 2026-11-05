@@ -30,3 +30,4 @@ pub extern "C" fn _start() -> ! {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     exit(1);
 }
+

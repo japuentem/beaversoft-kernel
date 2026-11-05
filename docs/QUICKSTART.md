@@ -46,7 +46,7 @@ Antes de grabar la memoria, verifica la suma de comprobación criptográfica SHA
 ```powershell
 Get-FileHash target\beaver-os-v0.9.0.iso -Algorithm SHA256
 ```
-**Hash oficial:** `1AB5014B61E7654B2492BCEEC1A29EE777D31444EB5F53807BA22CE535A8C4EB`
+**Hash oficial:** `E0039E532FA180554646B5A516C52F8FD0ACCCC607A796CEB1BAAD17DC307F95`
 
 ### 2. Grabado con Rufus (Windows)
 1. Descarga e inicia [Rufus](https://rufus.ie/).
