@@ -119,3 +119,4 @@ Para consultar la guía detallada de configuración de firmware y teclas de men�
 * **Marca Comercial:** Beaversoft
 * **Autor:** José Alberto Puente Maldonado ([@japuentem](https://github.com/japuentem))
 * **Licencia:** Distribuido bajo la Licencia de Código Abierto MIT / Apache 2.0.
+

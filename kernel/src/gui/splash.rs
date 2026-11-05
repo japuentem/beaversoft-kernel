@@ -82,3 +82,4 @@ pub fn show_boot_splash() {
         core::hint::spin_loop();
     }
 }
+
