@@ -344,16 +344,18 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
 
     // 13. Mensaje de bienvenida al Shell interactivo
     kprintln!();
-    kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  ____   _____     _    __     __ _____  ____   ");
-    kprint_color!(VgaColor::Yellow, VgaColor::Black, "   ___   ____  \n");
-    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | __ ) | ____|   / \\   \\ \\   / /| ____||  _ \\  ");
-    kprint_color!(VgaColor::Yellow, VgaColor::Black, "  / _ \\ / ___| \n");
-    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |  _ \\ |  _|    / _ \\   \\ \\ / / |  _|  | |_) | ");
-    kprint_color!(VgaColor::Yellow, VgaColor::Black, " | | | |\\___ \\ \n");
-    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | |_) || |___  / ___ \\   \\ V /  | |___ |  _ <  ");
-    kprint_color!(VgaColor::Yellow, VgaColor::Black, " | |_| | ___) |\n");
-    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |____/ |_____|/_/   \\_\\   \\_/   |_____||_| \\_\\ ");
-    kprint_color!(VgaColor::Yellow, VgaColor::Black, "  \\___/ |____/ \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " ______ _____   ___  _   _ _____ ______ ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, "  _____ _____  \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | ___ \\  ___| / _ \\| | | |  ___| ___ \\ ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, " /  _  /  ___| \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | |_/ / |__  / /_\\ \\ | | | |__ | |_/ / ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, " | | | \\ `--.  \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | ___ \\  __| |  _  | | | |  __|    /   ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, " | | | |`--. \\ \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | |_/ / |___ | | | \\ \\_/ / |___| |\\ \\  ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, " \\ \\_/ /\\__/ / \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " \\____/\\____/ \\_| |_/\\___/\\____/\\_| \\_| ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, "  \\___/\\____/  \n");
 
     kprint_color!(
         VgaColor::DarkGray, VgaColor::Black,
