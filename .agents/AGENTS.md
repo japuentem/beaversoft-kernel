@@ -73,6 +73,14 @@ En cada sesión de trabajo, el agente de IA **DEBE registrar todas las interacci
      - Intérprete y comandos de consola: **Beaver Shell** / prompt `root@beaver:/#`.
      - Motor de scripting: **BeaverScript** (`.bs`).
 
+7. **Principio de No Regresión y Verificación Continua de Funcionalidades Preexistentes:**
+   - Al agregar nueva funcionalidad, refactorizar o corregir errores en cualquier componente, **es estricta y obligatoriamente necesario auditar y comprobar que las funcionalidades, comandos y subsistemas ya creados sigan funcionando intactos**, evitando regresiones como bloqueos de entrada, bucles de prompt o fallos en cascada.
+   - Antes de dar por finalizada una tarea, el agente DEBE:
+     1. Comprobar que la interacción con la consola y el shell no se degrade ni presente bucles activos (polling sin `hlt` / descarte de interrupciones).
+     2. Ejecutar la suite de pruebas automatizadas:
+        `powershell -ExecutionPolicy Bypass -File run.ps1 -Test` y verificar que el 100% de las pruebas pasen sin fallas.
+     3. Verificar los flujos de usuario directamente afectados y los comandos adyacentes para asegurar la coherencia integral del sistema operativo.
+
 ---
 
 ## 3. Roles Especializados de Agencia (.agents/rules/)

@@ -274,6 +274,7 @@ impl Shell {
                 kprintln!("    pkg <cmd>      - Gestor de paquetes ELF64 en /disk/bin");
                 kprintln!("    whoami / su    - Sesion de usuario y permisos");
                 kprintln!("    dashboard/top  - Monitor en vivo de CPU, tareas y memoria");
+                kprintln!("    logo / fetch   - Muestra el emblema oficial y telemetria de Beaver OS");
                 kprintln!("    free / memmap  - Mapa transparente de Heap y marcos de 4KB");
                 kprintln!("    autotest       - Suite de pruebas automaticas del kernel");
                 kprintln!("    gui / desktop  - Inicia escritorio VESA TrueColor");
