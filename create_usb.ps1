@@ -177,6 +177,45 @@ if (-not (Test-Path $BootDir)) {
 }
 Copy-Item "target\x86_64-unknown-none\release\beaver-kernel" -Destination (Join-Path $BootDir "beaver-kernel.elf") -Force
 
+# Copiar ejecutables de usuario ELF64 precompilados
+$BinDir = Join-Path $MountPath "BIN"
+if (-not (Test-Path $BinDir)) {
+    New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+}
+if (Test-Path "target\x86_64-unknown-none\release\beaver-hello") {
+    Copy-Item "target\x86_64-unknown-none\release\beaver-hello" -Destination (Join-Path $BinDir "HELLO.ELF") -Force
+}
+if (Test-Path "target\x86_64-unknown-none\release\beaver-bench") {
+    Copy-Item "target\x86_64-unknown-none\release\beaver-bench" -Destination (Join-Path $BinDir "BENCH.ELF") -Force
+}
+if (Test-Path "target\x86_64-unknown-none\release\beaver-sh") {
+    Copy-Item "target\x86_64-unknown-none\release\beaver-sh" -Destination (Join-Path $BinDir "SH.ELF") -Force
+}
+
+# Copiar scripts nativos de demostración
+$ScriptsDir = Join-Path $MountPath "SCRIPTS"
+if (-not (Test-Path $ScriptsDir)) {
+    New-Item -ItemType Directory -Path $ScriptsDir -Force | Out-Null
+}
+$DemoScript = @'
+// BeaverScript v1.0 - Script de Demostracion en Hardware Real
+println "=== BEAVER OS BARE-METAL HARDWARE DEMO ==="
+let a = 15
+let b = 25
+let total = a + b
+println "Calculo matematico a + b: " + total
+let mi_array = [100, 200, 300]
+println "Array persistente: " + mi_array
+println "Elemento indexado [1]: " + mi_array[1]
+println "Generando melodia acustica en hardware..."
+beep(523, 70)
+beep(659, 70)
+beep(784, 80)
+loop 3 { println "Iteracion de bucle interactivo en Ring 3" }
+println "=== SCRIPT EJECUTADO CON EXITO EN RING 3 ==="
+'@
+Set-Content -Path (Join-Path $ScriptsDir "demo.bs") -Value $DemoScript -Encoding UTF8
+
 # Crear archivo README en la raíz de la USB con instrucciones claras
 $ReadmeContent = @"
 ===============================================================================
