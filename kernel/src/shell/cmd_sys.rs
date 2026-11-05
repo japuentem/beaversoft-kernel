@@ -132,53 +132,64 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             let smp_cores = crate::apic::SMP.lock().cores.len();
 
             kprintln!();
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "         .---.      .---.       ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "          .---====---.         ");
             kprint_color!(VgaColor::LightCyan, VgaColor::Black, "root@beaver\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "        /  _  \\    /  _  \\      ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "       .-'   ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "_..._");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "    '-.      ");
             kprint_color!(VgaColor::DarkGray, VgaColor::Black, "-----------\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "       |  / \\  \\__/  / \\  |     ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "      /     ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "/ .--.\\");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "      \\     ");
             kprint_color!(VgaColor::White, VgaColor::Black, "OS: ");
             kprint_color!(VgaColor::LightCyan, VgaColor::Black, "Beaver OS v0.9.0 (x86_64 Long Mode)\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "       |  \\ /        \\ /  |     ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "     |  ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "_.-' ( (o) \\");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "      |    ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Kernel: ");
             kprint_color!(VgaColor::Yellow, VgaColor::Black, "beaver-kernel (Bare-Metal Rust, no_std)\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "        \\      /\\      /        ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "     | ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "/  /\\  '--'  \\");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "     |    ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Architecture: ");
             kprint_color!(VgaColor::LightGreen, VgaColor::Black, "SMP ({} núcleos de CPU activos)\n", smp_cores);
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "        /     /  \\     \\        ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "     | ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "| /  \\ >==<   \\");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "    |    ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Isolation: ");
             kprint_color!(VgaColor::Pink, VgaColor::Black, "Ring 3 Sandbox + MSR Fast Syscalls\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "       |   (o)    (o)   |       ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "     | ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "\\ \\  / ===== ");
+            kprint_color!(VgaColor::White, VgaColor::Black, "[==]");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "|  |    ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Shell: ");
             kprint_color!(VgaColor::LightCyan, VgaColor::Black, "Beaver Shell / beaver-sh (Ring 3)\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "       |      <__>      |       ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "     |  ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "'-.______.-'  /");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "   |    ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Filesystem: ");
             kprint_color!(VgaColor::LightGreen, VgaColor::Black, "BeaverFS (A/B Resilient Slot Layout)\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "       /   .-' ");
-            kprint_color!(VgaColor::White, VgaColor::Black, "[==]");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, " '-.   \\       ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "      \\              /   /     ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Storage: ");
             kprint_color!(VgaColor::LightCyan, VgaColor::Black, "AHCI SATA III DMA + NVMe Ready\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "      /   /   ");
-            kprint_color!(VgaColor::White, VgaColor::Black, "|  |");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "    \\   \\      ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "       '-.        .-'  -'      ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Network: ");
             kprint_color!(VgaColor::LightGreen, VgaColor::Black, "Intel E1000 Gigabit + TCP/IP + DNS\n");
 
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "     /   /              \\   \\     ");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "          '---====---'         ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Uptime: ");
             kprint_color!(VgaColor::Yellow, VgaColor::Black, "{} segundos\n", seconds);
 
-            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "    '---'                '---'    ");
+            kprint_color!(VgaColor::DarkGray, VgaColor::Black, "                               ");
             kprint_color!(VgaColor::White, VgaColor::Black, "Memory: ");
             kprint_color!(VgaColor::LightGreen, VgaColor::Black, "{} KiB usados / {} KiB libres (Total: {} KiB)\n\n",
                 used_heap / 1024, free_heap / 1024, total_heap / 1024);
