@@ -76,16 +76,41 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     // 3. Despliegue en Pantalla VGA
     {
         let mut vga = VGA_WRITER.lock();
-        vga.set_color(VgaColor::Cyan, VgaColor::Black);
-        vga.write_str("================================================================================\n");
+        vga.set_color(VgaColor::LightCyan, VgaColor::Black);
+        vga.write_str("  ____  _____     __     _______ ____   ");
         vga.set_color(VgaColor::Yellow, VgaColor::Black);
-        vga.write_str("  BEAVER OS v0.8.0 | Micro-Kernel x86_64 Bare-Metal                             \n");
+        vga.write_str("  ___  ____  \n");
+
+        vga.set_color(VgaColor::LightCyan, VgaColor::Black);
+        vga.write_str(" | __ )| ____|   / \\ \\   / / ____|  _ \\  ");
+        vga.set_color(VgaColor::Yellow, VgaColor::Black);
+        vga.write_str(" / _ \\/ ___| \n");
+
+        vga.set_color(VgaColor::LightCyan, VgaColor::Black);
+        vga.write_str(" |  _ \\|  _|    / _ \\ \\ / /|  _| | |_) | ");
+        vga.set_color(VgaColor::Yellow, VgaColor::Black);
+        vga.write_str("| | | \\___ \\ \n");
+
+        vga.set_color(VgaColor::LightCyan, VgaColor::Black);
+        vga.write_str(" | |_) | |___  / ___ \\ V / | |___|  _ <  ");
+        vga.set_color(VgaColor::Yellow, VgaColor::Black);
+        vga.write_str("| |_| |___) |\n");
+
+        vga.set_color(VgaColor::LightCyan, VgaColor::Black);
+        vga.write_str(" |____/|_____|/_/   \\_\\_/  |_____|_| \\_\\ ");
+        vga.set_color(VgaColor::Yellow, VgaColor::Black);
+        vga.write_str(" \\___/|____/ \n");
+
+        vga.set_color(VgaColor::DarkGray, VgaColor::Black);
+        vga.write_str("--------------------------------------------------------------------------------\n");
+        vga.set_color(VgaColor::White, VgaColor::Black);
+        vga.write_str("  BEAVER OS v0.9.0 | Micro-Kernel x86_64 Bare-Metal                             \n");
         vga.set_color(VgaColor::LightCyan, VgaColor::Black);
         vga.write_str("  Author: José Alberto Puente Maldonado (japuentem)                             \n");
         vga.set_color(VgaColor::LightGreen, VgaColor::Black);
-        vga.write_str("  Architecture: Human-Centric VFS | Anti-OOM Guard | Transparent Memory & Tasks \n");
-        vga.set_color(VgaColor::Cyan, VgaColor::Black);
-        vga.write_str("================================================================================\n\n");
+        vga.write_str("  Architecture: Ring 3 Isolation | BeaverFS | A/B Recovery | TCP/IP Net         \n");
+        vga.set_color(VgaColor::DarkGray, VgaColor::Black);
+        vga.write_str("--------------------------------------------------------------------------------\n\n");
     }
 
     // 4. Inicializar GDT de 64 bits con TSS y pila IST dedicada para Double Fault
@@ -318,11 +343,29 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     test_main();
 
     // 13. Mensaje de bienvenida al Shell interactivo
+    kprintln!();
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  ____  _____     __     _______ ____   ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, "  ___  ____  \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | __ )| ____|   / \\ \\   / / ____|  _ \\  ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, " / _ \\/ ___| \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |  _ \\|  _|    / _ \\ \\ / /|  _| | |_) | ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, "| | | \\___ \\ \n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | |_) | |___  / ___ \\ V / | |___|  _ <  ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, "| |_| |___) |\n");
+    kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |____/|_____|/_/   \\_\\_/  |_____|_| \\_\\ ");
+    kprint_color!(VgaColor::Yellow, VgaColor::Black, " \\___/|____/ \n");
+
     kprint_color!(
-        VgaColor::Cyan, VgaColor::Black,
-        "================================================================================\n\
-         [BEAVER SHELL v0.8.0] Escribe 'dashboard', 'memmap' o 'help':                   \n\
-         ================================================================================\n"
+        VgaColor::DarkGray, VgaColor::Black,
+        "--------------------------------------------------------------------------------\n"
+    );
+    kprint_color!(
+        VgaColor::White, VgaColor::Black,
+        " [BEAVER SHELL v0.9.0] Escribe 'help' para ver comandos o 'dashboard' en vivo.  \n"
+    );
+    kprint_color!(
+        VgaColor::DarkGray, VgaColor::Black,
+        "--------------------------------------------------------------------------------\n"
     );
     SHELL.lock().prompt();
 
