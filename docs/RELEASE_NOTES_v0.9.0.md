@@ -30,8 +30,8 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 
 | Archivo de Imagen | Tamaño | Formato | Suma de Comprobación Criptográfica (SHA-256) |
 |---|---|---|---|
-| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `7B2ADA147F83062111091525BD732973047541D56D155FC386FF5AF8CDD199A9` |
-| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `89B9A3DC955AA524D60F7CABBE9366FE8E6617F23E5553DDF4793F12F693E232` |
+| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `1AB5014B61E7654B2492BCEEC1A29EE777D31444EB5F53807BA22CE535A8C4EB` |
+| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `BED065E8E1F40EA14CECC52C95CE270CFE082F4DF279207F3D3EFCB77E4BE66E` |
 
 > **Verificación en PowerShell:**
 > ```powershell
@@ -49,6 +49,7 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 - **Directorio de Páginas CR3 Aislado:** Paginación de 4 niveles (`PML4`) dedicada para procesos de usuario, con mapeo en modo usuario (`UserSupervisor = 1`) y protección contra lectura/escritura en la región alta del kernel.
 - **Pila de Usuario Independiente:** Pila separada de 2 MiB en espacio no privilegiado y conmutación de contexto libre de carreras.
 - **Shell Nativo en Ring 3 (`sh`):** Intérprete interactivo que opera completamente en modo no privilegiado, interactuando con el hardware exclusivamente a través de la pasarela MSR Syscall. Un error o caída en el shell nunca compromete la estabilidad del kernel supervisor.
+- **Pre-empaquetado de Binarios ELF64 de Usuario:** La partición de arranque y el sistema de archivos incluyen ejecutables nativos x86-64 preinstalados (`\BIN\HELLO.ELF`, `\BIN\BENCH.ELF`, `\BIN\SH.ELF` y `/disk/bin/*.elf`), compilados con `beaver-libc` y ejecutables directamente en modo no privilegiado mediante `syscall`.
 
 ### 2. Sistema de Archivos Resiliente BeaverFS
 - **Arquitectura de Partición Doble A/B:** Soporte nativo para arranques redundantes A/B con espejo de paridad para recuperación inmediata ante actualizaciones fallidas.
@@ -141,3 +142,4 @@ Código de Salida: 33 (Éxito limpio en modo de pruebas)
 - **Comunidad y Soporte:** [GitHub Repository / Beaversoft Meta-Kernel](https://github.com/japuentem/beaversoft-kernel)
 
 *Beaver OS v0.9.0 — Construyendo sistemas operativos seguros, deterministas y libres de caídas.*
+

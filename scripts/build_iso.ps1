@@ -41,12 +41,15 @@ if (-not (Test-Path $LLD)) {
 
 $KernelBin = "target\x86_64-unknown-none\release\beaver-kernel"
 $BootEfi = "target\BOOTX64.EFI"
+$UserHelloBin = "target\x86_64-unknown-none\release\beaver-hello"
+$UserBenchBin = "target\x86_64-unknown-none\release\beaver-bench"
+$UserShBin    = "target\x86_64-unknown-none\release\beaver-sh"
 
 if (-not $SkipBuild) {
-    Write-Host "[1/4] Compilando Beaver Kernel (Release x86_64)..." -ForegroundColor Yellow
+    Write-Host "[1/4] Compilando Beaver Kernel y Binarios de Usuario ELF64 (Release x86_64)..." -ForegroundColor Yellow
     & cargo build --release --target x86_64-unknown-none
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "[ERROR] Falló la compilación del kernel."
+        Write-Error "[ERROR] Falló la compilación del kernel y programas de usuario."
         exit $LASTEXITCODE
     }
 
@@ -70,9 +73,15 @@ if (-not (Test-Path $KernelBin) -or -not (Test-Path $BootEfi)) {
 
 $KernelBytes = [System.IO.File]::ReadAllBytes($KernelBin)
 $EfiBytes = [System.IO.File]::ReadAllBytes($BootEfi)
+$HelloBytes = if (Test-Path $UserHelloBin) { [System.IO.File]::ReadAllBytes($UserHelloBin) } else { $null }
+$BenchBytes = if (Test-Path $UserBenchBin) { [System.IO.File]::ReadAllBytes($UserBenchBin) } else { $null }
+$ShBytes    = if (Test-Path $UserShBin)    { [System.IO.File]::ReadAllBytes($UserShBin) } else { $null }
 
 Write-Host "[INFO] Kernel binario: $($KernelBytes.Length) bytes ($([math]::Round($KernelBytes.Length / 1MB, 2)) MB)" -ForegroundColor DarkGray
 Write-Host "[INFO] BOOTX64.EFI:    $($EfiBytes.Length) bytes ($([math]::Round($EfiBytes.Length / 1KB, 2)) KB)" -ForegroundColor DarkGray
+if ($HelloBytes) { Write-Host "[INFO] HELLO.ELF:     $($HelloBytes.Length) bytes" -ForegroundColor DarkGray }
+if ($BenchBytes) { Write-Host "[INFO] BENCH.ELF:     $($BenchBytes.Length) bytes" -ForegroundColor DarkGray }
+if ($ShBytes)    { Write-Host "[INFO] SH.ELF:        $($ShBytes.Length) bytes" -ForegroundColor DarkGray }
 
 # 2. Construcción de Sistema de Archivos FAT16 para la partición EFI en memoria
 Write-Host "[3/4] Generando partición de sistema EFI (FAT16/GPT compatible)..." -ForegroundColor Yellow
@@ -166,7 +175,12 @@ $KernelStartCluster = Write-FileData $KernelBytes
 # 2. Escribir BOOTX64.EFI
 $EfiStartCluster = Write-FileData $EfiBytes
 
-# 3. Crear cluster para directorio \EFI\BOOT
+# 3. Escribir binarios de usuario ELF64 pre-empaquetados
+$HelloStartCluster = if ($HelloBytes) { Write-FileData $HelloBytes } else { 0 }
+$BenchStartCluster = if ($BenchBytes) { Write-FileData $BenchBytes } else { 0 }
+$ShStartCluster    = if ($ShBytes)    { Write-FileData $ShBytes } else { 0 }
+
+# 4. Crear cluster para directorio \EFI\BOOT
 $EfiBootDirCluster = $CurrentCluster
 Set-FatEntry $CurrentCluster 0xFFFF
 $CurrentCluster++
@@ -191,7 +205,7 @@ $EfiBootDirBytes[75] = 0x20 # Archive
 $dirOffset = $DataOffset + (($EfiBootDirCluster - 2) * $ClusterSize)
 [System.Array]::Copy($EfiBootDirBytes, 0, $FatImage, $dirOffset, $ClusterSize)
 
-# 4. Crear cluster para directorio \EFI
+# 5. Crear cluster para directorio \EFI
 $EfiDirCluster = $CurrentCluster
 Set-FatEntry $CurrentCluster 0xFFFF
 $CurrentCluster++
@@ -214,7 +228,51 @@ $EfiDirBytes[75] = 0x10 # Directory
 $dirOffset = $DataOffset + (($EfiDirCluster - 2) * $ClusterSize)
 [System.Array]::Copy($EfiDirBytes, 0, $FatImage, $dirOffset, $ClusterSize)
 
-# 5. Escribir entradas en el Root Directory
+# 6. Crear cluster para directorio \BIN (Binarios ELF64 de usuario)
+$BinDirCluster = $CurrentCluster
+Set-FatEntry $CurrentCluster 0xFFFF
+$CurrentCluster++
+
+$BinDirBytes = New-Object byte[] $ClusterSize
+# '.' entry
+[System.Text.Encoding]::ASCII.GetBytes(".          ").CopyTo($BinDirBytes, 0)
+$BinDirBytes[11] = 0x10 # Directory
+[System.BitConverter]::GetBytes([uint16]$BinDirCluster).CopyTo($BinDirBytes, 26)
+
+# '..' entry
+[System.Text.Encoding]::ASCII.GetBytes("..         ").CopyTo($BinDirBytes, 32)
+$BinDirBytes[43] = 0x10 # Directory
+
+$binIdx = 2
+if ($HelloBytes) {
+    $off = $binIdx * 32
+    [System.Text.Encoding]::ASCII.GetBytes("HELLO   ELF").CopyTo($BinDirBytes, $off)
+    $BinDirBytes[$off + 11] = 0x20 # Archive
+    [System.BitConverter]::GetBytes([uint16]$HelloStartCluster).CopyTo($BinDirBytes, $off + 26)
+    [System.BitConverter]::GetBytes([uint32]$HelloBytes.Length).CopyTo($BinDirBytes, $off + 28)
+    $binIdx++
+}
+if ($BenchBytes) {
+    $off = $binIdx * 32
+    [System.Text.Encoding]::ASCII.GetBytes("BENCH   ELF").CopyTo($BinDirBytes, $off)
+    $BinDirBytes[$off + 11] = 0x20 # Archive
+    [System.BitConverter]::GetBytes([uint16]$BenchStartCluster).CopyTo($BinDirBytes, $off + 26)
+    [System.BitConverter]::GetBytes([uint32]$BenchBytes.Length).CopyTo($BinDirBytes, $off + 28)
+    $binIdx++
+}
+if ($ShBytes) {
+    $off = $binIdx * 32
+    [System.Text.Encoding]::ASCII.GetBytes("SH      ELF").CopyTo($BinDirBytes, $off)
+    $BinDirBytes[$off + 11] = 0x20 # Archive
+    [System.BitConverter]::GetBytes([uint16]$ShStartCluster).CopyTo($BinDirBytes, $off + 26)
+    [System.BitConverter]::GetBytes([uint32]$ShBytes.Length).CopyTo($BinDirBytes, $off + 28)
+    $binIdx++
+}
+
+$binDirOffset = $DataOffset + (($BinDirCluster - 2) * $ClusterSize)
+[System.Array]::Copy($BinDirBytes, 0, $FatImage, $binDirOffset, $ClusterSize)
+
+# 7. Escribir entradas en el Root Directory
 # Entrada 0: Volume Label
 [System.Text.Encoding]::ASCII.GetBytes("BEAVER_OS  ").CopyTo($FatImage, $RootOffset + 0)
 $FatImage[$RootOffset + 11] = 0x08 # Volume Label
@@ -229,6 +287,11 @@ $FatImage[$RootOffset + 43] = 0x20 # Archive
 [System.Text.Encoding]::ASCII.GetBytes("EFI        ").CopyTo($FatImage, $RootOffset + 64)
 $FatImage[$RootOffset + 75] = 0x10 # Directory
 [System.BitConverter]::GetBytes([uint16]$EfiDirCluster).CopyTo($FatImage, $RootOffset + 90)
+
+# Entrada 3: BIN directory
+[System.Text.Encoding]::ASCII.GetBytes("BIN        ").CopyTo($FatImage, $RootOffset + 96)
+$FatImage[$RootOffset + 107] = 0x10 # Directory
+[System.BitConverter]::GetBytes([uint16]$BinDirCluster).CopyTo($FatImage, $RootOffset + 122)
 
 # Guardar imagen raw de partición / disco USB ($OutputImg)
 [System.IO.File]::WriteAllBytes($OutputImg, $FatImage)

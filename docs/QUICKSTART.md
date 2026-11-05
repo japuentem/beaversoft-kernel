@@ -46,7 +46,7 @@ Antes de grabar la memoria, verifica la suma de comprobación criptográfica SHA
 ```powershell
 Get-FileHash target\beaver-os-v0.9.0.iso -Algorithm SHA256
 ```
-**Hash oficial:** `7B2ADA147F83062111091525BD732973047541D56D155FC386FF5AF8CDD199A9`
+**Hash oficial:** `1AB5014B61E7654B2492BCEEC1A29EE777D31444EB5F53807BA22CE535A8C4EB`
 
 ### 2. Grabado con Rufus (Windows)
 1. Descarga e inicia [Rufus](https://rufus.ie/).
@@ -88,6 +88,8 @@ root@beaver:/# _
 | `dashboard` | Abre el monitor de telemetría del sistema en vivo con actualización en tiempo real. |
 | `gui` | Inicia el entorno gráfico **Beaver Desktop** a resolución 1024x768 TrueColor. |
 | `sh` | Conmuta al shell nativo en **Ring 3** (modo usuario aislado con llamadas `syscall` MSR). |
+| `exec /disk/bin/hello.elf` | Ejecuta directamente un binario ELF64 en Ring 3 aislado. |
+| `exec /disk/bin/bench.elf` | Ejecuta el benchmark de procesamiento en Ring 3. |
 | `net` | Muestra la configuración de red y estado del adaptador Intel Gigabit. |
 | `ping 10.0.2.2` | Envía paquetes ICMP Echo de prueba a través de la pila TCP/IP BeaverNet. |
 | `curl http://beaver.lan/info.json` | Realiza una petición HTTP/1.1 nativa sobre socket TCP. |
@@ -114,3 +116,4 @@ Si encuentras algún problema de compatibilidad con tu hardware o deseas propone
 - **GitHub:** [https://github.com/japuentem/beaversoft-kernel](https://github.com/japuentem/beaversoft-kernel)
 - **Desarrollador:** José Alberto Puente Maldonado (`japuentem`)
 - **Firma:** Beaversoft
+

@@ -2,6 +2,8 @@
 members = [
     "kernel",
     "user/beaver-libc",
-    "user/shell"
+    "user/shell",
+    "user/hello",
+    "user/bench"
 ]
 resolver = "2"

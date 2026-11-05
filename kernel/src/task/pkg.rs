@@ -99,7 +99,7 @@ fn create_elf64_binary(message: &[u8]) -> Vec<u8> {
 
     // 2. Program Header ELF64 (56 bytes, offset 64 a 120)
     let code_offset: u64 = 120;
-    let code_size: u64 = (16 + message.len()) as u64;
+    let code_size: u64 = (33 + message.len()) as u64;
 
     elf.extend_from_slice(&1_u32.to_le_bytes()); // p_type: PT_LOAD (1)
     elf.extend_from_slice(&(1 | 4_u32).to_le_bytes()); // p_flags: PF_X | PF_R (5)
@@ -110,11 +110,27 @@ fn create_elf64_binary(message: &[u8]) -> Vec<u8> {
     elf.extend_from_slice(&code_size.to_le_bytes()); // p_memsz
     elf.extend_from_slice(&4096_u64.to_le_bytes()); // p_align: 4 KiB
 
-    // 3. Código y datos del programa (offset 120 en adelante)
-    // Instrucción de retorno rápido `ret` (0xC3) simulando ejecución limpia
-    elf.push(0x90); // nop
-    elf.push(0x90); // nop
-    elf.push(0xC3); // ret
+    // 3. Código Máquina x86-64 Auténtico de Ring 3 (33 bytes) y mensaje de datos:
+    //    mov eax, 1            (SYS_WRITE)
+    //    mov edi, 1            (stdout fd)
+    //    lea rsi, [rip + 16]   (puntero a message)
+    //    mov edx, len          (longitud de bytes)
+    //    syscall               (puerta de enlace MSR IA32_LSTAR a Ring 0)
+    //    mov eax, 60           (SYS_EXIT)
+    //    xor edi, edi          (código de salida 0)
+    //    syscall
+    let msg_len = message.len() as u32;
+    let code: [u8; 33] = [
+        0xB8, 0x01, 0x00, 0x00, 0x00,
+        0xBF, 0x01, 0x00, 0x00, 0x00,
+        0x48, 0x8D, 0x35, 0x10, 0x00, 0x00, 0x00,
+        0xBA, (msg_len & 0xFF) as u8, ((msg_len >> 8) & 0xFF) as u8, ((msg_len >> 16) & 0xFF) as u8, ((msg_len >> 24) & 0xFF) as u8,
+        0x0F, 0x05,
+        0xB8, 0x3C, 0x00, 0x00, 0x00,
+        0x31, 0xFF,
+        0x0F, 0x05,
+    ];
+    elf.extend_from_slice(&code);
     elf.extend_from_slice(message);
 
     elf
@@ -237,9 +253,13 @@ pub fn execute_elf(path: &str) -> Result<String, String> {
 
     if data.len() >= code_offset + 3 {
         let raw_code = &data[code_offset..];
-        // En nuestros binarios de usuario, el mensaje de texto está tras los primeros 3 bytes de opcode
-        if raw_code.len() > 3 {
-            if let Ok(s) = core::str::from_utf8(&raw_code[3..]) {
+        let msg_start = if raw_code.len() >= 33 && &raw_code[0..5] == &[0xB8, 0x01, 0x00, 0x00, 0x00] {
+            33
+        } else {
+            3
+        };
+        if raw_code.len() > msg_start {
+            if let Ok(s) = core::str::from_utf8(&raw_code[msg_start..]) {
                 output_msg = s.trim().to_string();
             }
         }

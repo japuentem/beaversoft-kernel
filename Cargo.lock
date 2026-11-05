@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "beaver-bench"
+version = "0.1.0"
+dependencies = [
+ "beaver-libc",
+]
+
+[[package]]
+name = "beaver-hello"
+version = "0.1.0"
+dependencies = [
+ "beaver-libc",
+]
+
+[[package]]
 name = "beaver-kernel"
 version = "0.1.0"
 

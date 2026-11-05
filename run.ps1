@@ -135,6 +135,14 @@ if ($Iso) {
     Copy-Item $BootEfi -Destination "$UefiDir\BOOTX64.EFI" -Force
     Copy-Item $KernelBin -Destination "$UefiRoot\KERNEL.ELF" -Force
 
+    $UefiBin = "$UefiRoot\BIN"
+    if (-not (Test-Path $UefiBin)) {
+        New-Item -ItemType Directory -Path $UefiBin -Force | Out-Null
+    }
+    if (Test-Path "target\$Target\$Mode\beaver-hello") { Copy-Item "target\$Target\$Mode\beaver-hello" -Destination "$UefiBin\HELLO.ELF" -Force }
+    if (Test-Path "target\$Target\$Mode\beaver-bench") { Copy-Item "target\$Target\$Mode\beaver-bench" -Destination "$UefiBin\BENCH.ELF" -Force }
+    if (Test-Path "target\$Target\$Mode\beaver-sh")    { Copy-Item "target\$Target\$Mode\beaver-sh" -Destination "$UefiBin\SH.ELF" -Force }
+
     $OvmfFirmware = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
     $QemuArgs = @(
         "-drive", "if=pflash,format=raw,readonly=on,file=$OvmfFirmware",
@@ -194,6 +202,14 @@ if ($Test) {
     New-Item -ItemType Directory -Path $UefiDir -Force | Out-Null
     Copy-Item "target\BOOTX64-TEST.EFI" -Destination "$UefiDir\BOOTX64.EFI" -Force
     Copy-Item $KernelBin -Destination "$UefiRoot\KERNEL.ELF" -Force
+
+    $UefiBin = "$UefiRoot\BIN"
+    if (-not (Test-Path $UefiBin)) {
+        New-Item -ItemType Directory -Path $UefiBin -Force | Out-Null
+    }
+    if (Test-Path "target\$Target\$Mode\beaver-hello") { Copy-Item "target\$Target\$Mode\beaver-hello" -Destination "$UefiBin\HELLO.ELF" -Force }
+    if (Test-Path "target\$Target\$Mode\beaver-bench") { Copy-Item "target\$Target\$Mode\beaver-bench" -Destination "$UefiBin\BENCH.ELF" -Force }
+    if (Test-Path "target\$Target\$Mode\beaver-sh")    { Copy-Item "target\$Target\$Mode\beaver-sh" -Destination "$UefiBin\SH.ELF" -Force }
 
     $OvmfFirmware = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
     $LogFile = "target\autotest_serial.log"
