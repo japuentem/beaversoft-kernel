@@ -151,3 +151,4 @@ Para instalar Beaver OS de manera permanente en el disco interno de la computado
    - Formateará el volumen con **BeaverFS**, aplicando el árbol de directorios `/system`, `/disk`, `/net`, `/proc` y `/home`.
    - Registrará la firma anti-brickeo en la partición supervisor.
 3. Al finalizar, retira la memoria USB y reinicia el equipo: tu computadora arrancará directamente Beaver OS desde el almacenamiento interno.
+

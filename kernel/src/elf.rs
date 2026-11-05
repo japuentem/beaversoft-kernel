@@ -11,7 +11,6 @@ use alloc::vec::Vec;
 use crate::memory::frame_allocator::{FRAME_ALLOCATOR, PAGE_SIZE};
 use crate::memory::paging::{self, USER_ELF_VADDR, USER_STACK_PAGES, USER_STACK_VADDR};
 use crate::task::scheduler::SCHEDULER;
-use crate::usermode::jump_to_ring3;
 use crate::vga::VgaColor;
 use crate::{kprintln, kprint_color};
 
@@ -215,8 +214,17 @@ impl<'a> ElfBinary<'a> {
             user_stack_top
         );
 
-        // Salto a Ring 3 mediante IRETQ
-        jump_to_ring3(entry_rip, user_stack_top);
+        let guard_top = core::ptr::addr_of!(crate::usermode::KERNEL_GUARD_STACK) as u64 + crate::usermode::KERNEL_GUARD_STACK_SIZE as u64;
+        crate::gdt::set_tss_rsp0(guard_top);
+
+        // Salto a Ring 3 con retorno seguro al supervisor
+        let exit_code = unsafe { crate::syscall::enter_ring3_with_return(entry_rip, user_stack_top) };
+        kprint_color!(
+            VgaColor::LightGreen, VgaColor::Black,
+            "[ELF] Binario finalizado exitosamente (exit code: {}).\n",
+            exit_code
+        );
+        Ok(())
     }
 }
 

@@ -35,8 +35,8 @@ use crate::kprint_color;
 
 // Pila de kernel que el procesador usa cuando la tarea Ring 3 recibe una
 // interrupción (se actualiza en el TSS.RSP0 antes de cada IRETQ)
-const KERNEL_GUARD_STACK_SIZE: usize = 4096 * 4;
-static mut KERNEL_GUARD_STACK: [u8; KERNEL_GUARD_STACK_SIZE] = [0u8; KERNEL_GUARD_STACK_SIZE];
+pub const KERNEL_GUARD_STACK_SIZE: usize = 4096 * 4;
+pub static mut KERNEL_GUARD_STACK: [u8; KERNEL_GUARD_STACK_SIZE] = [0u8; KERNEL_GUARD_STACK_SIZE];
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Lanzador genérico a Ring 3 via IRETQ
@@ -248,6 +248,9 @@ pub fn spawn_normal_user_task() {
     let (proc_cr3, entry, user_stack_top) =
         prepare_isolated_user_space(userland_normal_task as *const u8);
 
+    let guard_top = core::ptr::addr_of!(KERNEL_GUARD_STACK) as u64 + KERNEL_GUARD_STACK_SIZE as u64;
+    set_tss_rsp0(guard_top);
+
     kprint_color!(
         VgaColor::Yellow, VgaColor::Black,
         "\n[RING3] Lanzando proceso normal en Ring 3 via IRETQ (CR3 aislado)...\n"
@@ -258,13 +261,21 @@ pub fn spawn_normal_user_task() {
         proc_cr3, entry, user_stack_top
     );
 
-    jump_to_ring3(entry, user_stack_top);
+    let exit_code = unsafe { crate::syscall::enter_ring3_with_return(entry, user_stack_top) };
+    kprint_color!(
+        VgaColor::LightGreen, VgaColor::Black,
+        "[RING3] Proceso finalizado con código {}.\n",
+        exit_code
+    );
 }
 
 /// Worker que corre la tarea de crash de userland en Ring 3 (demuestra aislamiento)
 pub fn spawn_crash_user_task() {
     let (proc_cr3, entry, user_stack_top) =
         prepare_isolated_user_space(userland_crash_task as *const u8);
+
+    let guard_top = core::ptr::addr_of!(KERNEL_GUARD_STACK) as u64 + KERNEL_GUARD_STACK_SIZE as u64;
+    set_tss_rsp0(guard_top);
 
     kprint_color!(
         VgaColor::LightRed, VgaColor::Black,
@@ -276,7 +287,12 @@ pub fn spawn_crash_user_task() {
         "  El proceso intentara leer 0x0 (Supervisor PAGE_USER=0) -> #PF desde Ring 3\n  El kernel deberia matar solo este proceso.\n"
     );
 
-    jump_to_ring3(entry, user_stack_top);
+    let exit_code = unsafe { crate::syscall::enter_ring3_with_return(entry, user_stack_top) };
+    kprint_color!(
+        VgaColor::LightGreen, VgaColor::Black,
+        "[RING3-CRASH] Sandbox contenido con éxito. Código de salida: {}. Kernel intacto.\n",
+        exit_code
+    );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -299,7 +315,6 @@ extern "C" fn userland_shell_task() {
 
         let n = syscall!(SYS_READ, 0u64, line_buf.as_mut_ptr() as u64, 128u64) as usize;
         if n == 0 {
-            syscall!(SYS_SLEEP, 2u64);
             continue;
         }
 
@@ -407,11 +422,20 @@ pub fn spawn_userland_shell() {
     let (proc_cr3, entry, user_stack_top) =
         prepare_isolated_user_space(userland_shell_task as *const u8);
 
+    let guard_top = core::ptr::addr_of!(KERNEL_GUARD_STACK) as u64 + KERNEL_GUARD_STACK_SIZE as u64;
+    set_tss_rsp0(guard_top);
+
     kprint_color!(
         VgaColor::LightGreen, VgaColor::Black,
         "\n[RING3-SHELL] Conmutando a espacio de usuario aislado (CR3={:#x}, CPL=3)...\n",
         proc_cr3
     );
 
-    jump_to_ring3(entry, user_stack_top);
+    let exit_code = unsafe { crate::syscall::enter_ring3_with_return(entry, user_stack_top) };
+
+    kprint_color!(
+        VgaColor::LightGreen, VgaColor::Black,
+        "\n[RING3-SHELL] Sesión de usuario finalizada (código {}). De vuelta en el supervisor.\n",
+        exit_code
+    );
 }

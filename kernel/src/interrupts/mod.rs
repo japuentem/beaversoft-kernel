@@ -189,6 +189,12 @@ extern "x86-interrupt" fn general_protection_fault_handler(frame: InterruptStack
         // EOI al PIC para que el timer pueda seguir funcionando
         // SAFETY: Envío de EOI al controlador PIC 8259 en Ring 0 antes de ceder la CPU tras aislar el fallo de usuario.
         unsafe { PICS.notify_end_of_interrupt(32); }
+
+        if unsafe { crate::syscall::SUPERVISOR_RSP != 0 } {
+            crate::memory::paging::switch_to_kernel_cr3();
+            unsafe { crate::syscall::return_to_supervisor(139); }
+        }
+
         crate::task::scheduler::mark_finished_and_yield();
         // mark_finished_and_yield llama a schedule() que hace switch_context
         // Si llegamos aquí (sin otras tareas), simplemente esperamos
@@ -234,6 +240,12 @@ extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error_c
         );
         // SAFETY: Envío de EOI al PIC 8259 en Ring 0 para mantener activas las interrupciones tras terminar el proceso infractor.
         unsafe { PICS.notify_end_of_interrupt(32); }
+
+        if unsafe { crate::syscall::SUPERVISOR_RSP != 0 } {
+            crate::memory::paging::switch_to_kernel_cr3();
+            unsafe { crate::syscall::return_to_supervisor(139); }
+        }
+
         crate::task::scheduler::mark_finished_and_yield();
         // SAFETY: `hlt` suspende la CPU si no hay otra tarea a la cual conmutar.
         loop { unsafe { asm!("hlt"); } }

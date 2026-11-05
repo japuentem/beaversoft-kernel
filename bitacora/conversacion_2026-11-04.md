@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-04
-// Total de interacciones del día: 6
+// Total de interacciones del día: 7
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-04
@@ -192,5 +192,43 @@ Se diagnosticó y corrigió el fallo de protección general (`#GP Error: 0x28`) 
        - Instalación permanente en disco interno con el comando `install` (tabla GPT, esquema de resiliencia A/B y BeaverFS).
    - **Suite de Pruebas de Regresión:**
      - 16/16 pruebas pasando exitosamente en QEMU con código de salida `33`.
+
+================================================================================
+
+
+## Interacción #7 [18:20:00]
+
+### 👤 Pregunta / Petición del Usuario:
+al usar
+powershell -ExecutionPolicy Bypass -File run.ps1
+sh
+
+se quedo como se ve la imagen
+[Captura adjunta de pantalla mostrando: 'beaver-sh (Ring 3)$ ' repitiéndose indefinidamente en la pantalla en bucle cerrado]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se diagnosticó y corrigió la causa raíz del bucle continuo del prompt en el shell de espacio de usuario Ring 3 (`beaver-sh`) y se implementó el retorno limpio al shell supervisor:
+
+1. **Causa Raíz del Bucle Continuo de Prompt:**
+   - En `kernel/src/syscall.rs`, la llamada al sistema `SYS_READ` sobre el descriptor estándar `fd == 0` (stdin) realizaba un sondeo activo con límite finito de 10,000 iteraciones.
+   - Debido a que la instrucción `syscall` enmascara la bandera de interrupciones (`IF=0` vía `MSR_FMASK`), las interrupciones del teclado PS/2 (IRQ 1) y del temporizador no podían ejecutarse durante el sondeo.
+   - Como resultado, la cola de entrada de teclado (`INPUT_QUEUE`) no recibía caracteres, el ciclo de 10,000 iteraciones se agotaba en menos de un milisegundo y `SYS_READ` retornaba `0` (indicando fin de lectura no bloqueante).
+   - En `userland_shell_task`, al recibir `n == 0`, el bucle se repetía inmediatamente imprimiendo de nuevo el prompt `beaver-sh (Ring 3)$ `, generando una ráfaga continua en pantalla.
+
+2. **Implementación de Lectura Canónica y Bloqueante en `SYS_READ` (`fd == 0`):**
+   - Se habilitaron explícitamente las interrupciones de hardware (`sti`) al entrar a la espera interactiva de stdin para permitir que el controlador PS/2 y el puerto serie capturen las pulsaciones.
+   - Se configuró la instrucción `hlt` en espera pasiva con consumo de 0% CPU hasta la recepción de pulsaciones de hardware.
+   - Se implementó el soporte para eco en pantalla, tecla Backspace (`\x08`), Ctrl+C (`\x03`) y confirmación de línea mediante Enter (`\n` / `\r`).
+   - Se deshabilitan interrupciones (`cli`) antes de retornar para que el retorno vía `sysretq` opere de manera atómica y segura.
+
+3. **Mecanismo de Retorno Limpio al Supervisor (`enter_ring3_with_return` / `return_to_supervisor`):**
+   - Se implementó en ensamblador el guardado del contexto del supervisor (registros callee-saved `rbp, rbx, r12-r15` y `RSP`) antes de saltar a Ring 3 mediante `iretq`.
+   - Al ejecutar `exit` en Ring 3 (`SYS_EXIT(0)`), o en caso de una excepción contenida por Anti-BSOD, el despachador restaura la tabla de páginas del kernel (`CR3`), recupera la pila del supervisor y retorna mediante `ret` al intérprete del kernel (`root@beaver:/#`).
+
+4. **Verificación:**
+   - Compilación verificada con `cargo check --target x86_64-unknown-none`.
+   - 16/16 pruebas unitarias y de integración superadas exitosamente en QEMU con código de salida 33.
 
 ================================================================================

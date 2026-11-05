@@ -23,11 +23,17 @@ pub extern "C" fn _start() -> ! {
         match read(0, &mut buf) {
             Ok(n) if n > 0 => {
                 let cmd = &buf[..n];
-                if cmd.starts_with(b"exit") {
+                let line_len = cmd.iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(n);
+                let clean_cmd = &cmd[..line_len];
+                if clean_cmd.is_empty() {
+                    continue;
+                }
+
+                if clean_cmd == b"exit" || clean_cmd.starts_with(b"exit ") {
                     exit(0);
-                } else if cmd.starts_with(b"help") {
+                } else if clean_cmd == b"help" {
                     let _ = write(1, b"Comandos: help, uptime, whoami, exit\n");
-                } else if cmd.starts_with(b"whoami") {
+                } else if clean_cmd == b"whoami" {
                     let pid = getpid();
                     let mut msg = [0u8; 40];
                     let p = b"ring3-user (PID: ";
@@ -37,7 +43,7 @@ pub extern "C" fn _start() -> ! {
                     msg[idx] = b')'; idx += 1;
                     msg[idx] = b'\n'; idx += 1;
                     let _ = write(1, &msg[..idx]);
-                } else if cmd.starts_with(b"uptime") {
+                } else if clean_cmd == b"uptime" {
                     let up = uptime();
                     let mut msg = [0u8; 48];
                     let p = b"Kernel Uptime: ";
@@ -46,9 +52,14 @@ pub extern "C" fn _start() -> ! {
                     msg[idx] = b'0' + ((up % 10) as u8); idx += 1;
                     for &b in b" s\n" { msg[idx] = b; idx += 1; }
                     let _ = write(1, &msg[..idx]);
+                } else {
+                    let _ = write(1, b"Comando no reconocido. Escribe 'help'.\n");
                 }
             }
-            _ => {}
+            _ => {
+                // Si read devuelve 0 (EOF o sin entrada), pausar brevemente antes de reintentar
+                beaver_libc::sleep(10);
+            }
         }
     }
 }

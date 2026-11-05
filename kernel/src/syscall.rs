@@ -216,10 +216,61 @@ syscall_handler_asm:
     /* 5. Restaurar RSP usuario y volver a Ring 3 con sysretq */
     mov rsp, r10
     sysretq
+
+.global enter_ring3_with_return
+enter_ring3_with_return:
+    /* rdi = entry (u64), rsi = user_stack_top (u64) */
+    /* Preservar registros callee-saved según System V ABI */
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    /* Guardar RSP del supervisor para que SYS_EXIT o Anti-BSOD pueda retornar */
+    lea rax, [rip + SUPERVISOR_RSP]
+    mov [rax], rsp
+
+    /* Construir marco de IRETQ hacia Ring 3 */
+    mov rax, 0x1b          /* SELECTOR_USER_DATA (0x18 | 3) */
+    push rax               /* SS */
+    push rsi               /* RSP (user_stack_top) */
+    push 0x202             /* RFLAGS (IF=1) */
+    mov rax, 0x23          /* SELECTOR_USER_CODE (0x20 | 3) */
+    push rax               /* CS */
+    push rdi               /* RIP (entry) */
+
+    iretq
+
+.global return_to_supervisor
+return_to_supervisor:
+    /* rdi = exit code */
+    /* Restaurar RSP del supervisor */
+    lea rdx, [rip + SUPERVISOR_RSP]
+    mov rsp, [rdx]
+    mov qword ptr [rdx], 0
+
+    /* Restaurar registros callee-saved */
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+
+    /* Retornar código de salida en RAX */
+    mov rax, rdi
+    ret
 "#);
+
+#[no_mangle]
+pub static mut SUPERVISOR_RSP: u64 = 0;
 
 extern "C" {
     fn syscall_handler_asm();
+    pub fn enter_ring3_with_return(entry: u64, user_stack_top: u64) -> u64;
+    pub fn return_to_supervisor(code: u64) -> !;
 }
 
 // Mutexes y Semáforos para primitivas de sincronización de usuario en Ring 3
@@ -293,38 +344,58 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 return 0;
             }
 
-            // Lectura de teclado interactivo (stdin)
+            // Lectura de teclado interactivo (stdin) - Bloqueante estándar POSIX
             if fd == 0 {
                 let user_buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count) };
                 let mut read_bytes = 0;
 
-                // Sondeo activo con breve espera
-                for _ in 0..10_000 {
-                    if let Some(ch) = crate::interrupts::pop_input_char() {
-                        let b = ch as u8;
-                        user_buf[read_bytes] = b;
-                        read_bytes += 1;
+                // Habilitar interrupciones para permitir que el controlador de teclado PS/2 (IRQ 1),
+                // el puerto serie COM1 y el temporizador alimenten la cola de entrada.
+                unsafe {
+                    asm!("sti");
+                }
 
-                        // Visualizar tecla pulsada (echo interactivo en consola)
-                        if ch == '\n' {
+                loop {
+                    if let Some(ch) = crate::interrupts::pop_input_char() {
+                        if ch == '\n' || ch == '\r' {
                             kprint!("\n");
+                            if read_bytes < count {
+                                user_buf[read_bytes] = b'\n';
+                                read_bytes += 1;
+                            }
                             break;
                         } else if ch == '\x08' {
-                            kprint!("\x08 \x08");
-                        } else {
-                            kprint!("{}", ch);
-                        }
-
-                        if read_bytes >= count {
+                            // Tecla Backspace (borrar carácter previo)
+                            if read_bytes > 0 {
+                                read_bytes -= 1;
+                                kprint!("\x08 \x08");
+                            }
+                        } else if ch == '\x03' {
+                            // Ctrl+C: Cancelar entrada
+                            kprint!("^C\n");
+                            read_bytes = 0;
                             break;
+                        } else if (ch as u8) >= 0x20 && (ch as u8) <= 0x7E {
+                            // Carácter imprimible estándar
+                            if read_bytes + 1 < count {
+                                user_buf[read_bytes] = ch as u8;
+                                read_bytes += 1;
+                                kprint!("{}", ch);
+                            }
                         }
                     } else {
-                        if read_bytes > 0 {
-                            break;
+                        // Esperar a la siguiente interrupción de hardware de forma segura y eficiente
+                        unsafe {
+                            asm!("hlt");
                         }
-                        crate::task::scheduler::sleep(1);
                     }
                 }
+
+                // Deshabilitar interrupciones antes de retornar al stub de syscall
+                unsafe {
+                    asm!("cli");
+                }
+
                 return read_bytes as u64;
             }
 
@@ -516,8 +587,15 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 "  [SYSCALL] Proceso Ring 3 finalizado exitosamente (SYS_EXIT, codigo={})\n",
                 arg0
             );
-            crate::task::scheduler::mark_finished_and_yield();
-            0
+            if unsafe { SUPERVISOR_RSP != 0 } {
+                crate::memory::paging::switch_to_kernel_cr3();
+                unsafe {
+                    return_to_supervisor(arg0);
+                }
+            } else {
+                crate::task::scheduler::mark_finished_and_yield();
+                0
+            }
         }
 
         // SYS_UPTIME: segundos de actividad
