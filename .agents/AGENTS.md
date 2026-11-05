@@ -74,8 +74,9 @@ En cada sesión de trabajo, el agente de IA **DEBE registrar todas las interacci
      - Motor de scripting: **BeaverScript** (`.bs`).
 
 7. **Principio de No Regresión y Verificación Continua de Funcionalidades Preexistentes:**
-   - Al agregar nueva funcionalidad, refactorizar o corregir errores en cualquier componente, **es estricta y obligatoriamente necesario auditar y comprobar que las funcionalidades, comandos y subsistemas ya creados sigan funcionando intactos**, evitando regresiones como bloqueos de entrada, bucles de prompt o fallos en cascada.
-   - Antes de dar por finalizada una tarea, el agente DEBE:
+   - **Alcance Exclusivo:** La verificación mediante la suite automatizada de pruebas (`run.ps1 -Test`) aplica **única y exclusivamente** cuando se agregue, modifique, refactorice o elimine **funcionalidad o lógica técnica** del sistema operativo (controladores de hardware, llamadas al sistema, planificador de tareas, memoria, red, VFS, sistema de archivos o arquitectura de anillos).
+   - **Exención para Cambios Cosméticos y Estáticos:** Para tareas puramente estéticas, visuales o documentales (ajustes de texto, arte ASCII, generación o guardado de imágenes/logos en `assets/`, comentarios en código o actualización de bitácoras) **NO debe ejecutarse la suite de pruebas**, bastando con comprobar la correcta compilación del código (`cargo check`).
+   - Cuando sí aplique por cambios de funcionalidad, el agente DEBE:
      1. Comprobar que la interacción con la consola y el shell no se degrade ni presente bucles activos (polling sin `hlt` / descarte de interrupciones).
      2. Ejecutar la suite de pruebas automatizadas:
         `powershell -ExecutionPolicy Bypass -File run.ps1 -Test` y verificar que el 100% de las pruebas pasen sin fallas.

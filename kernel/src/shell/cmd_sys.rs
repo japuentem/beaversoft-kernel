@@ -132,16 +132,16 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             let smp_cores = crate::apic::SMP.lock().cores.len();
 
             kprintln!();
-            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  ____  _____     __     _______ ____   ");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "  ___  ____  \n");
-            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | __ )| ____|   / \\ \\   / / ____|  _ \\  ");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, " / _ \\/ ___| \n");
-            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |  _ \\|  _|    / _ \\ \\ / /|  _| | |_) | ");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "| | | \\___ \\ \n");
-            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | |_) | |___  / ___ \\ V / | |___|  _ <  ");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, "| |_| |___) |\n");
-            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |____/|_____|/_/   \\_\\_/  |_____|_| \\_\\ ");
-            kprint_color!(VgaColor::Yellow, VgaColor::Black, " \\___/|____/ \n");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  ____   _____     _    __     __ _____  ____   ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "   ___   ____  \n");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | __ ) | ____|   / \\   \\ \\   / /| ____||  _ \\  ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "  / _ \\ / ___| \n");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |  _ \\ |  _|    / _ \\   \\ \\ / / |  _|  | |_) | ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, " | | | |\\___ \\ \n");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " | |_) || |___  / ___ \\   \\ V /  | |___ |  _ <  ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, " | |_| | ___) |\n");
+            kprint_color!(VgaColor::LightCyan, VgaColor::Black, " |____/ |_____|/_/   \\_\\   \\_/   |_____||_| \\_\\ ");
+            kprint_color!(VgaColor::Yellow, VgaColor::Black, "  \\___/ |____/ \n");
 
             kprint_color!(VgaColor::DarkGray, VgaColor::Black, " -------------------------------------------------------------------\n");
             kprint_color!(VgaColor::White, VgaColor::Black, "  SO:            ");

@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-05
-// Total de interacciones del día: 1
+// Total de interacciones del día: 2
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-05
@@ -45,5 +45,40 @@ Se diagnosticó la causa del desbordamiento y se implementó la solución solici
 3. **Verificación y Cumplimiento de la Regla 7 (No Regresión):**
    - Compilación en release completada: `cargo build --release --target x86_64-unknown-none`.
    - Suite de 16 pruebas automatizadas ejecutada: 16/16 pruebas superadas (`[PASS] QEMU finalizo con codigo 33`).
+
+================================================================================
+
+
+
+## Interacción #2 [08:17:00]
+
+### 👤 Pregunta / Petición del Usuario:
+-estan ligeramente movidos los caracteres
+-la regla de pruebas solo aplica para casos de agregar, editar o eliminar funcionalidad, en el caso del texto en ascii no es ninguno de estos y no deberian realizarse pruebas, al igual que al crear las imagenes no era necesario
+[Captura adjunta de pantalla mostrando: Comparativa lado a lado del banner ASCII con caracteres desplazados en las letras A y V vs. la tipografía Figlet canónica matemáticamente alineada]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se corrigió la desalineación de caracteres en el banner ASCII y se acotó formalmente la regla de pruebas según lo indicado:
+
+1. **Alineación Exacta de la Tipografía ASCII de "BEAVER OS":**
+   - Se corrigió el desfase entre las letras `A`, `V` y los espacios de escape en las barras diagonales:
+     ```text
+       ____   _____     _    __     __ _____  ____      ___   ____  
+      | __ ) | ____|   / \   \ \   / /| ____||  _ \    / _ \ / ___| 
+      |  _ \ |  _|    / _ \   \ \ / / |  _|  | |_) |  | | | |\___ \ 
+      | |_) || |___  / ___ \   \ V /  | |___ |  _ <   | |_| | ___) |
+      |____/ |_____|/_/   \_\   \_/   |_____||_| \_\   \___/ |____/ 
+     ```
+   - Cada renglón cuenta exactamente con 64 caracteres de ancho (uniforme en las 5 filas).
+   - Se actualizaron tanto la pantalla de bienvenida y el arranque en [`kernel/src/main.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/main.rs) como el comando `logo` en [`kernel/src/shell/cmd_sys.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/shell/cmd_sys.rs).
+
+2. **Acotamiento del Alcance de la Regla de Pruebas en `.agents/AGENTS.md` (Regla 7):**
+   - Se explicitó en las reglas del repositorio que la suite automatizada de pruebas (`run.ps1 -Test`) aplica **únicamente al agregar, editar o eliminar funcionalidad técnica y lógica del kernel** (drivers, planificador, syscalls, memoria, VFS, etc.).
+   - Se estableció la exención explícita para cambios puramente cosméticos, visuales, documentación, textos ASCII o imágenes en `assets/`, donde no es necesario ejecutar la suite de pruebas.
+
+3. **Verificación:**
+   - Compilación limpia del binario release verificada con `cargo build --release --target x86_64-unknown-none`.
 
 ================================================================================
