@@ -46,7 +46,7 @@ Antes de grabar la memoria, verifica la suma de comprobación criptográfica SHA
 ```powershell
 Get-FileHash target\beaver-os-v0.9.0.iso -Algorithm SHA256
 ```
-**Hash oficial:** `E0039E532FA180554646B5A516C52F8FD0ACCCC607A796CEB1BAAD17DC307F95`
+**Hash oficial:** `0A26640A31A56EBA685DFB60BA5B8C95BB2709CCDC0C9CA8E70836958A7FA155`
 
 ### 2. Grabado con Rufus (Windows)
 1. Descarga e inicia [Rufus](https://rufus.ie/).
@@ -90,6 +90,8 @@ root@beaver:/# _
 | `sh` | Conmuta al shell nativo en **Ring 3** (modo usuario aislado con llamadas `syscall` MSR). |
 | `exec /disk/bin/hello.elf` | Ejecuta directamente un binario ELF64 en Ring 3 aislado. |
 | `exec /disk/bin/bench.elf` | Ejecuta el benchmark de procesamiento en Ring 3. |
+| `beaver /disk/demo.bs` | Ejecuta el script de demostración de BeaverScript en Ring 3 con syscalls POSIX. |
+| `beaver /disk/functions.bs`| Ejecuta script con funciones, arrays y persistencia ATA en Ring 3. |
 | `net` | Muestra la configuración de red y estado del adaptador Intel Gigabit. |
 | `ping 10.0.2.2` | Envía paquetes ICMP Echo de prueba a través de la pila TCP/IP BeaverNet. |
 | `curl http://beaver.lan/info.json` | Realiza una petición HTTP/1.1 nativa sobre socket TCP. |

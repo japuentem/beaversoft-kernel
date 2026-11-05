@@ -404,9 +404,11 @@ impl Shell {
                     if path.ends_with(".bs") {
                         let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
                         if let Ok(source) = crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
-                            kprint_color!(VgaColor::Yellow, VgaColor::Black, "[RUN BS] Ejecutando script '{}'...\n", path);
-                            if let Ok(output) = crate::task::script::run_script(&source) {
-                                kprint!("{}", output);
+                            kprint_color!(VgaColor::Yellow, VgaColor::Black, "[RUN-BS RING3] Ejecutando script '{}' en Ring 3...\n", path);
+                            if let Ok(output) = crate::task::script::run_script_in_ring3(&source) {
+                                if !output.is_empty() {
+                                    kprintln!("{}", output);
+                                }
                                 return;
                             }
                         }

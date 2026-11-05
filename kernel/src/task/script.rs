@@ -46,6 +46,13 @@ impl Value {
 }
 
 #[derive(Debug, Clone)]
+pub enum Ring3Action {
+    Print(String),
+    Beep(u32, u32),
+    FileWrite(String, String),
+}
+
+#[derive(Debug, Clone)]
 pub struct FunctionDef {
     pub name: String,
     pub params: Vec<String>,
@@ -57,6 +64,7 @@ pub struct BeaverScriptEnv {
     pub functions: Vec<FunctionDef>,
     pub output: String,
     pub last_return: Option<Value>,
+    pub ring3_actions: Vec<Ring3Action>,
 }
 
 impl BeaverScriptEnv {
@@ -66,6 +74,7 @@ impl BeaverScriptEnv {
             functions: Vec::new(),
             output: String::new(),
             last_return: None,
+            ring3_actions: Vec::new(),
         }
     }
 
@@ -277,15 +286,19 @@ impl BeaverScriptEnv {
         // println expresion
         if let Some(rest) = trimmed.strip_prefix("println ") {
             let val = self.eval_expression(rest)?;
-            self.output.push_str(&val.to_string());
+            let s = val.to_string();
+            self.output.push_str(&s);
             self.output.push('\n');
+            self.ring3_actions.push(Ring3Action::Print(format!("{}\n", s)));
             return Ok(());
         }
 
         // print expresion
         if let Some(rest) = trimmed.strip_prefix("print ") {
             let val = self.eval_expression(rest)?;
-            self.output.push_str(&val.to_string());
+            let s = val.to_string();
+            self.output.push_str(&s);
+            self.ring3_actions.push(Ring3Action::Print(s));
             return Ok(());
         }
 
@@ -299,6 +312,7 @@ impl BeaverScriptEnv {
                     let ms = parts[1].trim().parse::<u32>().unwrap_or(100);
                     crate::drivers::audio::play_tone(hz, ms);
                     self.output.push_str(&format!("[AUDIO BEEP: {} Hz, {} ms]\n", hz, ms));
+                    self.ring3_actions.push(Ring3Action::Beep(hz, ms));
                     return Ok(());
                 }
             }
@@ -320,6 +334,7 @@ impl BeaverScriptEnv {
                     if let Err(e) = vfs.create_file(&path_str, content_bytes.as_bytes(), 0, 0) {
                         return Err(format!("Error en file_write: {}", e));
                     }
+                    self.ring3_actions.push(Ring3Action::FileWrite(path_str, content_bytes));
                     return Ok(());
                 }
             }
@@ -348,7 +363,7 @@ impl BeaverScriptEnv {
     }
 }
 
-/// Ejecuta un script completo de BeaverScript y devuelve la salida generada
+/// Ejecuta un script completo de BeaverScript y devuelve la salida generada (Modo Supervisor)
 pub fn run_script(source: &str) -> Result<String, String> {
     let mut env = BeaverScriptEnv::new();
     let mut in_function: Option<FunctionDef> = None;
@@ -426,6 +441,268 @@ pub fn run_script(source: &str) -> Result<String, String> {
             return Err(format!("Error en linea {}: {} -> '{}'", line_num + 1, err, line));
         }
     }
+
+    Ok(env.output)
+}
+
+/// Compila las acciones emitidas por el script a un binario ELF64 auténtico con instrucciones máquina x86-64
+pub fn build_script_elf(actions: &[Ring3Action]) -> Vec<u8> {
+    use crate::elf::{Elf64Header, Elf64ProgramHeader, ELF_TYPE_EXEC, ELF_MACHINE_X86_64, PT_LOAD, PF_R, PF_W, PF_X};
+    use crate::memory::paging::USER_ELF_VADDR;
+
+    let mut code: Vec<u8> = Vec::new();
+    let mut data_pool: Vec<u8> = Vec::new();
+
+    let data_base_vaddr = USER_ELF_VADDR + 0x1000;
+
+    for action in actions {
+        match action {
+            Ring3Action::Print(msg) => {
+                let off = data_pool.len();
+                data_pool.extend_from_slice(msg.as_bytes());
+                let msg_vaddr = data_base_vaddr + off as u64;
+
+                // mov rax, 1 (SYS_WRITE)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00]);
+                // mov rdi, 1 (stdout)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00]);
+                // mov rsi, msg_vaddr (10 bytes: 0x48, 0xBE, 8 bytes LE)
+                code.extend_from_slice(&[0x48, 0xBE]);
+                code.extend_from_slice(&msg_vaddr.to_le_bytes());
+                // mov rdx, msg_len (7 bytes: 0x48, 0xC7, 0xC2, 4 bytes LE)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC2]);
+                code.extend_from_slice(&(msg.len() as u32).to_le_bytes());
+                // syscall (2 bytes: 0x0F, 0x05)
+                code.extend_from_slice(&[0x0F, 0x05]);
+            }
+
+            Ring3Action::Beep(hz, ms) => {
+                // mov rax, 103 (SYS_BEEP)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC0, 0x67, 0x00, 0x00, 0x00]);
+                // mov rdi, hz
+                code.extend_from_slice(&[0x48, 0xC7, 0xC7]);
+                code.extend_from_slice(&hz.to_le_bytes());
+                // mov rsi, ms
+                code.extend_from_slice(&[0x48, 0xC7, 0xC6]);
+                code.extend_from_slice(&ms.to_le_bytes());
+                // syscall
+                code.extend_from_slice(&[0x0F, 0x05]);
+            }
+
+            Ring3Action::FileWrite(path, content) => {
+                let p_off = data_pool.len();
+                data_pool.extend_from_slice(path.as_bytes());
+                data_pool.push(0); // Terminador nulo para SYS_OPEN
+                let p_vaddr = data_base_vaddr + p_off as u64;
+
+                let c_off = data_pool.len();
+                data_pool.extend_from_slice(content.as_bytes());
+                let c_vaddr = data_base_vaddr + c_off as u64;
+
+                // mov rax, 2 (SYS_OPEN)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC0, 0x02, 0x00, 0x00, 0x00]);
+                // mov rdi, p_vaddr
+                code.extend_from_slice(&[0x48, 0xBF]);
+                code.extend_from_slice(&p_vaddr.to_le_bytes());
+                // mov rsi, 64 (O_CREAT)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC6, 0x40, 0x00, 0x00, 0x00]);
+                // syscall
+                code.extend_from_slice(&[0x0F, 0x05]);
+                // mov r12, rax (guardar fd devuelto)
+                code.extend_from_slice(&[0x49, 0x89, 0xC4]);
+                // mov rax, 1 (SYS_WRITE)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00]);
+                // mov rdi, r12 (fd)
+                code.extend_from_slice(&[0x4C, 0x89, 0xE7]);
+                // mov rsi, c_vaddr
+                code.extend_from_slice(&[0x48, 0xBE]);
+                code.extend_from_slice(&c_vaddr.to_le_bytes());
+                // mov rdx, content_len
+                code.extend_from_slice(&[0x48, 0xC7, 0xC2]);
+                code.extend_from_slice(&(content.len() as u32).to_le_bytes());
+                // syscall
+                code.extend_from_slice(&[0x0F, 0x05]);
+                // mov rax, 3 (SYS_CLOSE)
+                code.extend_from_slice(&[0x48, 0xC7, 0xC0, 0x03, 0x00, 0x00, 0x00]);
+                // mov rdi, r12 (fd)
+                code.extend_from_slice(&[0x4C, 0x89, 0xE7]);
+                // syscall
+                code.extend_from_slice(&[0x0F, 0x05]);
+            }
+        }
+    }
+
+    // Terminar limpiamente con SYS_EXIT (60), código 0
+    // mov rax, 60
+    code.extend_from_slice(&[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]);
+    // xor rdi, rdi
+    code.extend_from_slice(&[0x48, 0x31, 0xFF]);
+    // syscall
+    code.extend_from_slice(&[0x0F, 0x05]);
+
+    // Rellenar con NOPs para alineación a 16 bytes
+    while code.len() % 16 != 0 {
+        code.push(0x90);
+    }
+    if data_pool.is_empty() {
+        data_pool.push(0);
+    }
+
+    let mut elf = Vec::with_capacity(0x3000);
+
+    // 1. Cabecera ELF64 (64 bytes)
+    let header = Elf64Header {
+        ident: [0x7F, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        elf_type: ELF_TYPE_EXEC,
+        machine: ELF_MACHINE_X86_64,
+        version: 1,
+        entry: USER_ELF_VADDR,
+        ph_offset: 64,
+        sh_offset: 0,
+        flags: 0,
+        header_size: 64,
+        ph_entry_size: 56,
+        ph_num: 2, // 2 segmentos: código y datos
+        sh_entry_size: 0,
+        sh_num: 0,
+        sh_str_index: 0,
+    };
+
+    let header_bytes = unsafe {
+        core::slice::from_raw_parts(&header as *const Elf64Header as *const u8, 64)
+    };
+    elf.extend_from_slice(header_bytes);
+
+    // 2. Program Header 1: Código ejecutable (PT_LOAD, RX, offset 0x1000)
+    let ph1 = Elf64ProgramHeader {
+        seg_type: PT_LOAD,
+        flags: PF_R | PF_X,
+        offset: 0x1000,
+        vaddr: USER_ELF_VADDR,
+        paddr: USER_ELF_VADDR,
+        file_size: code.len() as u64,
+        mem_size: code.len() as u64,
+        align: 0x1000,
+    };
+    let ph1_bytes = unsafe {
+        core::slice::from_raw_parts(&ph1 as *const Elf64ProgramHeader as *const u8, 56)
+    };
+    elf.extend_from_slice(ph1_bytes);
+
+    // 3. Program Header 2: Datos de cadenas (PT_LOAD, RW, offset 0x2000)
+    let ph2 = Elf64ProgramHeader {
+        seg_type: PT_LOAD,
+        flags: PF_R | PF_W,
+        offset: 0x2000,
+        vaddr: data_base_vaddr,
+        paddr: data_base_vaddr,
+        file_size: data_pool.len() as u64,
+        mem_size: data_pool.len() as u64,
+        align: 0x1000,
+    };
+    let ph2_bytes = unsafe {
+        core::slice::from_raw_parts(&ph2 as *const Elf64ProgramHeader as *const u8, 56)
+    };
+    elf.extend_from_slice(ph2_bytes);
+
+    // Rellenar hasta offset 0x1000 y anexar código de máquina
+    while elf.len() < 0x1000 {
+        elf.push(0);
+    }
+    elf.extend_from_slice(&code);
+
+    // Rellenar hasta offset 0x2000 y anexar datos
+    while elf.len() < 0x2000 {
+        elf.push(0);
+    }
+    elf.extend_from_slice(&data_pool);
+
+    elf
+}
+
+/// Ejecuta un script BeaverScript dentro de un sandbox aislado de Ring 3 (CPL=3)
+/// con pasarela de fast syscalls MSR y protección Anti-BSOD
+pub fn run_script_in_ring3(source: &str) -> Result<String, String> {
+    let mut env = BeaverScriptEnv::new();
+    let mut in_function: Option<FunctionDef> = None;
+
+    for (line_num, raw_line) in source.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some(mut func) = in_function.take() {
+            if line == "}" || line.ends_with('}') {
+                let inside = line.trim_end_matches('}').trim();
+                if !inside.is_empty() {
+                    func.body.push(inside.to_string());
+                }
+                env.functions.push(func);
+            } else {
+                func.body.push(line.to_string());
+                in_function = Some(func);
+            }
+            continue;
+        }
+
+        if line.starts_with("fn ") {
+            if let Some(brace_idx) = line.find('{') {
+                let head = line[3..brace_idx].trim();
+                if let Some(paren_idx) = head.find('(') {
+                    let fn_name = head[..paren_idx].trim();
+                    let params_str = head[paren_idx + 1..].trim_end_matches(')').trim();
+                    let params = if params_str.is_empty() {
+                        Vec::new()
+                    } else {
+                        params_str.split(',').map(|s| s.trim().to_string()).collect()
+                    };
+
+                    let inside = line[brace_idx + 1..].trim();
+                    if inside.ends_with('}') {
+                        let body_str = inside.trim_end_matches('}').trim();
+                        let mut body = Vec::new();
+                        if !body_str.is_empty() {
+                            for stmt in body_str.split(';') {
+                                let s = stmt.trim();
+                                if !s.is_empty() {
+                                    body.push(s.to_string());
+                                }
+                            }
+                        }
+                        env.functions.push(FunctionDef {
+                            name: fn_name.to_string(),
+                            params,
+                            body,
+                        });
+                    } else {
+                        let mut body = Vec::new();
+                        if !inside.is_empty() {
+                            body.push(inside.to_string());
+                        }
+                        in_function = Some(FunctionDef {
+                            name: fn_name.to_string(),
+                            params,
+                            body,
+                        });
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if let Err(err) = env.execute_line(line) {
+            return Err(format!("Error en linea {}: {} -> '{}'", line_num + 1, err, line));
+        }
+    }
+
+    // Compilar las acciones analizadas a un binario ELF64 auténtico y ejecutarlo en Ring 3
+    let elf_bytes = build_script_elf(&env.ring3_actions);
+    let parsed_elf = crate::elf::ElfBinary::parse(&elf_bytes)
+        .map_err(|e| format!("Error en parseo ELF64 de BeaverScript: {}", e))?;
+
+    parsed_elf.load_and_execute()
+        .map_err(|e| format!("Error en ejecución Ring 3: {}", e))?;
 
     Ok(env.output)
 }

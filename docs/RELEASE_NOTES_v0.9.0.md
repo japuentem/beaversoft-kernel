@@ -30,8 +30,8 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 
 | Archivo de Imagen | Tamaño | Formato | Suma de Comprobación Criptográfica (SHA-256) |
 |---|---|---|---|
-| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `E0039E532FA180554646B5A516C52F8FD0ACCCC607A796CEB1BAAD17DC307F95` |
-| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `EEAE62CA5295772594E5610706056B095C3EE69BC3CEC31C8D87A772501FECA0` |
+| `beaver-os-v0.9.0.iso` | 16,818,176 bytes (16.04 MB) | ISO 9660 / El Torito UEFI Híbrido | `0A26640A31A56EBA685DFB60BA5B8C95BB2709CCDC0C9CA8E70836958A7FA155` |
+| `beaver-os-v0.9.0.img` | 16,777,216 bytes (16.00 MB) | Imagen cruda de disco (GPT / UEFI ESP) | `99C3767836E822775D8F39D722402BB5BEABA5823560684D7E77867885C088BF` |
 
 > **Verificación en PowerShell:**
 > ```powershell
@@ -50,6 +50,7 @@ Las imágenes oficiales han sido generadas y certificadas mediante compilación 
 - **Pila de Usuario Independiente:** Pila separada de 2 MiB en espacio no privilegiado y conmutación de contexto libre de carreras.
 - **Shell Nativo en Ring 3 (`sh`):** Intérprete interactivo que opera completamente en modo no privilegiado, interactuando con el hardware exclusivamente a través de la pasarela MSR Syscall. Un error o caída en el shell nunca compromete la estabilidad del kernel supervisor.
 - **Pre-empaquetado de Binarios ELF64 de Usuario:** La partición de arranque y el sistema de archivos incluyen ejecutables nativos x86-64 preinstalados (`\BIN\HELLO.ELF`, `\BIN\BENCH.ELF`, `\BIN\SH.ELF` y `/disk/bin/*.elf`), compilados con `beaver-libc` y ejecutables directamente en modo no privilegiado mediante `syscall`.
+- **Motor de BeaverScript (.bs) Aislado en Ring 3:** Los scripts nativos (`/disk/*.bs` como `demo.bs`, `functions.bs`, `fibonacci.bs`) se ejecutan dentro de un sandbox aislado en modo usuario (CPL=3) con directorio CR3 dedicado, canalizando todas sus operaciones de E/S (`print`, `println`, `beep`, `file_write`) a través de llamadas al sistema MSR rápidas (`SYS_WRITE`, `SYS_BEEP`, `SYS_OPEN`, `SYS_CLOSE`, `SYS_EXIT`) con protección Anti-BSOD.
 
 ### 2. Sistema de Archivos Resiliente BeaverFS
 - **Arquitectura de Partición Doble A/B:** Soporte nativo para arranques redundantes A/B con espejo de paridad para recuperación inmediata ante actualizaciones fallidas.

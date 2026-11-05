@@ -758,10 +758,14 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
             match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
                 Ok(source) => {
-                    kprint_color!(VgaColor::Yellow, VgaColor::Black, "[BEAVERSCRIPT] Ejecutando '{}'...\n", path);
-                    match crate::task::script::run_script(&source) {
-                        Ok(output) => kprint!("{}", output),
-                        Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR DE EJECUCION] {}\n", e),
+                    kprint_color!(VgaColor::Yellow, VgaColor::Black, "[BEAVERSCRIPT-RING3] Ejecutando '{}' en Ring 3 aislado...\n", path);
+                    match crate::task::script::run_script_in_ring3(&source) {
+                        Ok(output) => {
+                            if !output.is_empty() {
+                                kprintln!("{}", output);
+                            }
+                        }
+                        Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR RING 3] {}\n", e),
                     }
                 }
                 Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e),

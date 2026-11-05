@@ -57,6 +57,7 @@ pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
 pub const SYS_UPTIME:   u64 = 99;
 pub const SYS_SLEEP:    u64 = 102;
+pub const SYS_BEEP:     u64 = 103;
 
 // IPC y sincronización en Ring 3
 pub const SYS_IPC_SEND:     u64 = 110;
@@ -606,6 +607,14 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
         // SYS_SLEEP (102)
         SYS_SLEEP => {
             crate::task::scheduler::sleep(arg0);
+            0
+        }
+
+        // SYS_BEEP (103): hz=arg0, ms=arg1
+        SYS_BEEP => {
+            let hz = arg0 as u32;
+            let ms = arg1 as u32;
+            crate::drivers::audio::play_tone(hz, ms);
             0
         }
 

@@ -529,6 +529,11 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     let sh_exec = crate::task::pkg::execute_elf("/disk/bin/sh.elf")
         .expect("El paquete sh.elf debe existir e iniciar correctamente");
     assert!(sh_exec.contains("BEAVER-SH") || sh_exec.contains("sh"), "La ejecucion de sh.elf debe ser autentica");
+
+    // 5. Verificación de BeaverScript (.bs) aislado en Ring 3 con syscalls POSIX
+    let test_bs = "let x = 12\nlet y = 8\nlet sum = x + y\nprintln \"Ring 3 BS OK: \" + sum\n";
+    let bs_res = crate::task::script::run_script_in_ring3(test_bs);
+    assert!(bs_res.is_ok(), "BeaverScript debe ejecutarse en Ring 3 sin fallos");
 }
 
 #[cfg(test)]

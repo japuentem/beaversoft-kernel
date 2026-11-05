@@ -21,6 +21,7 @@ pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
 pub const SYS_UPTIME:   u64 = 99;
 pub const SYS_SLEEP:    u64 = 102;
+pub const SYS_BEEP:     u64 = 103;
 
 #[inline(always)]
 pub unsafe fn syscall0(nr: u64) -> u64 {
@@ -96,6 +97,10 @@ pub fn uptime() -> u64 {
 
 pub fn sleep(ticks: u64) {
     unsafe { syscall1(SYS_SLEEP, ticks); }
+}
+
+pub fn beep(hz: u32, duration_ms: u32) {
+    unsafe { syscall2(SYS_BEEP, hz as u64, duration_ms as u64); }
 }
 
 pub fn exit(code: u64) -> ! {
