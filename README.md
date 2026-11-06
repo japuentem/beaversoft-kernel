@@ -63,6 +63,34 @@ A diferencia de los sistemas operativos tradicionales, Beaver OS no deriva de Un
 2. **Arranque Nativo UEFI y GOP:** Cargador `BOOTX64.EFI` que inicializa el framebuffer TrueColor en alta resolución (1024x768x32) e ingresa en Modo Largo sin depender del legado BIOS de 16 bits.
 3. **Resiliencia Anti-Brickeo:** Protección contra apagados abruptos mediante journaling de paridad en BeaverFS y doble slot de arranque A/B.
 4. **Veracidad y Cero Simulaciones:** El kernel opera con información, tablas ACPI/MADT, paquetes Ethernet y registros de hardware reales en ejecución bare-metal.
+5. **Visión Ubicua Multi-Dispositivo:** Gracias a su huella ultraligera (~14 MB RAM) y su núcleo `no_std`, Beaver OS está concebido como la plataforma unificada para smartphones, Smart TVs, laptops, servidores y computadoras de a bordo de vehículos (ECUs automotrices).
+6. **Malla Conectiva Universal (BeaverMesh & BeaverSync):** Red distribuida P2P en el puerto `:4242` que permite a cualquier dispositivo Beaver OS descubrirse, sincronizarse y compartir tareas en tiempo real sin intermediarios ni dependencia de la nube.
+
+---
+
+## 🌐 Ecosistema Ubicuo: De Móviles a Vehículos Autónomos
+
+```
+ ┌─────────────┐       ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+ │   MÓVILES   │       │ SMART TVs   │       │ PC / LAPTOP │       │ AUTOMOTRIZ  │
+ │ (Smartphones│       │  & PANTALLAS│       │  (Desktop / │       │   (ECUs /   │
+ │ & Tablets)  │       │ Interactivas│       │ Workstation)│       │  Telemetría)│
+ └──────┬──────┘       └──────┬──────┘       └──────┬──────┘       └──────┬──────┘
+        │                     │                     │                     │
+        └─────────────────────┼─────────────────────┴─────────────────────┘
+                              ▼
+        ┌─────────────────────────────────────────────────────────┐
+        │   RED DE MALLA DISTRIBUIDA (BeaverMesh :4242 & Sync)   │
+        │   • Descubrimiento P2P sin servidores centrales ni nube │
+        │   • Migración fluida de tareas y sincronización BeaverFS│
+        └─────────────────────────────────────────────────────────┘
+```
+
+* **📱 Móviles y Tablets:** Arquitectura ARM (`aarch64`), huella ultraligera que maximiza la batería y aislamiento en Ring 3 para ejecución segura de apps.
+* **📺 Smart TVs y Pantallas:** Gráficos TrueColor instantáneos sin capas lentas, control multimedia y domótica en tiempo real.
+* **💻 PCs, Laptops y Workstations:** Modo Largo x86_64, multitarea con SMP simétrico y Beaver Desktop.
+* **🚗 Industria Automotriz y Sistemas Críticos:** Inmunidad contra congelamientos (Anti-BSOD) y almacenamiento anti-brickeo (BeaverFS A/B) para computadoras de a bordo.
+* **🏢 Servidores y Centros de Datos:** Cómputo multinúcleo masivo con sobrecarga mínima en llamadas al sistema (~42 ciclos).
 
 ---
 

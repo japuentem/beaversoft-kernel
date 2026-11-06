@@ -10,9 +10,6 @@ import os
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
-from pptx.enum.shapes import MSO_SHAPE
 
 SLIDE_SIZE = (1080, 1080)
 BG_COLOR = (11, 15, 25)           # Deep Obsidian #0B0F19
@@ -36,6 +33,8 @@ FONT_SMALL = ImageFont.truetype("segoeui.ttf", 15)
 FONT_TAG = ImageFont.truetype("segoeuib.ttf", 14)
 FONT_MONO = ImageFont.truetype("consolab.ttf", 16)
 
+TOTAL_SLIDES = 6
+
 def create_base_canvas():
     img = Image.new("RGBA", SLIDE_SIZE, BG_COLOR)
     draw = ImageDraw.Draw(img)
@@ -45,18 +44,10 @@ def create_base_canvas():
     draw.rectangle([(20, 20), (1060, 1060)], outline=(30, 41, 59), width=1)
     return img, draw
 
-def draw_pill(draw, x, y, text, border_color, text_color):
-    bbox = FONT_TAG.getbbox(text)
-    w = bbox[2] - bbox[0] + 20
-    h = 28
-    draw.rounded_rectangle([(x, y), (x + w, y + h)], radius=14, fill=(15, 23, 42, 220), outline=border_color, width=1)
-    draw.text((x + 10, y + 5), text, font=FONT_TAG, fill=text_color)
-    return w
-
 def draw_card(draw, x, y, w, h, border_color=(51, 65, 85), fill_color=CARD_BG, radius=12):
     draw.rounded_rectangle([(x, y), (x + w, y + h)], radius=radius, fill=fill_color, outline=border_color, width=1)
 
-def add_footer(draw, page_num, total_pages=5):
+def add_footer(draw, page_num, total_pages=TOTAL_SLIDES):
     y = 1010
     draw.line([(40, y - 10), (1040, y - 10)], fill=(30, 41, 59), width=1)
     draw.text((50, y), "Beaver OS • Arquitectura & Componentes • Beaversoft", font=FONT_SMALL, fill=TEXT_MUTED)
@@ -68,17 +59,14 @@ def add_footer(draw, page_num, total_pages=5):
 def make_slide_1():
     img, draw = create_base_canvas()
     
-    # Cargar y colocar el cyber banner
     if os.path.exists("assets/beaver_os_cyber_banner.png"):
         banner = Image.open("assets/beaver_os_cyber_banner.png").convert("RGBA")
         banner = banner.resize((780, 153), Image.Resampling.LANCZOS)
         img.paste(banner, (150, 70), banner)
     
-    # Subtítulo y Badge
     draw.text((160, 240), "MAPA INTEGRAL DE ARQUITECTURA Y SUBSISTEMAS", font=FONT_MED, fill=AMBER_ACCENT)
     draw.text((160, 275), "Microkernel x86_64 Bare-Metal en Rust • Ring 3 Aislado • Multiprocesamiento SMP", font=FONT_BODY, fill=TEXT_MUTED)
     
-    # 4 Bloques Principales en Formato Grid
     blocks = [
         ("ESPACIO DE USUARIO (RING 3)", "• Beaver Shell interactivo (root@beaver:/#)\n• Motor BeaverScript (.bs) con JIT en Ring 3\n• Binarios ELF64 (BENCH, HELLO, SH)\n• Biblioteca estándar beaver-libc", (80, 340, 440, 280), PURPLE_ACCENT),
         ("PASARELA MSR FAST SYSCALLS", "• Instrucciones rápidas syscall y sysret\n• MSR IA32_LSTAR (0xC0000082, ~42 ciclos)\n• Directorio de páginas CR3 aislado por proceso\n• Supervisor Anti-BSOD: captura #PF / #GP", (560, 340, 440, 280), CYAN_ACCENT),
@@ -90,8 +78,6 @@ def make_slide_1():
         draw_card(draw, x, y, w, h, border_color=color)
         draw.text((x + 20, y + 18), title, font=FONT_CARD_TITLE, fill=color)
         draw.line([(x + 20, y + 50), (x + w - 20, y + 50)], fill=(40, 50, 70), width=1)
-        
-        # Líneas de descripción
         dy = y + 65
         for line in desc.split("\n"):
             draw.text((x + 20, dy), line, font=FONT_BODY, fill=TEXT_WHITE)
@@ -105,11 +91,9 @@ def make_slide_1():
 # ==============================================================================
 def make_slide_2():
     img, draw = create_base_canvas()
-    
     draw.text((60, 50), "RING 3: AISLAMIENTO Y PASARELA MSR SYSCALLS", font=FONT_TITLE, fill=CYAN_ACCENT)
     draw.text((60, 95), "Seguridad de memoria por hardware sin dependencia del legado Unix", font=FONT_BODY, fill=TEXT_MUTED)
     
-    # Diagrama de flujo conceptual Ring 3 ⇄ Ring 0
     draw_card(draw, 60, 140, 960, 360, border_color=PURPLE_ACCENT)
     draw.text((80, 160), "1. Entorno de Ejecución No Privilegiado (CPL=3)", font=FONT_CARD_TITLE, fill=PURPLE_ACCENT)
     
@@ -121,7 +105,6 @@ def make_slide_2():
     for stitle, sdesc, (sx, sy, sw, sh), scolor in subcards:
         draw_card(draw, sx, sy, sw, sh, border_color=scolor, fill_color=(15, 23, 42, 240))
         draw.text((sx + 15, sy + 15), stitle, font=FONT_BODY_BOLD, fill=scolor)
-        # Wrap text
         words = sdesc.split(" ")
         lines, cur = [], ""
         for w in words:
@@ -135,13 +118,11 @@ def make_slide_2():
             draw.text((sx + 15, sdy), l, font=FONT_SMALL, fill=TEXT_MUTED)
             sdy += 22
 
-    # Syscall Transition Box
     draw_card(draw, 80, 370, 920, 110, border_color=CYAN_ACCENT, fill_color=(10, 20, 35, 250))
     draw.text((100, 385), "TRANSICIÓN POR HARDWARE: MSR IA32_LSTAR (0xC0000082)", font=FONT_BODY_BOLD, fill=CYAN_ACCENT)
     draw.text((100, 415), "• Instrucción 'syscall' conmuta instantáneamente de Ring 3 a Ring 0 en ~42 ciclos de CPU.", font=FONT_SMALL, fill=TEXT_WHITE)
     draw.text((100, 440), "• Instrucción 'sysret' restaura RIP/RSP y regresa al usuario sin pasar por la IDT de interrupciones.", font=FONT_SMALL, fill=TEXT_WHITE)
 
-    # Bloque Inferior: Protección Anti-BSOD
     draw_card(draw, 60, 530, 960, 440, border_color=AMBER_ACCENT)
     draw.text((80, 555), "2. Resiliencia: Aislamiento Anti-BSOD y Fallos de Página (#PF)", font=FONT_CARD_TITLE, fill=AMBER_ACCENT)
     
@@ -165,7 +146,6 @@ def make_slide_2():
 # ==============================================================================
 def make_slide_3():
     img, draw = create_base_canvas()
-    
     draw.text((60, 50), "RING 0: ARQUITECTURA DEL MICROKERNEL SUPERVISOR", font=FONT_TITLE, fill=AMBER_ACCENT)
     draw.text((60, 95), "Gestión bare-metal de memoria, multiprocesamiento, archivos y red", font=FONT_BODY, fill=TEXT_MUTED)
     
@@ -206,7 +186,6 @@ def make_slide_3():
         
         idy = y + 75
         for item in items:
-            # Word wrap item
             words = item.split(" ")
             lines, cur = [], ""
             for word in words:
@@ -228,11 +207,9 @@ def make_slide_3():
 # ==============================================================================
 def make_slide_4():
     img, draw = create_base_canvas()
-    
     draw.text((60, 50), "SERVIDOR GRÁFICO TRUECOLOR Y BEAVER DESKTOP", font=FONT_TITLE, fill=GREEN_ACCENT)
     draw.text((60, 95), "Entorno de ventanas a 1024x768x32 bits con compositor Dirty Rects", font=FONT_BODY, fill=TEXT_MUTED)
     
-    # Tarjeta Superior: Motor Gráfico Canvas
     draw_card(draw, 60, 145, 960, 240, border_color=CYAN_ACCENT)
     draw.text((80, 165), "1. Arquitectura de Renderizado Canvas y VBE/GOP", font=FONT_CARD_TITLE, fill=CYAN_ACCENT)
     
@@ -247,7 +224,6 @@ def make_slide_4():
         draw.text((80, gdy + 24), gdesc, font=FONT_BODY, fill=TEXT_WHITE)
         gdy += 55
 
-    # Tarjeta Inferior: Suite de Aplicaciones de Escritorio
     draw_card(draw, 60, 410, 960, 560, border_color=PURPLE_ACCENT)
     draw.text((80, 435), "2. Beaver Desktop: Suite Integrada de Aplicaciones", font=FONT_CARD_TITLE, fill=PURPLE_ACCENT)
     
@@ -260,7 +236,6 @@ def make_slide_4():
         ("BeaverCalendar", "Agenda y calendario del sistema operativo sincronizado mediante el reloj de tiempo real (RTC) por hardware.", AMBER_ACCENT)
     ]
     
-    # 2 columnas de 3 apps
     for i, (atitle, adesc, acolor) in enumerate(apps):
         col = i % 2
         row = i // 2
@@ -268,7 +243,6 @@ def make_slide_4():
         ay = 485 + row * 155
         draw_card(draw, ax, ay, 450, 135, border_color=acolor, fill_color=(15, 23, 42, 240))
         draw.text((ax + 15, ay + 15), atitle, font=FONT_BODY_BOLD, fill=acolor)
-        
         words = adesc.split(" ")
         lines, cur = [], ""
         for w in words:
@@ -286,15 +260,95 @@ def make_slide_4():
     return img
 
 # ==============================================================================
-# SLIDE 5: SILICIO FÍSICO, BENCHMARKS Y REPOSITORIO
+# SLIDE 5 (NUEVA): VISIÓN Y ARQUITECTURA MULTIDISPOSITIVO (ECOSISTEMA UBICUO)
 # ==============================================================================
-def make_slide_5():
+def make_slide_5_ubiquitous():
     img, draw = create_base_canvas()
     
+    draw.text((60, 45), "VISIÓN MULTIDISPOSITIVO: EL ECOSISTEMA UBICUO", font=FONT_TITLE, fill=AMBER_ACCENT)
+    draw.text((60, 90), "Una base unificada de microkernel para operar e interconectar cualquier dispositivo", font=FONT_BODY, fill=TEXT_MUTED)
+    
+    # 5 Sectores Clave (Grid 2 columnas x 3 filas)
+    sectors = [
+        ("📱 MÓVILES Y TABLETS", [
+            "• Portabilidad a arquitectura ARM (aarch64)",
+            "• Huella mínima (~14 MB RAM) que multiplica la batería",
+            "• Aislamiento Ring 3 para ejecutar apps sin riesgo al SO"
+        ], CYAN_ACCENT),
+        
+        ("📺 SMART TVs Y PANTALLAS", [
+            "• Servidor gráfico TrueColor instantáneo sin capas lentas",
+            "• Control domótico y visualización multimedia en tiempo real",
+            "• Bajo consumo energético y encendido ultraveloz (< 1.8s)"
+        ], PURPLE_ACCENT),
+        
+        ("💻 PCs, LAPTOPS Y ESTACIONES", [
+            "• Modo Largo x86_64 nativo y soporte multinúcleo SMP",
+            "• Servidor Beaver Desktop con aplicaciones de productividad",
+            "• Compatibilidad con silicio Intel Core y AMD Ryzen"
+        ], GREEN_ACCENT),
+        
+        ("🚗 AUTOMOTRIZ Y CRÍTICO (ECUs)", [
+            "• Aislamiento Anti-BSOD: fallo de una app jamás congela el auto",
+            "• BeaverFS anti-brickeo: inmune a cortes abruptos de energía",
+            "• Respuesta determinista y baja latencia de interrupciones"
+        ], AMBER_ACCENT),
+        
+        ("🏢 SERVIDORES Y EDGE COMPUTING", [
+            "• Planificador SMP masivo escalable a cientos de núcleos",
+            "• Sobrecarga mínima en llamadas al sistema (~42 ciclos CPU)",
+            "• Supervisor Anti-OOM con memoria reservada de emergencia"
+        ], CYAN_ACCENT),
+        
+        ("🌐 BEAVERMESH & BEAVERSYNC", [
+            "• Red de malla distribuida (:4242) entre todos los dispositivos",
+            "• Descubrimiento y sincronización P2P sin servidores nube",
+            "• Compartición de tareas y periféricos en tiempo real"
+        ], GREEN_ACCENT)
+    ]
+    
+    for i, (stitle, sitems, scolor) in enumerate(sectors):
+        col = i % 2
+        row = i // 2
+        sx = 60 + col * 490
+        sy = 135 + row * 195
+        sw, sh = 470, 180
+        
+        draw_card(draw, sx, sy, sw, sh, border_color=scolor, fill_color=(15, 23, 42, 240))
+        draw.text((sx + 15, sy + 14), stitle, font=FONT_CARD_TITLE, fill=scolor)
+        draw.line([(sx + 15, sy + 44), (sx + sw - 15, sy + 44)], fill=(40, 50, 70), width=1)
+        
+        sdy = sy + 56
+        for it in sitems:
+            draw.text((sx + 15, sdy), it, font=FONT_BODY, fill=TEXT_WHITE)
+            sdy += 34
+
+    # Tarjeta de Conectividad Universal en la parte inferior
+    draw_card(draw, 60, 735, 960, 240, border_color=CYAN_ACCENT, fill_color=(10, 22, 38, 250))
+    draw.text((80, 755), "LA PROMESA: TEJIDO CONECTIVO TOTAL SIN DEPENDENCIAS EXTERNAS", font=FONT_CARD_TITLE, fill=CYAN_ACCENT)
+    
+    promise_points = [
+        "1. Misma Base de Microkernel: El mismo núcleo seguro y determinista opera desde el vehículo hasta el teléfono.",
+        "2. Sin Nube Obligatoria: La red de malla P2P (BeaverMesh) intercambia datos localmente sin exponer privacidad.",
+        "3. Continuidad de Tareas: Inicia un cálculo o proceso en un dispositivo y continúa en otro nodo de la malla."
+    ]
+    pdy = 795
+    for pt in promise_points:
+        draw.text((80, pdy), pt, font=FONT_BODY_BOLD, fill=TEXT_WHITE)
+        pdy += 36
+    draw.text((80, 915), ">> Beaver OS no es solo un SO de escritorio: es la plataforma base para la próxima era de dispositivos inteligentes.", font=FONT_BODY, fill=AMBER_ACCENT)
+
+    add_footer(draw, 5)
+    return img
+
+# ==============================================================================
+# SLIDE 6: SILICIO FÍSICO, BENCHMARKS Y REPOSITORIO
+# ==============================================================================
+def make_slide_6():
+    img, draw = create_base_canvas()
     draw.text((60, 50), "VALIDACIÓN EN SILICIO FÍSICO Y CÓDIGO FUENTE", font=FONT_TITLE, fill=CYAN_ACCENT)
     draw.text((60, 95), "Certificación en hardware real Intel/AMD y disponibilidad abierta", font=FONT_BODY, fill=TEXT_MUTED)
     
-    # Benchmark Comparison Table
     draw_card(draw, 60, 145, 960, 310, border_color=AMBER_ACCENT)
     draw.text((80, 165), "BANCO DE PRUEBAS ARITMÉTICO EN SILICIO FÍSICO (1M PRIMOS x100)", font=FONT_CARD_TITLE, fill=AMBER_ACCENT)
     
@@ -319,7 +373,6 @@ def make_slide_5():
         draw.text((800, r_y), col3, font=FONT_BODY, fill=TEXT_MUTED)
         r_y += 45
 
-    # Compatibilidad de Silicio
     draw_card(draw, 60, 480, 960, 240, border_color=PURPLE_ACCENT)
     draw.text((80, 505), "COMPATIBILIDAD CERTIFICADA DE PROCESADORES", font=FONT_CARD_TITLE, fill=PURPLE_ACCENT)
     
@@ -334,7 +387,6 @@ def make_slide_5():
         draw.text((250, hdy), hdesc, font=FONT_BODY, fill=TEXT_WHITE)
         hdy += 45
 
-    # Card Final: Enlace al Repositorio
     draw_card(draw, 60, 745, 960, 220, border_color=CYAN_ACCENT, fill_color=(10, 20, 35, 250))
     draw.text((80, 770), "PROYECTO DE CÓDIGO ABIERTO (OPEN SOURCE)", font=FONT_CARD_TITLE, fill=CYAN_ACCENT)
     draw.text((80, 808), "• Repositorio Oficial en GitHub:", font=FONT_BODY_BOLD, fill=TEXT_WHITE)
@@ -344,7 +396,7 @@ def make_slide_5():
     draw.text((80, 875), "• Pruebas e Instalación:", font=FONT_BODY, fill=TEXT_MUTED)
     draw.text((280, 875), "powershell -ExecutionPolicy Bypass -File run.ps1", font=FONT_MONO, fill=AMBER_ACCENT)
 
-    add_footer(draw, 5)
+    add_footer(draw, 6)
     return img
 
 # ==============================================================================
@@ -356,9 +408,10 @@ def main():
     s2 = make_slide_2()
     s3 = make_slide_3()
     s4 = make_slide_4()
-    s5 = make_slide_5()
+    s5 = make_slide_5_ubiquitous()
+    s6 = make_slide_6()
     
-    slides = [s1, s2, s3, s4, s5]
+    slides = [s1, s2, s3, s4, s5, s6]
     os.makedirs("docs", exist_ok=True)
     os.makedirs("docs/architecture_deck", exist_ok=True)
     
@@ -369,7 +422,6 @@ def main():
         img_paths.append(p)
         print(f"  * Diapositiva {i+1} guardada en: {p}")
 
-    # Guardar PDF multipágina con ReportLab
     pdf_path = "docs/beaver_os_architecture_diagram.pdf"
     print(f"[2/3] Compilando documento PDF para LinkedIn: {pdf_path}...")
     from reportlab.pdfgen import canvas
@@ -380,11 +432,9 @@ def main():
     c.save()
     print(f"[OK] PDF generado satisfactoriamente: {pdf_path} ({os.path.getsize(pdf_path)/1024:.1f} KB)")
 
-    # Guardar PowerPoint PPTX
     pptx_path = "docs/beaver_os_architecture_diagram.pptx"
     print(f"[3/3] Compilando presentación PowerPoint (PPTX): {pptx_path}...")
     prs = Presentation()
-    # Configurar formato cuadrado 1:1 o 16:9
     prs.slide_width = Inches(10)
     prs.slide_height = Inches(10)
     blank_layout = prs.slide_layouts[6]
