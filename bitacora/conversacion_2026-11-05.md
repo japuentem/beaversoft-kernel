@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-05
-// Total de interacciones del día: 17
+// Total de interacciones del día: 18
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-05
@@ -502,5 +502,29 @@ Se analizaron las opciones de título para la ventana modal de LinkedIn, respeta
 
 2. **Texto / Copy sugerido para el cuerpo de la publicación en LinkedIn:**
    Se redactó un post profesional de alto impacto destacando los hitos de ingeniería: desarrollo independiente en Rust `no_std`, aislamiento en Ring 3, pasarela MSR `syscall`, multiprocesamiento SMP y el enlace al repositorio.
+
+================================================================================
+
+## Interacción #18 [18:12:00]
+
+### 👤 Pregunta / Petición del Usuario:
+dame un diagrama de como esta integrado o los componentes de BEAVER OS
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se estructuró y entregó un diagrama integral de la arquitectura y componentes de **Beaver OS** en formato Mermaid (`flowchart TD`) y desglose técnico de subsistemas:
+
+1. **Espacio de Usuario (Ring 3 - CPL=3):**
+   - Beaver Shell, motor JIT BeaverScript (`.bs`), binarios ELF64 (`bench.elf`, `hello.elf`, `sh.elf`) y biblioteca `beaver-libc`.
+2. **Pasarela de Aislamiento y Syscalls por Hardware (Ring 3 ⇄ Ring 0):**
+   - Instrucciones `syscall`/`sysret`, registro MSR `IA32_LSTAR` (`0xC0000082`), directorios de páginas `PML4` dedicados por proceso y manejador Anti-BSOD.
+3. **Supervisor del Microkernel (Ring 0 - CPL=0):**
+   - Memoria paginada de 4 niveles, Heap dinámico `alloc::*`, supervisor Anti-OOM, planificador SMP multinúcleo sobre ACPI MADT / IPIs.
+   - Almacenamiento: VFS, BeaverFS con journaling de paridad y controlador IDE/ATA PIO.
+   - Pila de red: Ethernet (RTL8139 / e1000), protocolos ARP/IPv4/ICMP/DHCP/TCP/UDP/DNS y BeaverMesh.
+   - Servidor gráfico: VBE/UEFI GOP TrueColor, Canvas con doble buffer y Dirty Rects (1024x768), administrador de ventanas y Beaver Desktop.
+4. **Firmware y Silicio Físico:**
+   - Firmware UEFI, cargador `BOOTX64.EFI`, salto a Long Mode x86_64 sobre procesadores reales Intel y AMD.
 
 ================================================================================
