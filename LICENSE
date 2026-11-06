@@ -1,0 +1,53 @@
+================================================================================
+BEAVER OS PUBLIC SOURCE LICENSE & TRADEMARK RESTRICTION
+================================================================================
+Copyright (c) 2026 José Alberto Puente Maldonado (japuentem)
+Brand: Beaversoft
+Project: Beaver OS (beaver-kernel)
+All rights reserved.
+
+Por la presente se concede autorización a cualquier persona u organización para 
+obtener una copia de este software y los archivos de documentación asociados 
+("Beaver OS"), para inspeccionar, compilar, ejecutar, estudiar, auditar y realizar 
+pruebas con fines personales, educativos, de investigación o evaluación técnica, 
+sujeto a las siguientes condiciones obligatorias:
+
+1. PROTECCIÓN ESTRICTA DE MARCA Y NOMBRE COMERCIAL (TRADEMARK CLAUSE)
+--------------------------------------------------------------------------------
+Los nombres comerciales "BEAVER OS", "Beaver OS", "beaver-kernel", "BeaverFS", 
+"BeaverScript", "Beaver Desktop", "Beaversoft", así como sus emblemas, logotipos, 
+iconografía y activos gráficos incluidos en este repositorio, son marcas e 
+identidades comerciales exclusivas de su autor, José Alberto Puente Maldonado 
+y de la firma Beaversoft.
+
+QUEDA EXPRESAMENTE PROHIBIDO:
+a) Publicar, distribuir, empaquetar o comercializar versiones modificadas, 
+   bifurcaciones (forks), parches públicos, distribuciones derivadas o binarios 
+   utilizando la denominación "BEAVER OS", "Beaver OS" o "Beaversoft".
+b) Insinuar o declarar patrocinio, respaldo, afiliación o aval oficial de 
+   Beaversoft o José Alberto Puente Maldonado hacia cualquier proyecto derivado.
+
+OBLIGACIÓN DE RENOMBRADO COMPLETO (REBRANDING):
+Cualquier persona, equipo o entidad que cree una versión modificada, derivación 
+técnica o distribución alternativa a partir de este código fuente DEBE 
+renombrarla en su totalidad, eliminando cualquier referencia a "BEAVER OS", 
+"Beaver", "beaver-kernel" o "Beaversoft" en el nombre del producto, cargadores de 
+arranque, pantallas de bienvenida, banners del sistema operativo y documentación, 
+adoptando un nombre y marca propios, claramente diferenciados que no induzcan 
+a confusión sobre el origen del sistema operativo.
+
+2. PRESERVACIÓN DE AVISOS DE DERECHOS DE AUTOR
+--------------------------------------------------------------------------------
+El aviso de copyright anterior, esta cláusula de protección de marca y este 
+permiso deberán incluirse en todas las copias o partes sustanciales del Software.
+
+3. RENUNCIA DE GARANTÍAS Y RESPONSABILIDAD
+--------------------------------------------------------------------------------
+EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O 
+IMPLÍCITA, INCLUYENDO PERO SIN LIMITARSE A LAS GARANTÍAS DE COMERCIABILIDAD, 
+IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO EL AUTOR 
+O TITULARES DE LOS DERECHOS DE AUTOR SERÁN RESPONSABLES DE NINGUNA RECLAMACIÓN, 
+DAÑOS U OTRAS RESPONSABILIDADES, YA SEA EN UNA ACCIÓN DE CONTRATO, AGRAVIO O DE 
+OTRO MODO, QUE SURJA DE, FUERA DE O EN CONEXIÓN CON EL SOFTWARE O EL USO U OTROS 
+TRATOS EN EL SOFTWARE.
+================================================================================

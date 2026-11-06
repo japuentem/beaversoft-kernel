@@ -437,13 +437,13 @@ def make_slide_6():
         hdy += 45
 
     draw_card(draw, 60, 745, 960, 225, border_color=CYAN_ACCENT, fill_color=(10, 20, 35, 250))
-    draw.text((80, 768), "PROYECTO DE CÓDIGO ABIERTO (OPEN SOURCE)", font=FONT_CARD_TITLE, fill=CYAN_ACCENT)
+    draw.text((80, 768), "CÓDIGO DISPONIBLE PÚBLICAMENTE (SOURCE-AVAILABLE)", font=FONT_CARD_TITLE, fill=CYAN_ACCENT)
     draw.text((80, 805), "• Repositorio Oficial en GitHub:", font=FONT_BODY_BOLD, fill=TEXT_WHITE)
     draw.text((360, 805), "https://github.com/japuentem/beaversoft-kernel", font=FONT_BODY_BOLD, fill=CYAN_ACCENT)
-    draw.text((80, 838), "• Autor y Arquitectura:", font=FONT_BODY, fill=TEXT_MUTED)
-    draw.text((280, 838), "José Alberto Puente Maldonado (@japuentem) • Beaversoft", font=FONT_BODY, fill=TEXT_WHITE)
-    draw.text((80, 870), "• Pruebas e Instalación:", font=FONT_BODY, fill=TEXT_MUTED)
-    draw.text((280, 870), "powershell -ExecutionPolicy Bypass -File run.ps1", font=FONT_MONO, fill=AMBER_ACCENT)
+    draw.text((80, 838), "• Autor y Titular de Marca:", font=FONT_BODY, fill=TEXT_MUTED)
+    draw.text((300, 838), "José Alberto Puente Maldonado (@japuentem) • Beaversoft", font=FONT_BODY, fill=TEXT_WHITE)
+    draw.text((80, 870), "• Licencia y Marca:", font=FONT_BODY, fill=TEXT_MUTED)
+    draw.text((230, 870), "Código disponible • Nombre 'BEAVER OS' y 'Beaversoft' protegidos (Forks requieren renombrado)", font=FONT_SMALL, fill=AMBER_ACCENT)
 
     add_footer(draw, 6)
     return img

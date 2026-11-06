@@ -16,6 +16,7 @@
 [![Architecture](https://img.shields.io/badge/Architecture-x86__64%20Long%20Mode-blue.svg?style=for-the-badge&logo=intel)](https://software.intel.com/)
 [![Boot](https://img.shields.io/badge/Boot-UEFI%20Native%20GOP-green.svg?style=for-the-badge)](docs/UEFI_BOOT_GUIDE.md)
 [![Privilege](https://img.shields.io/badge/Isolation-Ring%203%20MSR%20Syscalls-purple.svg?style=for-the-badge)](docs/RELEASE_NOTES_v0.9.0.md)
+[![License](https://img.shields.io/badge/License-Source--Available%20%7C%20Trademark%20Protected-brightgreen.svg?style=for-the-badge)](LICENSE)
 [![Version](https://img.shields.io/badge/Release-v0.9.0-cyan.svg?style=for-the-badge)](docs/RELEASE_NOTES_v0.9.0.md)
 
 [🚀 Inicio Rápido](docs/QUICKSTART.md) • [💻 Compatibilidad de Silicio](docs/HARDWARE_COMPATIBILITY.md) • [📜 Notas de Versión v0.9.0](docs/RELEASE_NOTES_v0.9.0.md) • [💾 Instalación USB](docs/BARE_METAL_INSTALLATION.md)
@@ -141,10 +142,17 @@ Para consultar la guía detallada de configuración de firmware y teclas de men�
 
 ---
 
-## 📜 Licencia y Autoría
+## 📜 Licencia, Marca y Cláusula de Renombrado Obligatorio
 
 * **Proyecto:** Beaversoft Meta-Kernel
 * **Marca Comercial:** Beaversoft
-* **Autor:** José Alberto Puente Maldonado ([@japuentem](https://github.com/japuentem))
-* **Licencia:** Distribuido bajo la Licencia de Código Abierto MIT / Apache 2.0.
+* **Producto Oficial:** Beaver OS
+* **Autor y Titular:** José Alberto Puente Maldonado ([@japuentem](https://github.com/japuentem))
+* **Términos de Licencia ([`LICENSE`](LICENSE)):** Código disponible públicamente (*Source-Available*) para inspección, estudio, compilación, evaluación y auditoría técnica.
+
+> [!IMPORTANT]
+> **Protección Estricta de Marca y Denominación:**
+> Los términos **BEAVER OS**, **beaver-kernel**, **BeaverFS**, **BeaverScript** y la marca comercial **Beaversoft** son propiedad exclusiva de su creador.
+> **Queda prohibido distribuir versiones modificadas, bifurcaciones (*forks*) o redistribuciones utilizando el nombre "BEAVER OS" o "Beaversoft".**
+> Cualquier persona o equipo que desarrolle una derivación técnica basada en este código fuente **está obligado a renombrar completamente el proyecto** bajo una identidad comercial propia y no vinculada a la marca original. Consulta el archivo [`LICENSE`](LICENSE) para mayores detalles.
 

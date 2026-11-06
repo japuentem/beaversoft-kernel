@@ -393,7 +393,7 @@ def generate_slide_7():
         ">>  Arranque Ultrarrápido en QEMU:   powershell -ExecutionPolicy Bypass -File run.ps1",
         ">>  Hashes Criptográficos SHA-256:   Verificados e íntegros (ISO & IMG)",
         ">>  Suite de Pruebas Automatizada:   16 de 16 Pruebas Superadas (100% PASS)",
-        ">>  Código Abierto en Rust:           Licencia Dual MIT / Apache 2.0"
+        ">>  Licencia y Marca:                Código Disponible (Nombre BEAVER OS Protegido)"
     ]
     y_sp = 315
     for s in specs:

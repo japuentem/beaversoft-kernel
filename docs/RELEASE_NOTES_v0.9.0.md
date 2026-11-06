@@ -12,7 +12,7 @@
 **Arquitectura:** x86_64 Bare-Metal (`no_std`)  
 **Firma / Marca:** Beaversoft  
 **Autor Principal & Arquitecto de Software:** José Alberto Puente Maldonado (`japuentem`)  
-**Licencia:** Dual MIT / Apache 2.0  
+**Licencia:** Source-Available con Protección Estricta de Marca y Renombrado Obligatorio ([`LICENSE`](../LICENSE))  
 
 ---
 
