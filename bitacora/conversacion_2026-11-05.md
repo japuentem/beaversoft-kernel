@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-05
-// Total de interacciones del día: 21
+// Total de interacciones del día: 22
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-05
@@ -605,5 +605,31 @@ Se constató que en las versiones iniciales los documentos estaban enfocados cas
    - Se incorporó la sección *"Ecosistema Ubicuo: De Móviles a Vehículos Autónomos"* con su respectivo diagrama de bloques.
 3. **Regeneración de Archivos:**
    - Se compilaron y verificaron `docs/beaver_os_architecture_diagram.pdf` (759 KB) y `docs/beaver_os_architecture_diagram.pptx` (756 KB).
+
+================================================================================
+
+## Interacción #22 [22:50:00]
+
+### 👤 Pregunta / Petición del Usuario:
+hay texto que se salen de sus espacios
+[Adjunto: Captura de pantalla de la Diapositiva 5, mostrando desbordamiento de texto en las tarjetas de 'PCs, Laptops', 'Automotriz', 'Servidores' y 'BeaverMesh', además de caracteres emoji renderizados como glifos vacíos '▯']
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se corrigió de raíz el problema de formateo y desbordamiento visual en la generación de diapositivas:
+
+1. **Reemplazo de Glifos Emoji de Sistema por Etiquetas de Plataforma:**
+   - En Pillow/ReportLab los emojis Unicode complejos no poseen soporte en tipografías TTF estándar y se renderizaban como cajas vacías (`▯`). Se reemplazaron por identificadores limpios y tecnológicos: `[MÓVIL]`, `[PANTALLA]`, `[ESCRITORIO]`, `[AUTO]`, `[NUBE]`, `[CONECTIVIDAD]`.
+
+2. **Motor de Salto de Línea Dinámico al Píxel (`draw_wrapped_text` y `draw_bullet`):**
+   - Se implementó un algoritmo estricto que calcula con `font.getbbox()` el ancho real en píxeles de cada palabra y línea antes de dibujar.
+   - Si una frase excede el ancho útil interior de la tarjeta (máximo 430 px), se divide limpiamente en saltos de línea con sangría francesa automática en los bullets.
+
+3. **Verificación Geométrica y Recompilación:**
+   - Se comprobó mediante análisis de píxeles (`slide_05.png`) que el desbordamiento hacia los márgenes y canales inter-tarjetas es exactamente **0 píxeles**.
+   - Se regeneraron en alta resolución:
+     - [`docs/beaver_os_architecture_diagram.pdf`](file:///d:/proyectos_personales/beaversoft-kernel/docs/beaver_os_architecture_diagram.pdf) (665 KB).
+     - [`docs/beaver_os_architecture_diagram.pptx`](file:///d:/proyectos_personales/beaversoft-kernel/docs/beaver_os_architecture_diagram.pptx) (655 KB).
 
 ================================================================================
