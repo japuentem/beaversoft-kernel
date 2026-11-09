@@ -15,6 +15,8 @@ pub mod note;
 pub mod bmp;
 pub mod icons;
 pub mod splash;
+pub mod smart_hub;
 
 pub use desktop::{render_desktop, render_fullscreen_cli};
 pub use splash::show_boot_splash;
+pub use smart_hub::{render_smart_hub, enter_smart_hub};

@@ -143,6 +143,11 @@ pub fn render_desktop() {
         }
     }
 
+    // Botón Conmutador a Smart Hub (TV & Kiosco Domótico)
+    Canvas::fill_rounded_rect(795, 4, 76, 20, 10, pill_bg);
+    Canvas::fill_rounded_rect(801, 8, 12, 12, 3, Color::BEAVER_ACCENT_CYAN);
+    Canvas::draw_string_prop(818, 6, "TV/Hub", Color::BEAVER_ACCENT_CYAN, None);
+
     // Fecha y hora LOCAL (RTC en UTC + desfase TZ_OFFSET_HOURS), usuario y tiempo de actividad
     let rtc = crate::drivers::timer::local_datetime();
     let (_, _, curr_user) = SCHEDULER.lock().current_credentials();
@@ -280,6 +285,7 @@ pub fn render_desktop() {
 pub enum GuiViewMode {
     Desktop,
     FullScreenCli,
+    SmartHub,
 }
 
 pub struct GuiTerminalState {
@@ -379,7 +385,8 @@ impl GuiTerminalState {
         let candidates = [
             "help", "sys", "exec", "sh", "curl", "net", "ping", "calc", "clear",
             "ls", "cat", "uptime", "whoami", "dashboard", "fetch", "logo",
-            "desktop", "cli", "exit", "ring3", "ring3-crash", "bench", "slots", "install"
+            "desktop", "cli", "exit", "ring3", "ring3-crash", "bench", "slots", "install",
+            "smarthub", "hub", "tv"
         ];
 
         for cand in candidates {
@@ -558,6 +565,11 @@ pub fn render_fullscreen_cli() {
 }
 
 pub fn handle_gui_char(ch: char) {
+    if GUI_TERMINAL.lock().mode == GuiViewMode::SmartHub {
+        let _ = crate::gui::smart_hub::handle_key(ch);
+        return;
+    }
+
     let (is_desktop, is_spot_open, is_note_active) = {
         let is_desk = GUI_TERMINAL.lock().mode == GuiViewMode::Desktop;
         let is_spot = SPOTLIGHT.lock().is_open;
@@ -703,6 +715,12 @@ pub fn handle_gui_char(ch: char) {
                         state.mode = GuiViewMode::Desktop;
                         mode_changed = true;
                     }
+                    "smarthub" | "hub" | "tv" => {
+                        let mut state = GUI_TERMINAL.lock();
+                        state.lines.push(String::from("[INFO] Entrando a Beaver Smart Hub (Modo TV & Kiosco Domotico)..."));
+                        state.mode = GuiViewMode::SmartHub;
+                        mode_changed = true;
+                    }
                     "sh" | "ring3-sh" => {
                         {
                             let mut state = GUI_TERMINAL.lock();
@@ -752,11 +770,13 @@ pub fn handle_gui_char(ch: char) {
                 match current_mode {
                     GuiViewMode::Desktop => render_desktop(),
                     GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                    GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
                 }
             } else {
                 match current_mode {
                     GuiViewMode::Desktop => render_terminal_window(),
                     GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                    GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
                 }
             }
         }
@@ -768,6 +788,7 @@ pub fn handle_gui_char(ch: char) {
             match mode {
                 GuiViewMode::Desktop => render_terminal_window(),
                 GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
             }
         }
         crate::drivers::keyboard::KEY_UP_ARROW => {
@@ -778,6 +799,7 @@ pub fn handle_gui_char(ch: char) {
                 match mode {
                     GuiViewMode::Desktop => render_terminal_window(),
                     GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                    GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
                 }
             }
         }
@@ -789,6 +811,7 @@ pub fn handle_gui_char(ch: char) {
                 match mode {
                     GuiViewMode::Desktop => render_terminal_window(),
                     GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                    GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
                 }
             }
         }
@@ -800,6 +823,7 @@ pub fn handle_gui_char(ch: char) {
                 match mode {
                     GuiViewMode::Desktop => render_terminal_window(),
                     GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                    GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
                 }
             }
         }
@@ -814,6 +838,7 @@ pub fn handle_gui_char(ch: char) {
                     match mode {
                         GuiViewMode::Desktop => render_terminal_window(),
                         GuiViewMode::FullScreenCli => render_fullscreen_cli(),
+                        GuiViewMode::SmartHub => crate::gui::smart_hub::render_smart_hub(),
                     }
                 }
             }
@@ -842,6 +867,14 @@ pub fn handle_mouse_event(state: crate::drivers::mouse::MouseState) {
     // SAFETY: Actualización atómica del estado previo del botón izquierdo.
     unsafe {
         PREV_LEFT_BTN = state.left_button;
+    }
+
+    if mode == GuiViewMode::SmartHub {
+        Canvas::try_draw_cursor_at(mx, my);
+        if left_pressed_now {
+            crate::gui::smart_hub::handle_click(mx, my);
+        }
+        return;
     }
 
     if mode == GuiViewMode::Desktop {
@@ -1023,6 +1056,12 @@ fn handle_desktop_click(mx: usize, my: usize) {
                 };
             }
             render_desktop();
+            return;
+        }
+
+        if mx >= 795 && mx <= 875 {
+            crate::drivers::audio::click_feedback();
+            crate::gui::smart_hub::enter_smart_hub();
             return;
         }
     }

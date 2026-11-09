@@ -12,6 +12,8 @@ const KEYBOARD_DATA_PORT: u16 = 0x60;
 
 pub const KEY_UP_ARROW: char = '\x11';
 pub const KEY_DOWN_ARROW: char = '\x12';
+pub const KEY_LEFT_ARROW: char = '\x14';
+pub const KEY_RIGHT_ARROW: char = '\x15';
 
 pub struct KeyboardState {
     shift_pressed: bool,
@@ -42,8 +44,10 @@ impl KeyboardState {
                 return None;
             }
             return match scancode {
-                0x48 => Some(KEY_UP_ARROW),   // Flecha Arriba
-                0x50 => Some(KEY_DOWN_ARROW), // Flecha Abajo
+                0x48 => Some(KEY_UP_ARROW),    // Flecha Arriba
+                0x50 => Some(KEY_DOWN_ARROW),  // Flecha Abajo
+                0x4B => Some(KEY_LEFT_ARROW),  // Flecha Izquierda
+                0x4D => Some(KEY_RIGHT_ARROW), // Flecha Derecha
                 _ => None,
             };
         }

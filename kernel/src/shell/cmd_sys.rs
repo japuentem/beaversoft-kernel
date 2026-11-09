@@ -630,6 +630,24 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             crate::gui::render_desktop();
         }
 
+        "smarthub" | "hub" | "tv" => {
+            let mut vbe = crate::drivers::vbe::VBE.lock();
+            if !vbe.is_available() {
+                kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] Extensión VESA/VBE no detectada en este hardware.\n");
+                return true;
+            }
+            if !vbe.is_active {
+                kprint_color!(VgaColor::Yellow, VgaColor::Black, "[SMART HUB] Iniciando Framebuffer VESA 1024x768 TrueColor...\n");
+                let _bar0 = vbe.detect_lfb_address();
+                if let Err(e) = vbe.set_mode(1024, 768, 32) {
+                    kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e);
+                    return true;
+                }
+            }
+            drop(vbe);
+            crate::gui::smart_hub::enter_smart_hub();
+        }
+
         "gui-off" => {
             let vbe = crate::drivers::vbe::VBE.lock();
             if vbe.is_active {
