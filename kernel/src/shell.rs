@@ -278,6 +278,9 @@ impl Shell {
                 kprintln!("    free / memmap  - Mapa transparente de Heap y marcos de 4KB");
                 kprintln!("    autotest       - Suite de pruebas automaticas del kernel");
                 kprintln!("    gui / desktop  - Inicia escritorio VESA TrueColor");
+                kprintln!("    smarthub / tv  - Inicia Beaver Smart Hub (10-Foot UI para TV y Kioscos)");
+                kprintln!("    cec / remote   - Diagnostico y control HDMI-CEC para control remoto de TV");
+                kprintln!("    touch [x y]    - Digitalizador de pantalla tactil capacitiva I2C/HID");
                 kprintln!("    slots          - Estado de ranuras A/B anti-brickeo y Sector Cero");
                 kprintln!("==============================================================================");
             }

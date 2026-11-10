@@ -55,6 +55,10 @@ pub extern "C" fn kernel_main_aarch64(_dtb_ptr: u64) -> ! {
     ArmGenericTimer::init();
     Pl011Uart::write_str("[ARM64] Temporizador Genérico sincronizado con PIT [OK]\n");
 
+    // 6.1 Inicializar Controladores de Entrada Táctil (I2C) y HDMI-CEC
+    crate::drivers::touchscreen::init_touchscreen();
+    crate::drivers::cec::init_cec();
+
     // 7. Habilitar Interrupciones en el Núcleo (DAIFCLR #2)
     Pl011Uart::write_str("[ARM64] Habilitando interrupciones de hardware en CPU...\n");
     cpu::enable_interrupts();

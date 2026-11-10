@@ -225,6 +225,12 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     crate::drivers::audio::init_disk_audio();
     kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n");
 
+    // 9.10 Inicializar Controladores de Entrada Táctil (I2C/Digitizer) y HDMI-CEC (TV)
+    kprint!("[INIT] Drivers de Pantalla Tactil (I2C) y Control Remoto HDMI-CEC");
+    crate::drivers::touchscreen::init_touchscreen();
+    crate::drivers::cec::init_cec();
+    kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK]\n");
+
     // 10. Inicializar Planificador Preemptivo (Scheduler) y Lanzar Hilos Concurrentes
     kprint!("[INIT] Planificador Preemptivo Round-Robin (Time-Slicing)...    ");
     {

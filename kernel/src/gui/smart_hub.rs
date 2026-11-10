@@ -527,3 +527,18 @@ fn exit_to_desktop() {
     }
     crate::gui::render_desktop();
 }
+
+/// Enfoca un mosaico específico desde el control remoto o controlador táctil
+pub fn focus_tile(idx: usize) {
+    if idx < TOTAL_TILES {
+        let mut state = SMART_HUB.lock();
+        state.focused_tile = idx;
+    }
+}
+
+/// Activa la acción del mosaico actualmente enfocado
+pub fn activate_focused_tile() {
+    let mut state = SMART_HUB.lock();
+    let cur = state.focused_tile;
+    execute_tile_action(&mut state, cur);
+}

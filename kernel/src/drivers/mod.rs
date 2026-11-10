@@ -15,3 +15,5 @@ pub mod net;
 pub mod e1000;
 pub mod usb;
 pub mod mesh;
+pub mod touchscreen;
+pub mod cec;

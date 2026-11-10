@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 # Project: Beaversoft Meta-Kernel
 # Author: José Alberto Puente Maldonado (japuentem)
 # Brand: Beaversoft
@@ -37,3 +37,4 @@ Write-Host "[RUN] Iniciando Beaver OS en emulador ARM64 (QEMU virt, 512MB RAM)..
 Write-Host "[INFO] Presiona Ctrl+A luego X para salir de QEMU." -ForegroundColor DarkGray
 
 & $qemu -M virt -cpu cortex-a72 -m 512M -nographic -kernel $kernel
+
