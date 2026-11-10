@@ -117,10 +117,7 @@ impl Task {
 extern "C" fn task_exit() -> ! {
     scheduler::mark_finished_and_yield();
     loop {
-        // SAFETY: `hlt` suspende la CPU en Ring 0 si un hilo finalizado vuelve a ser alcanzado.
-        unsafe {
-            core::arch::asm!("hlt");
-        }
+        crate::arch::current::halt();
     }
 }
 

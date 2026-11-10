@@ -577,6 +577,7 @@ fn wake_secondary_cores(smp: &mut SmpManager, madt_apic_ids: &[u32]) {
 /// Lectura segura de registro MSR (Model-Specific Register)
 #[inline(always)]
 // SAFETY: El llamador debe garantizar que `msr` es una dirección MSR válida en la arquitectura actual y se ejecuta en Ring 0.
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn read_msr(msr: u32) -> u64 {
     let low: u32;
     let high: u32;
@@ -590,9 +591,15 @@ pub unsafe fn read_msr(msr: u32) -> u64 {
     ((high as u64) << 32) | (low as u64)
 }
 
+#[cfg(target_arch = "aarch64")]
+pub unsafe fn read_msr(_msr: u32) -> u64 {
+    0
+}
+
 /// Escritura segura en registro MSR
 #[inline(always)]
 // SAFETY: El llamador debe garantizar que `msr` y `value` son válidos para la arquitectura y que se ejecuta en Ring 0.
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn write_msr(msr: u32, value: u64) {
     let low = value as u32;
     let high = (value >> 32) as u32;
@@ -604,6 +611,9 @@ pub unsafe fn write_msr(msr: u32, value: u64) {
         options(nomem, nostack)
     );
 }
+
+#[cfg(target_arch = "aarch64")]
+pub unsafe fn write_msr(_msr: u32, _value: u64) {}
 
 /// Punto de entrada de 64 bits ejecutado por cada Application Processor (AP) tras salir del trampolín en `0x8000`.
 /// Nota importante: NO adquiere `SMP.lock()` porque el BSP mantiene `SMP.lock()` mientras espera `AP_BOOT_FLAG`.

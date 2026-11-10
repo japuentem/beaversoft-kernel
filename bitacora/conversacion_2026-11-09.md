@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-09
-// Total de interacciones del día: 5
+// Total de interacciones del día: 6
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-09
@@ -159,3 +159,47 @@ Se implementó exitosamente la **Fase 1: Beaver Smart Hub** en el kernel y se an
 
 
 
+
+## Interacción #6 [18:12:00]
+
+### 👤 Pregunta / Petición del Usuario:
+[Captura de correo de GitHub: "[GitHub] A personal access token (classic) has been added to your account" para el token "beaversoft-kernel"] y solicitud de continuar con la Fase 2 (Portabilidad ARM64 en QEMU).
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+1. **Explicación de Seguridad sobre la Notificación de GitHub:**
+   - Se le confirmó al usuario que el correo es una notificación automática y legítima de seguridad de GitHub enviada al generar el Personal Access Token (PAT) `"beaversoft-kernel"` utilizado para subir el repositorio y las etiquetas a `https://github.com/japuentem/beaversoft-kernel.git`.
+   - Se le indicó que puede mantener el token para futuros despliegues o revocarlo cuando lo desee en la configuración de GitHub (`settings/tokens`).
+
+2. **Implementación y Culminación Exitosa de la Fase 2 (Arquitectura Multi-Target AArch64 en QEMU):**
+   - **Capa de Abstracción de Hardware (`kernel/src/arch/`):**
+     - Submódulos desacoplados: `arch::x86_64` y `arch::aarch64`.
+     - Primitivas unificadas: `halt()`, `enable_interrupts()`, `disable_interrupts()`, `cpu_relax()`.
+   - **Controladores y Primitivas Bare-Metal de AArch64 implementadas:**
+     - `arch/aarch64/cpu.rs`: Detección de niveles de privilegio (`current_el()`), control de interrupciones DAIF, `wfi`, `wfe`, `isb`, `dsb`.
+     - `arch/aarch64/uart.rs`: Controlador PrimeCell PL011 UART MMIO (`0x0900_0000`, 115200 8N1).
+     - `arch/aarch64/gic.rs`: Controlador de Interrupciones ARM GICv2 (Distributor `0x0800_0000` y CPU Interface `0x0801_0000`).
+     - `arch/aarch64/timer.rs`: ARM Generic Timer a 100 Hz sincronizado con el quantum del planificador (PPI 14 / IRQ 30).
+     - `arch/aarch64/mmu.rs`: Paginación de 4 niveles en gránulo de 4KB (TCR_EL1, MAIR_EL1, TTBR0 para EL0, TTBR1 para EL1).
+     - `arch/aarch64/exceptions.rs`: Tabla vectorial `VBAR_EL1` alineada a 2048 bytes con 16 vectores de interrupción/excepción y pasarela `svc #0`.
+     - `boot/boot_aarch64.s` y `boot/linker_aarch64.ld`: Arranque bare-metal multinúcleo en `0x40080000`, activación de FP/SIMD en `CPACR_EL1` y salto a `kernel_main_aarch64`.
+     - `task/context.rs`: Conmutación de contexto AArch64 guardando registros preservados `x19..x30`.
+   - **Compatibilidad Cruzada y Desacoplamiento de E/S (`io.rs`, `interrupts`, `gdt`, `apic`, `usermode`):**
+     - Reestructuración de `kernel/src/interrupts/` con el submódulo `x86_64_idt.rs` y cola de entrada compartida `InputQueue`.
+     - Macros de syscall universales (`svc #0` con registros `x8/x0/x1/x2` en ARM64 y `syscall` en x86_64).
+   - **Verificación de Arranque en QEMU ARM64:**
+     - Script oficial de ejecución creado: [`scripts/run_arm64.ps1`](file:///d:/proyectos_personales/beaversoft-kernel/scripts/run_arm64.ps1).
+     - Ejecución sobre emulador `qemu-system-aarch64 -M virt -cpu cortex-a72 -m 512M`:
+       - Banner institucional de Beaver OS desplegado por PL011 UART.
+       - Nivel de ejecución verificado: `EL1 (Kernel Supervisor) [OK]`.
+       - GICv2 inicializado y ruteado a CPU 0 `[OK]`.
+       - Tabla `VBAR_EL1` y pasarela `svc #0` enlazadas `[OK]`.
+       - ARM Generic Timer sincronizado a 100 Hz `[OK]`.
+       - Interrupciones de hardware habilitadas y bucle supervisor activo.
+   - **Principio de No Regresión Estricto (Regla 7):**
+     - Ejecución completa de la suite de pruebas automatizadas:
+       `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`
+     - Resultado: **16/16 pruebas pasando exitosamente (100%)** con código de salida QEMU 33 (`0x10`).
+
+================================================================================

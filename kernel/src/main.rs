@@ -7,13 +7,14 @@
 
 #![no_std]
 #![no_main]
-#![feature(abi_x86_interrupt)]
+#![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 #![cfg_attr(test, feature(custom_test_frameworks))]
 #![cfg_attr(test, test_runner(crate::tests::test_runner))]
 #![cfg_attr(test, reexport_test_harness_main = "test_main")]
 
 extern crate alloc;
 
+pub mod arch;
 pub mod io;
 pub mod sync;
 pub mod vga;
@@ -39,23 +40,40 @@ pub mod tests;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::arch::{asm, global_asm};
+use core::arch::global_asm;
 use core::panic::PanicInfo;
-use crate::vga::{VgaColor, VGA_WRITER};
+use crate::vga::VgaColor;
+#[cfg(target_arch = "x86_64")]
+use crate::vga::VGA_WRITER;
+#[cfg(target_arch = "x86_64")]
 use crate::serial::SERIAL;
+#[cfg(target_arch = "x86_64")]
 use crate::gdt::init_gdt;
+#[cfg(target_arch = "x86_64")]
 use crate::interrupts::init_idt;
+#[cfg(target_arch = "x86_64")]
 use crate::interrupts::pic::PICS;
+#[cfg(target_arch = "x86_64")]
 use crate::drivers::timer::init_pit;
+#[cfg(target_arch = "x86_64")]
 use crate::memory::{init_memory, memmap};
+#[cfg(target_arch = "x86_64")]
 use crate::storage::init_storage;
+#[cfg(target_arch = "x86_64")]
 use crate::task::scheduler::SCHEDULER;
+#[cfg(target_arch = "x86_64")]
 use crate::task::{storage_guard_worker, telemetry_worker};
+#[cfg(target_arch = "x86_64")]
 use crate::shell::SHELL;
 
-// Vinculación directa del código de arranque y trampoline x86_64 desde /boot/boot.s
+// Vinculación directa del código de arranque según la arquitectura objetivo
+#[cfg(target_arch = "x86_64")]
 global_asm!(include_str!("../../boot/boot.s"));
 
+#[cfg(target_arch = "aarch64")]
+global_asm!(include_str!("../../boot/boot_aarch64.s"));
+
+#[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     // 1. Inicializar hardware básico de salida (UART COM1 y VGA)
@@ -381,21 +399,16 @@ pub extern "C" fn kernel_main(boot_magic: u64, boot_info: u64) -> ! {
     }
 
     // 14. Habilitar interrupciones (STI) y entrar al bucle principal de la Tarea 0
-    // SAFETY: La GDT, IDT, PIC y temporizadores ya están inicializados de forma segura antes de activar IF=1.
-    unsafe {
-        asm!("sti");
-    }
+    crate::arch::current::enable_interrupts();
     loop {
-        // Procesar entrada pendiente de teclado PS/2 y puerto serie COM1 en contexto de Tarea 0 (IF=1)
+        // Procesar entrada pendiente de teclado y puerto serie en contexto de Tarea 0 (IF=1)
         crate::interrupts::process_pending_input();
         // Sondear anillo RX del E1000 para recibir tramas (ARP, ICMP, UDP/BeaverSync)
         crate::drivers::net::net_poll_rx();
         // Mantenimiento de la malla: anuncio periodico cada 2 s + expiracion de nodos en 10 s
         crate::drivers::mesh::mesh_tick();
-        // SAFETY: `hlt` suspende el procesador de forma segura en Ring 0 hasta la próxima interrupción.
-        unsafe {
-            asm!("hlt"); // Esperar la siguiente interrupcion (PIT 100Hz)
-        }
+        // Suspende el procesador de forma segura en Ring 0 / EL1 hasta la próxima interrupción.
+        crate::arch::current::halt(); // Esperar la siguiente interrupcion
     }
 }
 
@@ -416,9 +429,6 @@ fn panic(info: &PanicInfo) -> ! {
     crate::tests::exit_qemu(crate::tests::QemuExitCode::Failed);
 
     loop {
-        // SAFETY: `hlt` detiene la ejecución de la CPU tras un pánico irrecuperable sin corromper memoria.
-        unsafe {
-            asm!("hlt");
-        }
+        crate::arch::current::halt();
     }
 }

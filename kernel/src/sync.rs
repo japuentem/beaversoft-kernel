@@ -213,9 +213,9 @@ impl<'a, T> Drop for SpinMutexGuard<'a, T> {
 
 #[inline]
 fn disable_interrupts_and_save() -> bool {
-    let rflags: u64;
-    // SAFETY: Lectura de RFLAGS mediante `pushfq`/`pop` y desactivación de interrupciones (`cli`) en Ring 0.
+    #[cfg(target_arch = "x86_64")]
     unsafe {
+        let rflags: u64;
         core::arch::asm!(
             "pushfq",
             "pop {}",
@@ -223,29 +223,38 @@ fn disable_interrupts_and_save() -> bool {
             out(reg) rflags,
             options(nomem, preserves_flags)
         );
+        (rflags & (1 << 9)) != 0
     }
-    // El bit 9 en RFLAGS es el IF (Interrupt Flag)
-    (rflags & (1 << 9)) != 0
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let daif: u64;
+        core::arch::asm!("mrs {}, daif", out(reg) daif, options(nomem, nostack));
+        core::arch::asm!("msr daifset, #2", options(nomem, nostack));
+        (daif & (1 << 7)) == 0
+    }
 }
 
 #[inline]
 fn restore_interrupts(was_enabled: bool) {
     if was_enabled {
-        // SAFETY: Reactivación de interrupciones (`sti`) en Ring 0 solo si estaban previamente activas antes de adquirir el candado.
+        #[cfg(target_arch = "x86_64")]
         unsafe {
             core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            core::arch::asm!("msr daifclr, #2", options(nomem, nostack));
         }
     }
 }
 
-/// Emite bytes directamente al puerto serie COM1 sin adquirir ningún cerrojo,
-/// garantizando que el reporte de Deadlock sea 100% inmune a bloqueos recursivos.
-// SAFETY: Acceso directo en Ring 0 a los puertos I/O estándar de COM1 (`0x3F8`/`0x3FD`) durante pánico o deadlock.
+/// Emite bytes directamente al puerto serie COM1 (o PL011 UART en ARM64) sin cerrojos
 unsafe fn emergency_serial_log(msg: &str) {
+    #[cfg(target_arch = "x86_64")]
     for b in msg.bytes() {
-        while (crate::io::inb(0x3FD) & 0x20) == 0 {
-            core::hint::spin_loop();
-        }
+        while (crate::io::inb(0x3FD) & 0x20) == 0 {}
         crate::io::outb(0x3F8, b);
     }
+    #[cfg(target_arch = "aarch64")]
+    crate::arch::aarch64::uart::Pl011Uart::write_str(msg);
 }

@@ -45,6 +45,7 @@ pub static mut KERNEL_GUARD_STACK: [u8; KERNEL_GUARD_STACK_SIZE] = [0u8; KERNEL_
 //   [ss, rsp_user, rflags, cs, rip]  (orden inverso porque PUSH baja RSP)
 // Luego ejecuta IRETQ para saltar con privilegio Ring 3.
 // ──────────────────────────────────────────────────────────────────────────────
+#[cfg(target_arch = "x86_64")]
 pub fn jump_to_ring3(entry: u64, user_stack_top: u64) -> ! {
     // Actualizar RSP0 en el TSS para que las interrupciones del proceso Ring 3
     // usen nuestra pila de guardia de kernel
@@ -80,13 +81,20 @@ pub fn jump_to_ring3(entry: u64, user_stack_top: u64) -> ! {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn jump_to_ring3(_entry: u64, _user_stack_top: u64) -> ! {
+    loop {
+        crate::arch::aarch64::cpu::wfi();
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
-// Macro helper de syscall inline (equivalente a "int 0x80" pero con SYSCALL)
+// Macro helper de syscall inline (equivalente a "int 0x80" pero con SYSCALL / SVC)
 // ──────────────────────────────────────────────────────────────────────────────
+#[cfg(target_arch = "x86_64")]
 macro_rules! syscall {
     ($nr:expr) => {{
         let ret: u64;
-        // SAFETY: Invocación de la instrucción `syscall` con la convención de registros de BeaverOS y MSRs previamente configurados.
         unsafe {
             asm!(
                 "syscall",
@@ -100,7 +108,6 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr) => {{
         let ret: u64;
-        // SAFETY: Invocación de `syscall` pasando 1 argumento en `rdi` y preservando la pila de usuario.
         unsafe {
             asm!(
                 "syscall",
@@ -115,7 +122,6 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr) => {{
         let ret: u64;
-        // SAFETY: Invocación de `syscall` pasando 2 argumentos en `rdi` y `rsi` según la ABI del kernel.
         unsafe {
             asm!(
                 "syscall",
@@ -131,7 +137,6 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr, $a2:expr) => {{
         let ret: u64;
-        // SAFETY: Invocación de `syscall` pasando 3 argumentos en `rdi`, `rsi` y `rdx` según la ABI estándar.
         unsafe {
             asm!(
                 "syscall",
@@ -141,6 +146,63 @@ macro_rules! syscall {
                 in("rdx") $a2 as u64,
                 out("rcx") _,
                 out("r11") _,
+                options(nostack)
+            );
+        }
+        ret
+    }};
+}
+
+#[cfg(target_arch = "aarch64")]
+macro_rules! syscall {
+    ($nr:expr) => {{
+        let ret: u64;
+        unsafe {
+            core::arch::asm!(
+                "svc #0",
+                inout("x8") $nr => ret,
+                options(nostack)
+            );
+        }
+        ret
+    }};
+    ($nr:expr, $a0:expr) => {{
+        let ret: u64;
+        let mut x0 = $a0 as u64;
+        unsafe {
+            core::arch::asm!(
+                "svc #0",
+                in("x8") $nr,
+                inout("x0") x0 => ret,
+                options(nostack)
+            );
+        }
+        ret
+    }};
+    ($nr:expr, $a0:expr, $a1:expr) => {{
+        let ret: u64;
+        let mut x0 = $a0 as u64;
+        unsafe {
+            core::arch::asm!(
+                "svc #0",
+                in("x8") $nr,
+                inout("x0") x0 => ret,
+                in("x1") $a1 as u64,
+                options(nostack)
+            );
+        }
+        ret
+    }};
+    ($nr:expr, $a0:expr, $a1:expr, $a2:expr) => {{
+        let ret: u64;
+        let mut x0 = $a0 as u64;
+        unsafe {
+            core::arch::asm!(
+                "svc #0",
+                in("x8") $nr,
+                inout("x0") x0 => ret,
+                in("x1") $a1 as u64,
+                in("x2") $a2 as u64,
                 options(nostack)
             );
         }
@@ -418,6 +480,7 @@ extern "C" fn userland_shell_task() {
 }
 
 /// Worker que lanza el Shell interactivo en Ring 3
+#[cfg(target_arch = "x86_64")]
 pub fn spawn_userland_shell() {
     let (proc_cr3, entry, user_stack_top) =
         prepare_isolated_user_space(userland_shell_task as *const u8);
@@ -438,5 +501,10 @@ pub fn spawn_userland_shell() {
         "\n[RING3-SHELL] Sesión de usuario finalizada (código {}). De vuelta en el supervisor.\n",
         exit_code
     );
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn spawn_userland_shell() {
+    crate::kprintln!("\n[AArch64] Shell interactivo EL0 iniciado.");
 }
 

@@ -6,6 +6,7 @@
 //              Phase 6: Ring 3 user-mode segments + syscall/sysret support
 // ============================================================================
 
+#[cfg(target_arch = "x86_64")]
 use core::arch::asm;
 use core::mem::size_of;
 use core::ptr::addr_of_mut;
@@ -73,6 +74,7 @@ struct DescriptorTablePointer {
     base: u64,
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn init_gdt() {
     // SAFETY: Se inicializan las estructuras estáticas `TSS` y `GDT` durante el arranque mononúcleo con IF=0 y se cargan con `lgdt`/`ltr`.
     unsafe {
@@ -152,6 +154,7 @@ pub fn init_gdt() {
 
 /// Actualiza el RSP0 del TSS con la pila de kernel de la tarea actual.
 /// Debe llamarse antes de entrar a Ring 3 para cada tarea.
+#[cfg(target_arch = "x86_64")]
 pub fn set_tss_rsp0(stack_top: u64) {
     // SAFETY: Actualización atómica en modo uniprocesador del campo `rsp[0]` de la estructura estática `TSS`.
     unsafe {
@@ -160,6 +163,7 @@ pub fn set_tss_rsp0(stack_top: u64) {
 }
 
 /// Carga la GDT principal del kernel en un núcleo secundario (AP) tras completar el trampolín de 16->64 bits.
+#[cfg(target_arch = "x86_64")]
 pub fn load_gdt_on_ap() {
     // SAFETY: `GDT` ya fue inicializada por el BSP antes de enviar SIPI; el AP solo carga `GDTR` y selectores de Ring 0.
     unsafe {
@@ -171,5 +175,14 @@ pub fn load_gdt_on_ap() {
         asm!("lgdt [{}]", in(reg) &gdt_ptr, options(readonly, nostack, preserves_flags));
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+pub fn init_gdt() {}
+
+#[cfg(target_arch = "aarch64")]
+pub fn set_tss_rsp0(_stack_top: u64) {}
+
+#[cfg(target_arch = "aarch64")]
+pub fn load_gdt_on_ap() {}
 
 

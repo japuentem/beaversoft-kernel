@@ -453,10 +453,8 @@ pub fn ap_worker_loop(apic_id: u32) -> ! {
             }
         } else {
             // No hay tareas listas: reposo en baja latencia con interrupciones habilitadas
-            // SAFETY: 'sti; hlt' activa interrupciones y suspende la CPU hasta el próximo evento/IPI
-            unsafe {
-                core::arch::asm!("sti; hlt", options(nomem, nostack));
-            }
+            crate::arch::current::enable_interrupts();
+            crate::arch::current::halt();
         }
     }
 }

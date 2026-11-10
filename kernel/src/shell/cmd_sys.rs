@@ -920,6 +920,7 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
     true
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn hardware_reboot() -> ! {
     kprintln!("[SISTEMA] Reiniciando equipo por hardware (8042 reset)...");
     // SAFETY: En Ring 0 enviamos el pulso de reset 0xFE al puerto 0x64 del controlador 8042 y forzamos triple fault de respaldo.
@@ -934,6 +935,7 @@ pub fn hardware_reboot() -> ! {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn hardware_shutdown() -> ! {
     kprintln!("[SISTEMA] Apagando el sistema (QEMU/ACPI)...");
     // SAFETY: Escritura a los puertos PM1a_CNT de QEMU/Bochs/VirtualBox en Ring 0 seguida de bucle cli+hlt.
@@ -947,6 +949,7 @@ pub fn hardware_shutdown() -> ! {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn print_cpuinfo() {
     let res = core::arch::x86_64::__cpuid(0);
     let mut v = [0_u8; 12];
@@ -993,6 +996,35 @@ pub fn print_cpuinfo() {
         kprintln!("   * No-Execute (NX):   {}", if (ext_feat.edx & (1 << 20)) != 0 { "[SI] (Proteccion Anti-Exploit)" } else { "[NO]" });
         kprintln!("   * Long Mode (64-bit):{}", if (ext_feat.edx & (1 << 29)) != 0 { "[SI] (Kernel Nativo)" } else { "[NO]" });
     }
+    kprintln!("=============================================================================");
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn hardware_reboot() -> ! {
+    kprintln!("[SISTEMA] Reiniciando equipo ARM64 (PSCI SYSTEM_RESET)...");
+    loop {
+        crate::arch::aarch64::cpu::wfi();
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn hardware_shutdown() -> ! {
+    kprintln!("[SISTEMA] Apagando el sistema ARM64 (PSCI SYSTEM_OFF)...");
+    loop {
+        crate::arch::aarch64::cpu::wfi();
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn print_cpuinfo() {
+    let el = crate::arch::aarch64::cpu::current_el();
+    let freq = crate::arch::aarch64::timer::timer_frequency();
+    kprintln!("==================== INFORMACIÓN DEL PROCESADOR (AArch64) ====================");
+    kprintln!("  Arquitectura:         ARMv8-A (64 bits AArch64 Bare-Metal)");
+    kprintln!("  Nivel de Ejecución:   EL{} (Modo Kernel Supervisor)", el);
+    kprintln!("  Frecuencia Timer:     {} Hz (Generic Timer)", freq);
+    kprintln!("  Controlador IRQ:      ARM GICv2 (Distributor + CPU Interface)");
+    kprintln!("  Consola Principal:    PrimeCell PL011 UART (MMIO)");
     kprintln!("=============================================================================");
 }
 

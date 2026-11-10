@@ -90,6 +90,7 @@ pub static OPEN_FILES: SpinMutex<[Option<OpenFile>; 32]> = SpinMutex::new([
 // Helpers de lectura/escritura de MSR
 // ──────────────────────────────────────────────────────────────────────────────
 #[inline]
+#[cfg(target_arch = "x86_64")]
 unsafe fn rdmsr(msr: u32) -> u64 {
     let lo: u32;
     let hi: u32;
@@ -104,6 +105,7 @@ unsafe fn rdmsr(msr: u32) -> u64 {
 }
 
 #[inline]
+#[cfg(target_arch = "x86_64")]
 unsafe fn wrmsr(msr: u32, value: u64) {
     let lo = value as u32;
     let hi = (value >> 32) as u32;
@@ -134,6 +136,7 @@ pub static mut SYSCALL_KERNEL_STACK_TOP: u64 = 0;
 // Inicialización del subsistema de syscalls
 // ──────────────────────────────────────────────────────────────────────────────
 pub fn init_syscalls() {
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         // Inicializar puntero de cima de pila
         let base = core::ptr::addr_of_mut!(SYSCALL_KERNEL_STACK) as u64;
@@ -160,11 +163,16 @@ pub fn init_syscalls() {
         // 4. IA32_FMASK: enmascarar IF (bit 9) y DF (bit 10) al entrar al kernel
         wrmsr(MSR_FMASK, 0x0000_0000_0000_0600);
     }
+    #[cfg(target_arch = "aarch64")]
+    {
+        crate::arch::aarch64::exceptions::init_exceptions();
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Stub de assembly: puente Ring 3 → Ring 0
 // ──────────────────────────────────────────────────────────────────────────────
+#[cfg(target_arch = "x86_64")]
 core::arch::global_asm!(r#"
 .section .text
 .global syscall_handler_asm
@@ -268,10 +276,24 @@ return_to_supervisor:
 #[no_mangle]
 pub static mut SUPERVISOR_RSP: u64 = 0;
 
+#[cfg(target_arch = "x86_64")]
 extern "C" {
     fn syscall_handler_asm();
     pub fn enter_ring3_with_return(entry: u64, user_stack_top: u64) -> u64;
     pub fn return_to_supervisor(code: u64) -> !;
+}
+
+#[cfg(target_arch = "aarch64")]
+pub unsafe fn enter_ring3_with_return(_entry: u64, _user_stack_top: u64) -> u64 {
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+pub unsafe fn return_to_supervisor(_code: u64) -> ! {
+    crate::task::scheduler::mark_finished_and_yield();
+    loop {
+        crate::arch::aarch64::cpu::wfi();
+    }
 }
 
 // Mutexes y Semáforos para primitivas de sincronización de usuario en Ring 3
@@ -350,11 +372,9 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 let user_buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count) };
                 let mut read_bytes = 0;
 
-                // Habilitar interrupciones para permitir que el controlador de teclado PS/2 (IRQ 1),
-                // el puerto serie COM1 y el temporizador alimenten la cola de entrada.
-                unsafe {
-                    asm!("sti");
-                }
+                // Habilitar interrupciones para permitir que el controlador de teclado,
+                // el puerto serie / UART y el temporizador alimenten la cola de entrada.
+                crate::arch::current::enable_interrupts();
 
                 loop {
                     if let Some(ch) = crate::interrupts::pop_input_char() {
@@ -386,16 +406,12 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                         }
                     } else {
                         // Esperar a la siguiente interrupción de hardware de forma segura y eficiente
-                        unsafe {
-                            asm!("hlt");
-                        }
+                        crate::arch::current::halt();
                     }
                 }
 
                 // Deshabilitar interrupciones antes de retornar al stub de syscall
-                unsafe {
-                    asm!("cli");
-                }
+                crate::arch::current::disable_interrupts();
 
                 return read_bytes as u64;
             }
