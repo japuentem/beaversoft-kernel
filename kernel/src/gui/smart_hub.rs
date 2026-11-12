@@ -3,13 +3,14 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Description: Beaver Smart Hub - 10-Foot UI for Smart TVs, Touch Displays & Kiosks
-//              Phase 1 Implementation: Ubiquitous Touch & D-Pad Remote Navigation
+//              Real Hardware Profile, Mesh, VFS & Resource Telemetry (Zero Mocks)
 // ============================================================================
 
 extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use crate::sync::SpinMutex;
 use crate::gui::canvas::{Canvas, Color};
 use crate::drivers::timer::get_uptime_seconds;
@@ -20,17 +21,11 @@ pub const TOTAL_TILES: usize = 6;
 
 pub struct SmartHubState {
     pub focused_tile: usize,       // 0..5 (3 columnas x 2 filas)
-    pub fridge_temp_tenths: i32,   // Ej: 38 = +3.8 °C
-    pub fridge_door_open: bool,
-    pub ambient_light_on: bool,
     pub last_action: String,
 }
 
 pub static SMART_HUB: SpinMutex<SmartHubState> = SpinMutex::new(SmartHubState {
     focused_tile: 0,
-    fridge_temp_tenths: 38,
-    fridge_door_open: false,
-    ambient_light_on: true,
     last_action: String::new(),
 });
 
@@ -43,14 +38,14 @@ pub fn enter_smart_hub() {
     render_smart_hub();
 }
 
-/// Dibuja la interfaz completa de Smart Hub con doble búfer TrueColor
+/// Dibuja la interfaz completa de Smart Hub con doble búfer TrueColor usando telemetría real
 pub fn render_smart_hub() {
     let (width, height) = Canvas::screen_dimensions();
 
     // 1. Fondo Oscuro Obsidian Keynote (Atmósfera Cinematográfica para TV)
     Canvas::fill_rect(0, 0, width, height, 0x07090E);
 
-    // Rejilla sutil nanométrica para textura visual de calidad
+    // Rejilla sutil de fondo
     for x in (30..width).step_by(40) {
         for y in (70..height).step_by(40) {
             Canvas::put_pixel(x, y, 0x172033);
@@ -69,27 +64,50 @@ pub fn render_smart_hub() {
     Canvas::draw_string_prop(76, 16, "BEAVER SMART HUB", Color::WHITE, None);
     Canvas::fill_rounded_rect(240, 18, 230, 24, 12, 0x111E38);
     Canvas::draw_rounded_rect(240, 18, 230, 24, 12, Color::BEAVER_ACCENT_CYAN);
-    Canvas::draw_string_prop(252, 21, "[MODO TV & KIOSCO DOMOTICO]", Color::BEAVER_ACCENT_CYAN, None);
+    Canvas::draw_string_prop(252, 21, "[MODO TV & KIOSCO REAL]", Color::BEAVER_ACCENT_CYAN, None);
 
-    // Información en Vivo (Uptime, Red Mesh, Reloj)
+    // Información en Vivo Real (Uptime, Red Mesh, IP Real)
     let uptime = get_uptime_seconds();
     let hours = uptime / 3600;
     let mins = (uptime % 3600) / 60;
     let secs = uptime % 60;
     let clock_str = format!("{:02}:{:02}:{:02}", hours, mins, secs);
 
-    Canvas::draw_string_prop(width - 320, 16, "Malla P2P: :4242 [3 Nodos]", Color::BEAVER_TEAL_BRIGHT, None);
+    let mesh_count = crate::drivers::mesh::MESH_MANAGER.lock().online_count();
+    let local_ip = crate::drivers::net::NET_INTERFACE.lock().ip_address.to_string();
+    let mesh_hdr = format!("Malla P2P: :4242 [{} Nodos]", mesh_count);
+    let ip_hdr = format!("IP Local: {} | Cero Nube", local_ip);
+
+    Canvas::draw_string_prop(width - 320, 16, &mesh_hdr, Color::BEAVER_TEAL_BRIGHT, None);
     Canvas::draw_string_prop(width - 130, 16, &clock_str, Color::BEAVER_AMBER_LIGHT, None);
-    Canvas::draw_string_prop(width - 320, 38, "IP Local: 192.168.1.50 | Cero Nube", Color::SLATE_400, None);
+    Canvas::draw_string_prop(width - 320, 38, &ip_hdr, Color::SLATE_400, None);
 
     // 3. Renderizado de la Cuadrícula de 6 Mosaicos Inteligentes (3 Cols x 2 Rows)
-    let state = SMART_HUB.lock();
-    let focused = state.focused_tile;
-    let fridge_temp_str = format!("{}.{} C", state.fridge_temp_tenths / 10, (state.fridge_temp_tenths % 10).abs());
-    let fridge_door_str = if state.fridge_door_open { "ABIERTA (Alerta)" } else { "CERRADA (Segura)" };
-    let light_str = if state.ambient_light_on { "ENCENDIDA (Calida)" } else { "APAGADA (Ahorro)" };
-    let last_act = state.last_action.clone();
-    drop(state);
+    let (focused, last_act) = {
+        let state = SMART_HUB.lock();
+        (state.focused_tile, state.last_action.clone())
+    };
+
+    let profile = crate::drivers::profile::detect_device_profile();
+    let (vbe_active, vbe_w, vbe_h) = {
+        let v = crate::drivers::vbe::VBE.lock();
+        (v.is_active, v.width, v.height)
+    };
+    let mesh_nodes: Vec<(String, String)> = {
+        let m = crate::drivers::mesh::MESH_MANAGER.lock();
+        m.get_nodes()
+            .iter()
+            .take(3)
+            .map(|n| (n.name.clone(), n.ip.to_string()))
+            .collect()
+    };
+    let disk_entries: Vec<(String, bool, usize)> = {
+        let vfs = crate::fs::vfs::VFS.lock();
+        match vfs.list_dir("/disk", 0, 0) {
+            Ok(list) => list.into_iter().take(3).map(|(n, d, sz, _, _, _)| (n, d, sz)).collect(),
+            Err(_) => Vec::new(),
+        }
+    };
 
     let start_x = 42;
     let start_y = 85;
@@ -105,7 +123,18 @@ pub fn render_smart_hub() {
         let ty = start_y + row * (tile_h + gap_y);
         let is_focused = idx == focused;
 
-        draw_smart_tile(idx, tx, ty, tile_w, tile_h, is_focused, &fridge_temp_str, fridge_door_str, light_str);
+        draw_smart_tile(
+            idx,
+            tx,
+            ty,
+            tile_w,
+            tile_h,
+            is_focused,
+            &profile,
+            (vbe_active, vbe_w, vbe_h),
+            &mesh_nodes,
+            &disk_entries,
+        );
     }
 
     // 4. Barra Inferior de Acción Táctil y Teclas de Control Remoto
@@ -114,7 +143,7 @@ pub fn render_smart_hub() {
 
     // Línea de Estado / Feedback de Última Acción
     let status_text = if last_act.is_empty() {
-        String::from("Listo. Usa las flechas del control remoto o toca directamente cualquier mosaico.")
+        String::from("Listo. Telemetria real activa. Usa flechas, D-Pad o toca cualquier mosaico.")
     } else {
         last_act
     };
@@ -123,9 +152,9 @@ pub fn render_smart_hub() {
 
     // Botones Táctiles de Gran Escala en la Parte Inferior
     draw_touch_button(42, 655, 215, 48, "[ ESC ] MODO ESCRITORIO", Color::BEAVER_ACCENT_CYAN, 0x131E33);
-    draw_touch_button(275, 655, 215, 48, "[ T ] AJUSTAR FRIO (-1 C)", Color::BEAVER_GREEN, 0x10261E);
-    draw_touch_button(508, 655, 215, 48, "[ P ] PUERTA REFRIGERADOR", Color::BEAVER_AMBER, 0x2E2010);
-    draw_touch_button(741, 655, 240, 48, "[ M ] SINCRONIZAR MESH :4242", Color::BEAVER_PURPLE, 0x221538);
+    draw_touch_button(275, 655, 215, 48, "[ P ] SONDEAR HARDWARE", Color::BEAVER_GREEN, 0x10261E);
+    draw_touch_button(508, 655, 215, 48, "[ A ] AUDIO BEAVER", Color::BEAVER_AMBER, 0x2E2010);
+    draw_touch_button(741, 655, 240, 48, "[ M ] ANUNCIAR MESH :4242", Color::BEAVER_PURPLE, 0x221538);
 
     // Indicaciones de Navegación D-Pad
     Canvas::draw_string_prop(42, 715, "Controles de Sala:  [FLECHAS / D-PAD / WASD] Mover Foco   |   [ENTER / ESPACIO] Abrir   |   [ESC] Escritorio", Color::SLATE_400, None);
@@ -142,7 +171,8 @@ pub fn render_smart_hub() {
     Canvas::present();
 }
 
-/// Dibuja un mosaico inteligente individual con formato optimizado para visualización a distancia (10-Foot UI)
+/// Dibuja un mosaico inteligente individual con telemetría real del sistema
+#[allow(clippy::too_many_arguments)]
 fn draw_smart_tile(
     idx: usize,
     x: usize,
@@ -150,9 +180,10 @@ fn draw_smart_tile(
     w: usize,
     h: usize,
     is_focused: bool,
-    fridge_temp: &str,
-    fridge_door: &str,
-    light_status: &str,
+    profile: &crate::drivers::profile::HardwareProfile,
+    vbe_info: (bool, usize, usize),
+    mesh_nodes: &[(String, String)],
+    disk_entries: &[(String, bool, usize)],
 ) {
     let (bg_color, border_color, border_thickness) = if is_focused {
         (0x152238, Color::BEAVER_ACCENT_CYAN, 3)
@@ -160,15 +191,12 @@ fn draw_smart_tile(
         (0x0E1626, Color::SLATE_700, 1)
     };
 
-    // Fondo del Mosaico con esquinas redondeadas
     Canvas::fill_rounded_rect(x, y, w, h, 14, bg_color);
 
-    // Borde (Simple o resaltado en caso de foco D-Pad)
     if border_thickness == 3 {
         Canvas::draw_rounded_rect(x, y, w, h, 14, border_color);
         Canvas::draw_rounded_rect(x + 1, y + 1, w - 2, h - 2, 13, border_color);
         Canvas::draw_rounded_rect(x + 2, y + 2, w - 4, h - 4, 12, border_color);
-        // Indicador de Foco Brillante en esquina superior derecha
         Canvas::fill_rounded_rect(x + w - 105, y + 12, 92, 20, 10, Color::BEAVER_ACCENT_CYAN);
         Canvas::draw_string_prop(x + w - 98, y + 14, "ENFOCADO", Color::BEAVER_NAVY, None);
     } else {
@@ -177,101 +205,125 @@ fn draw_smart_tile(
 
     match idx {
         0 => {
-            // [REFRIGERADOR Y DOMOTICA]
+            // [PERFIL DE HARDWARE REAL]
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, Color::BEAVER_GREEN);
-            Canvas::draw_string(x + 23, y + 20, "F", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 16, "REFRIGERADOR SMART", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 34, "Control de Electrodomestico", Color::BEAVER_GREEN, None);
+            Canvas::draw_string(x + 23, y + 20, "H", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 50, y + 16, "PERFIL DE HARDWARE", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 50, y + 34, profile.source, Color::BEAVER_GREEN, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
-            Canvas::draw_string_prop(x + 18, y + 68, "Temperatura Interior:", Color::SLATE_200, None);
-            Canvas::fill_rounded_rect(x + 18, y + 90, 150, 42, 8, 0x0A2E1F);
-            Canvas::draw_string_prop(x + 30, y + 98, fridge_temp, Color::BEAVER_GREEN, None);
+            Canvas::draw_string_prop(x + 18, y + 68, "Clase Detectada:", Color::SLATE_200, None);
+            Canvas::draw_string_prop(x + 18, y + 88, profile.class.as_str(), Color::BEAVER_GREEN, None);
 
-            Canvas::draw_string_prop(x + 18, y + 145, "Estado Puerta:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 165, fridge_door, if fridge_door.starts_with("A") { Color::BEAVER_RED } else { Color::BEAVER_GREEN }, None);
+            let cores_str = format!("CPU SMP: {} nucleos activos", profile.cpu_cores);
+            Canvas::draw_string_prop(x + 18, y + 120, &cores_str, Color::WHITE, None);
 
-            Canvas::draw_string_prop(x + 18, y + 190, "Iluminacion:", Color::SLATE_400, None);
-            Canvas::draw_string_prop(x + 18, y + 208, light_status, Color::BEAVER_AMBER_LIGHT, None);
+            let cec_str = if profile.has_cec { "HDMI-CEC: DETECTADO" } else { "HDMI-CEC: No detectado" };
+            let touch_str = if profile.has_touch { "Tactil I2C: DETECTADO" } else { "Tactil I2C: No detectado" };
+            Canvas::draw_string_prop(x + 18, y + 150, cec_str, if profile.has_cec { Color::BEAVER_GREEN } else { Color::SLATE_400 }, None);
+            Canvas::draw_string_prop(x + 18, y + 174, touch_str, if profile.has_touch { Color::BEAVER_GREEN } else { Color::SLATE_400 }, None);
 
-            Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para ajustar", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 232, ">> ENTER o Toca para re-sondear", Color::SLATE_400, None);
         }
         1 => {
-            // [CENTRO MULTIMEDIA & STREAMING TV]
+            // [CENTRO MULTIMEDIA & DISPLAY]
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, Color::BEAVER_PURPLE);
             Canvas::draw_string(x + 23, y + 20, "M", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 16, "CENTRO MULTIMEDIA", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 34, "Audio & TV TrueColor", Color::BEAVER_PURPLE, None);
+            Canvas::draw_string_prop(x + 50, y + 34, "Audio & Display Nativo", Color::BEAVER_PURPLE, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
-            Canvas::draw_string_prop(x + 18, y + 68, "Salida Grafica:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 88, "VESA / GOP TrueColor 60 Hz", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 18, y + 68, "Salida Grafica Real:", Color::SLATE_200, None);
+            let gfx_str = if vbe_info.0 {
+                format!("VBE {}x{} TrueColor", vbe_info.1, vbe_info.2)
+            } else {
+                String::from("Sin framebuffer VBE")
+            };
+            Canvas::draw_string_prop(x + 18, y + 88, &gfx_str, Color::WHITE, None);
 
-            Canvas::draw_string_prop(x + 18, y + 118, "Subsistema de Audio:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 138, "AC97 / Intel HDA Nativo", Color::BEAVER_TEAL_BRIGHT, None);
+            Canvas::draw_string_prop(x + 18, y + 118, "Controlador HDMI-CEC:", Color::SLATE_200, None);
+            let cec_online = crate::drivers::cec::HDMI_CEC.lock().is_online;
+            let cec_status = if cec_online { "CEC en linea" } else { "CEC inactivo (sin bus)" };
+            Canvas::draw_string_prop(x + 18, y + 138, cec_status, Color::BEAVER_TEAL_BRIGHT, None);
 
-            Canvas::draw_string_prop(x + 18, y + 168, "Fotos Familiares:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 188, "Galeria Local BeaverPhotos", Color::BEAVER_AMBER_LIGHT, None);
+            Canvas::draw_string_prop(x + 18, y + 168, "Aplicacion Asociada:", Color::SLATE_200, None);
+            Canvas::draw_string_prop(x + 18, y + 188, "BeaverAudio / BeaverPhotos", Color::BEAVER_AMBER_LIGHT, None);
 
-            Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para reproducir", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 232, ">> ENTER o Toca para abrir Audio", Color::SLATE_400, None);
         }
         2 => {
-            // [RED DE MALLA BEAVERMESH P2P]
+            // [RED DE MALLA BEAVERMESH P2P REAL]
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, Color::BEAVER_ACCENT_CYAN);
             Canvas::draw_string(x + 23, y + 20, "N", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 16, "MALLA BEAVERMESH", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 34, "Interconexion P2P :4242", Color::BEAVER_ACCENT_CYAN, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
-            Canvas::draw_string_prop(x + 18, y + 68, "Nodos Activos en Casa:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 90, "- Nodo 1: Smart TV (Sala)", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 112, "- Nodo 2: Smart Fridge (Cocina)", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 134, "- Nodo 3: Laptop (Despacho)", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 18, y + 68, "Nodos Descubiertos:", Color::SLATE_200, None);
+            if mesh_nodes.is_empty() {
+                Canvas::draw_string_prop(x + 18, y + 92, "-- Sin nodos remotos --", Color::SLATE_400, None);
+                Canvas::draw_string_prop(x + 18, y + 114, "Presiona [ M ] para anunciar", Color::SLATE_400, None);
+            } else {
+                for (i, (name, ip)) in mesh_nodes.iter().enumerate() {
+                    let line = format!("- {} ({})", name, ip);
+                    Canvas::draw_string_prop(x + 18, y + 90 + i * 22, &line, Color::WHITE, None);
+                }
+            }
 
-            Canvas::draw_string_prop(x + 18, y + 165, "Privacidad del Hogar:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 185, "Cero datos enviados a internet", Color::BEAVER_GREEN, None);
+            Canvas::draw_string_prop(x + 18, y + 165, "Privacidad Local:", Color::SLATE_200, None);
+            Canvas::draw_string_prop(x + 18, y + 185, "Red LAN directa (Cero Nube)", Color::BEAVER_GREEN, None);
 
-            Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para sincronizar", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 232, ">> ENTER o Toca para BeaverSync", Color::SLATE_400, None);
         }
         3 => {
-            // [MONITOR DE SALUD & RENDIMIENTO]
+            // [MONITOR DE SALUD & RENDIMIENTO REAL]
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, Color::BEAVER_AMBER);
             Canvas::draw_string(x + 23, y + 20, "S", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 16, "SISTEMA & HARDWARE", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 34, "Supervisor Anti-Crash", Color::BEAVER_AMBER, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
-            let (_total, used, free, _, _) = HEAP_ALLOCATOR.stats();
-            let ram_str = format!("RAM Usada: {} KiB (~14 MB SO)", used / 1024);
-            let free_str = format!("RAM Libre: {} KiB (99% Libre)", free / 1024);
+            let (total, used, free, _, _) = HEAP_ALLOCATOR.stats();
+            let used_pct = HEAP_ALLOCATOR.usage_percent();
+            let free_pct = 100usize.saturating_sub(used_pct as usize);
+            let ram_str = format!("Heap Usado: {} / {} KiB", used / 1024, total / 1024);
+            let free_str = format!("Heap Libre: {} KiB ({}%)", free / 1024, free_pct);
 
-            Canvas::draw_string_prop(x + 18, y + 68, "Uso de Memoria:", Color::SLATE_200, None);
+            Canvas::draw_string_prop(x + 18, y + 68, "Uso de Memoria Kernel:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 90, &ram_str, Color::BEAVER_AMBER_LIGHT, None);
             Canvas::draw_string_prop(x + 18, y + 112, &free_str, Color::BEAVER_GREEN, None);
 
             Canvas::draw_string_prop(x + 18, y + 145, "Resiliencia de Disco:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 165, "BeaverFS Doble Slot A/B Anti-Corte", Color::BEAVER_TEAL_BRIGHT, None);
+            Canvas::draw_string_prop(x + 18, y + 165, "BeaverFS Doble Slot A/B", Color::BEAVER_TEAL_BRIGHT, None);
 
-            Canvas::draw_string_prop(x + 18, y + 195, "CPU / Estado Termico: Fresco (HLT)", Color::SLATE_400, None);
-            Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para abrir Monitor", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 232, ">> ENTER o Toca para Monitor", Color::SLATE_400, None);
         }
         4 => {
-            // [NOTAS & RECETAS DE COCINA]
+            // [ARCHIVOS REALES EN /disk]
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, 0xF43F5E);
-            Canvas::draw_string(x + 23, y + 20, "R", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 16, "RECETAS & NOTAS", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 34, "BeaverNote Domotico", 0xF43F5E, None);
+            Canvas::draw_string(x + 23, y + 20, "D", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 50, y + 16, "ARCHIVOS EN /disk", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 50, y + 34, "VFS / BeaverFS Real", 0xF43F5E, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
-            Canvas::draw_string_prop(x + 18, y + 68, "Notas Familiares en Disco:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 90, "1. Lista de supermercado (6 items)", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 112, "2. Receta: Crema de verduras", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 134, "3. Horario de medicamentos", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 18, y + 68, "Entradas en /disk:", Color::SLATE_200, None);
+            if disk_entries.is_empty() {
+                Canvas::draw_string_prop(x + 18, y + 92, "-- Sin entradas en /disk --", Color::SLATE_400, None);
+            } else {
+                for (i, (name, is_dir, sz)) in disk_entries.iter().enumerate() {
+                    let line = if *is_dir {
+                        format!("[DIR] {}", name)
+                    } else {
+                        format!("{} ({} B)", name, sz)
+                    };
+                    Canvas::draw_string_prop(x + 18, y + 90 + i * 22, &line, Color::WHITE, None);
+                }
+            }
 
             Canvas::draw_string_prop(x + 18, y + 165, "Almacenamiento Local:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 185, "Guardado transaccional en /disk", Color::BEAVER_AMBER_LIGHT, None);
+            Canvas::draw_string_prop(x + 18, y + 185, "Lectura directa de VFS", Color::BEAVER_AMBER_LIGHT, None);
 
-            Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para escribir", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 232, ">> ENTER o Toca para BeaverNote", Color::SLATE_400, None);
         }
         5 => {
             // [TERMINAL Y RING 3 SYSCALLS]
@@ -285,10 +337,10 @@ fn draw_smart_tile(
             Canvas::draw_string_prop(x + 18, y + 90, "Espacio de Usuario CPL=3", Color::BEAVER_GREEN, None);
 
             Canvas::draw_string_prop(x + 18, y + 120, "Pasarela Rapida:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 140, "IA32_LSTAR (0xC0000082) ~42 ciclos", Color::BEAVER_ACCENT_CYAN, None);
+            Canvas::draw_string_prop(x + 18, y + 140, "IA32_LSTAR (0xC0000082)", Color::BEAVER_ACCENT_CYAN, None);
 
             Canvas::draw_string_prop(x + 18, y + 175, "Prompt Interactivo: root@beaver:/#", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para abrir Shell", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 232, ">> ENTER o Toca para Terminal", Color::SLATE_400, None);
         }
         _ => {}
     }
@@ -305,7 +357,6 @@ fn draw_touch_button(x: usize, y: usize, w: usize, h: usize, label: &str, border
 pub fn handle_key(ch: char) -> bool {
     let mut state = SMART_HUB.lock();
     match ch {
-        // Navegación Izquierda
         KEY_LEFT_ARROW | 'a' | 'A' | 'h' => {
             if state.focused_tile % 3 > 0 {
                 state.focused_tile -= 1;
@@ -317,7 +368,6 @@ pub fn handle_key(ch: char) -> bool {
             render_smart_hub();
             true
         }
-        // Navegación Derecha
         KEY_RIGHT_ARROW | 'd' | 'D' | 'l' => {
             if state.focused_tile % 3 < 2 {
                 state.focused_tile += 1;
@@ -329,7 +379,6 @@ pub fn handle_key(ch: char) -> bool {
             render_smart_hub();
             true
         }
-        // Navegación Arriba
         KEY_UP_ARROW | 'w' | 'W' | 'k' => {
             if state.focused_tile >= 3 {
                 state.focused_tile -= 3;
@@ -341,7 +390,6 @@ pub fn handle_key(ch: char) -> bool {
             render_smart_hub();
             true
         }
-        // Navegación Abajo
         KEY_DOWN_ARROW | 's' | 'S' | 'j' => {
             if state.focused_tile < 3 {
                 state.focused_tile += 3;
@@ -353,7 +401,6 @@ pub fn handle_key(ch: char) -> bool {
             render_smart_hub();
             true
         }
-        // Siguiente mosaico con TAB
         '\t' => {
             state.focused_tile = (state.focused_tile + 1) % TOTAL_TILES;
             crate::drivers::audio::click_feedback();
@@ -361,7 +408,6 @@ pub fn handle_key(ch: char) -> bool {
             render_smart_hub();
             true
         }
-        // Activación de la tarjeta seleccionada con ENTER o ESPACIO
         '\n' | ' ' => {
             crate::drivers::audio::click_feedback();
             let cur = state.focused_tile;
@@ -369,38 +415,22 @@ pub fn handle_key(ch: char) -> bool {
             drop(state);
             true
         }
-        // Tecla de acceso rápido 't' para ajustar temperatura del refrigerador
-        't' | 'T' => {
-            state.fridge_temp_tenths -= 5;
-            if state.fridge_temp_tenths < 10 {
-                state.fridge_temp_tenths = 50; // Cliclo de +1.0 a +5.0 °C
-            }
-            let temp_str = format!("{}.{} C", state.fridge_temp_tenths / 10, state.fridge_temp_tenths % 10);
-            state.last_action = format!("[REFRIGERADOR] Temperatura fijada a {}", temp_str);
-            crate::drivers::audio::click_feedback();
-            drop(state);
-            render_smart_hub();
-            true
-        }
-        // Tecla de acceso rápido 'p' para puerta
         'p' | 'P' => {
-            state.fridge_door_open = !state.fridge_door_open;
-            let status = if state.fridge_door_open { "ABIERTA" } else { "CERRADA" };
-            state.last_action = format!("[REFRIGERADOR] Sensor de puerta: {}", status);
+            let p = crate::drivers::profile::detect_device_profile();
+            state.last_action = format!("[HARDWARE] {} ({})", p.class.as_str(), p.source);
             crate::drivers::audio::click_feedback();
             drop(state);
             render_smart_hub();
             true
         }
-        // Tecla de acceso rápido 'm' para malla BeaverMesh
         'm' | 'M' => {
-            state.last_action = String::from("[BEAVERMESH] Sincronizando 3 nodos en red local (:4242) sin nube...");
+            state.last_action = String::from("[BEAVERMESH] Anuncio P2P emitido en puerto :4242.");
             crate::drivers::audio::click_feedback();
             drop(state);
+            crate::drivers::mesh::send_mesh_announce_now();
             render_smart_hub();
             true
         }
-        // ESC o 'q': Salir y retornar a Beaver Desktop
         '\x1b' | 'q' | 'Q' => {
             crate::drivers::audio::click_feedback();
             drop(state);
@@ -413,29 +443,24 @@ pub fn handle_key(ch: char) -> bool {
 
 /// Maneja toques directos en pantalla táctil o clics de ratón
 pub fn handle_click(mx: usize, my: usize) -> bool {
-    // 1. Comprobar botones táctiles inferiores
     if my >= 655 && my <= 703 {
         if mx >= 42 && mx <= 257 {
-            // [ ESC ] MODO ESCRITORIO
             crate::drivers::audio::click_feedback();
             exit_to_desktop();
             return true;
         } else if mx >= 275 && mx <= 490 {
-            // [ T ] AJUSTAR FRIO
-            handle_key('t');
-            return true;
-        } else if mx >= 508 && mx <= 723 {
-            // [ P ] PUERTA
             handle_key('p');
             return true;
+        } else if mx >= 508 && mx <= 723 {
+            let mut state = SMART_HUB.lock();
+            execute_tile_action(&mut state, 1);
+            return true;
         } else if mx >= 741 && mx <= 981 {
-            // [ M ] MESH
             handle_key('m');
             return true;
         }
     }
 
-    // 2. Comprobar clic/toque en los 6 mosaicos
     let start_x = 42;
     let start_y = 85;
     let tile_w = 296;
@@ -466,17 +491,11 @@ pub fn handle_click(mx: usize, my: usize) -> bool {
 fn execute_tile_action(state: &mut SmartHubState, tile_idx: usize) {
     match tile_idx {
         0 => {
-            // Refrigerador: cicla temperatura y modo
-            state.fridge_temp_tenths -= 2;
-            if state.fridge_temp_tenths < 15 {
-                state.fridge_temp_tenths = 45;
-            }
-            let temp_str = format!("{}.{} C", state.fridge_temp_tenths / 10, state.fridge_temp_tenths % 10);
-            state.last_action = format!("[REFRIGERADOR] Frio ajustado a {}. Compresor operando normalmente en Ring 3.", temp_str);
+            let p = crate::drivers::profile::detect_device_profile();
+            state.last_action = format!("[HARDWARE] Perfil: {} (Fuente: {})", p.class.as_str(), p.source);
             render_smart_hub();
         }
         1 => {
-            // Multimedia: cambia a Beaver Desktop y abre BeaverAudio
             state.last_action = String::from("[MULTIMEDIA] Abriendo BeaverAudio en Beaver Desktop...");
             if let Some(mut mgr) = crate::gui::window::WINDOW_MGR.try_lock() {
                 mgr.bring_to_front(crate::gui::window::WindowId::Player);
@@ -484,7 +503,6 @@ fn execute_tile_action(state: &mut SmartHubState, tile_idx: usize) {
             exit_to_desktop();
         }
         2 => {
-            // Mesh: cambia a Beaver Desktop y abre BeaverSync
             state.last_action = String::from("[BEAVERMESH] Abriendo BeaverSync en Beaver Desktop...");
             if let Some(mut mgr) = crate::gui::window::WINDOW_MGR.try_lock() {
                 mgr.bring_to_front(crate::gui::window::WindowId::Sync);
@@ -492,7 +510,6 @@ fn execute_tile_action(state: &mut SmartHubState, tile_idx: usize) {
             exit_to_desktop();
         }
         3 => {
-            // Monitor: cambia a Beaver Desktop y abre Monitor
             state.last_action = String::from("[SISTEMA] Abriendo Monitor de Recursos en Beaver Desktop...");
             if let Some(mut mgr) = crate::gui::window::WINDOW_MGR.try_lock() {
                 mgr.bring_to_front(crate::gui::window::WindowId::Monitor);
@@ -500,15 +517,13 @@ fn execute_tile_action(state: &mut SmartHubState, tile_idx: usize) {
             exit_to_desktop();
         }
         4 => {
-            // Notas / Recetas: abre BeaverNote
-            state.last_action = String::from("[RECETAS] Abriendo BeaverNote en Beaver Desktop...");
+            state.last_action = String::from("[ARCHIVOS] Abriendo BeaverNote en Beaver Desktop...");
             if let Some(mut mgr) = crate::gui::window::WINDOW_MGR.try_lock() {
                 mgr.bring_to_front(crate::gui::window::WindowId::Note);
             }
             exit_to_desktop();
         }
         5 => {
-            // Terminal: abre consola interactiva en Beaver Desktop
             state.last_action = String::from("[CONSOLA] Abriendo Beaver Terminal...");
             if let Some(mut mgr) = crate::gui::window::WINDOW_MGR.try_lock() {
                 mgr.bring_to_front(crate::gui::window::WindowId::Terminal);

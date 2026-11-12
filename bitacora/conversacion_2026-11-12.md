@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 2
+// Total de interacciones del día: 4
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -57,4 +57,47 @@ Se implementaron las mejoras prioritarias de endurecimiento y detección real de
 
 ================================================================================
 
+## Interacción #3 [15:45:00]
 
+### 👤 Pregunta / Petición del Usuario:
+entonces ahora en que punto estamos? falta algo? aun hay datos simulados?
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se presentó un diagnóstico honesto y basado en evidencia del estado actual del repositorio:
+
+1. **En qué punto estamos:**
+   - **x86_64:** Núcleo funcional y verificado (`18/18` pruebas en QEMU), incluyendo detección real de perfil de dispositivo (`profile.rs`: ACPI FADT, SMBIOS Type 3, VBE, CEC, Touchscreen), eliminación de `.unwrap()`/`.expect()` en `syscall.rs`, `ipc/mod.rs`, `vfs.rs` y `usermode.rs`, y estado honesto en `cec.rs` (`is_online = hw_present`).
+   - **ARM64 (`aarch64`):** Arranca en QEMU `virt` hasta `EL1` con UART, DTB/SimpleFB, GICv2, `VBAR_EL1` y ARM Generic Timer a 100 Hz.
+2. **Qué falta todavía:**
+   - **ARM64 completo:** activar MMU (`TTBR0`/`TTBR1`), heap, scheduler, VFS y espacio de usuario `EL0` (actualmente entra a `loop { cpu::halt(); }`), además de definir el símbolo de entrada `_start_aarch64` para quitar el warning del linker.
+   - **Controladores físicos reales de TV/Electrodomésticos:** `cec.rs` y `touchscreen.rs` ya reportan `hw_present = false` honestamente, pero aún no implementan sondeo real de hardware I2C/HID/HDMI-CEC ni sensores GPIO/térmicos reales.
+   - **Últimos `.expect()` de arranque:** quedan 5 en `memory/heap.rs:124` y `memory/paging.rs:135,136,140,158`.
+3. **Dónde aún quedan datos simulados / hardcodeados:**
+   - **`kernel/src/gui/smart_hub.rs` (crítico frente a la Regla 5):** el mosaico *Malla BeaverMesh* sigue mostrando `"Malla P2P: :4242 [3 Nodos]"`, `"IP Local: 192.168.1.50"`, `"- Nodo 1: Smart TV (Sala)"`, `"- Nodo 2: Smart Fridge (Cocina)"`, `"- Nodo 3: Laptop (Despacho)"` en lugar de leer `MESH_STATE` y la IP real de `net.rs`; además el mosaico *Refrigerador Smart* mantiene estado sintético en memoria (`fridge_temp_tenths = 38`, `fridge_door_open`) sin sensor físico.
+   - **`kernel/src/gui/icons.rs:115`:** comentario de líneas decorativas de texto en un ícono (puramente visual).
+   - **`kernel/src/drivers/net.rs:638,654`:** campos temporales en `0` antes de calcular el checksum real de ICMP/IP (no es mock, se rellenan enseguida).
+
+================================================================================
+
+## Interacción #4 [15:54:00]
+
+### 👤 Pregunta / Petición del Usuario:
+ok, elimina los textos fijos, al final dime el paso que sigue
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se eliminaron todos los textos fijos y datos sintéticos de `kernel/src/gui/smart_hub.rs`, conectando Beaver Smart Hub con telemetría real del kernel:
+- Barra superior: muestra el conteo real de nodos en `MESH_MANAGER.online_count()` y la IP real de `NET_INTERFACE.ip_address`.
+- Mosaico 0: muestra el perfil de hardware real detectado por `profile::detect_device_profile()` (clase, fuente, núcleos SMP, estado real de `HDMI-CEC` y `Táctil I2C`) en lugar del estado sintético de refrigerador.
+- Mosaico 1: muestra la resolución VBE real y el estado real de `HDMI_CEC.is_online`.
+- Mosaico 2: lista los nodos reales descubiertos en `MESH_MANAGER.get_nodes()` y la tecla `[ M ]` emite un anuncio real (`send_mesh_announce_now()`).
+- Mosaico 3: calcula el uso/porcentaje libre real de `HEAP_ALLOCATOR.stats()`.
+- Mosaico 4: lista las entradas reales del directorio `/disk` desde `VFS`.
+
+Verificación: `cargo check` (`x86_64` y `aarch64`) OK y `run.ps1 -Test` aprobado (18/18 pruebas).
+Siguiente paso recomendado: implementar MMU (`TTBR0`/`TTBR1`), heap dinámico y planificador de tareas en ARM64 (`aarch64`).
+
+================================================================================
