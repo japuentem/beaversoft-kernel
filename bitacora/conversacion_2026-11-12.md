@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 10
+// Total de interacciones del día: 11
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -203,6 +203,23 @@ Se implementó el cargador real de binarios **ELF64 AArch64 (`EM_AARCH64 = 0xB7`
 Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
 
 ================================================================================
+
+## Interacción #11 [16:45:00]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el siguiente paso por importancia y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementó el **aislamiento real por proceso (`TTBR0_EL1` dedicado con tablas de 4 KiB)** en **ARM64 (`aarch64`)**:
+- `kernel/src/arch/aarch64/mmu.rs`: se añadieron `create_process_address_space()`, `map_user_page(proc_l0, vaddr, phys, writable)` (con división automática de bloques de 2 MiB a 512 páginas `L3` de 4 KiB manteniendo el kernel en `EL1`-only) y `switch_to_kernel_ttbr0()`.
+- `kernel/src/elf.rs`: `load_and_execute` en `aarch64` ahora crea un `TTBR0_EL1` privado por proceso ELF64, asigna marcos físicos con `FRAME_ALLOCATOR` para cada página `PT_LOAD` y para 16 KiB de pila privada (`0x7000_0000`), y ejecuta bajo traducción virtual real (`EL0_ENTRY = 0x6000_0000` sin mapeo de identidad físico).
+- `kernel/src/syscall.rs` y `kernel/src/arch/aarch64/exceptions.rs`: restauran `TTBR0_EL1` al kernel en `SYS_EXIT` y en recuperación Anti-BSOD.
+- `run.ps1`: `-TestArm64` verifica `[ELF-ARM64] Binario ELF64 finalizado en EL0 aislado (TTBR0=0x405d0000, exit code: 42)`.
+
+================================================================================
+
 
 
 

@@ -642,7 +642,10 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 arg0
             );
             if unsafe { SUPERVISOR_RSP != 0 } {
+                #[cfg(target_arch = "x86_64")]
                 crate::memory::paging::switch_to_kernel_cr3();
+                #[cfg(target_arch = "aarch64")]
+                crate::arch::aarch64::mmu::Aarch64Mmu::switch_to_kernel_ttbr0();
                 unsafe {
                     return_to_supervisor(arg0);
                 }

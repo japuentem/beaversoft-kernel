@@ -119,43 +119,60 @@ impl<'a> ElfBinary<'a> {
         list
     }
 
-    /// Carga el binario en un espacio de direcciones aislado y salta a espacio de usuario (Ring 3 / EL0)
+    /// Carga el binario en un espacio de direcciones `TTBR0_EL1` aislado por proceso y salta a `EL0`
     #[cfg(target_arch = "aarch64")]
     pub fn load_and_execute(&self) -> Result<(), &'static str> {
-        const EL0_ARENA_BASE: u64 = 0x4200_0000;
-        const EL0_ARENA_LIMIT: u64 = 0x421E_0000;
-        const EL0_STACK_TOP: u64 = 0x421F_F000;
+        use crate::arch::aarch64::mmu::Aarch64Mmu;
 
         let entry = self.header.entry;
-        if entry < EL0_ARENA_BASE || entry >= EL0_ARENA_LIMIT {
-            return Err("Punto de entrada ELF64 fuera de la arena EL0 (0x4200_0000..0x421E_0000)");
-        }
+        let proc_ttbr0 = Aarch64Mmu::create_process_address_space()
+            .ok_or("No hay marcos libres para crear TTBR0_EL1 aislado del proceso ELF")?;
 
-        crate::arch::aarch64::mmu::Aarch64Mmu::allow_el0_2mb_block(EL0_ARENA_BASE);
         let segments = self.program_headers();
         let mut loaded_count = 0usize;
 
         for ph in segments {
             let seg_type = ph.seg_type;
+            let flags = ph.flags;
             let file_offset = ph.offset as usize;
             let file_sz = ph.file_size as usize;
             let mem_sz = ph.mem_size as usize;
-            let vaddr = ph.vaddr;
+            let target_vaddr = ph.vaddr;
 
             if seg_type == PT_LOAD {
-                if vaddr < EL0_ARENA_BASE || vaddr.saturating_add(mem_sz as u64) > EL0_ARENA_LIMIT {
-                    return Err("Segmento PT_LOAD fuera de la arena EL0");
-                }
                 if file_offset + file_sz > self.data.len() {
                     return Err("El segmento excede los limites del archivo ELF");
                 }
-                // SAFETY: El rango [vaddr .. vaddr + mem_sz] está dentro de la arena EL0 mapeada con PTE_USER.
-                unsafe {
-                    let dst = vaddr as *mut u8;
-                    if mem_sz > file_sz {
-                        core::ptr::write_bytes(dst.add(file_sz), 0, mem_sz - file_sz);
+
+                let vaddr_start = target_vaddr & !0xFFF;
+                let vaddr_end = (target_vaddr + (mem_sz as u64).max(1) + 0xFFF) & !0xFFF;
+                let writable = (flags & PF_W) != 0;
+
+                let mut page_vaddr = vaddr_start;
+                while page_vaddr < vaddr_end {
+                    let phys_frame = FRAME_ALLOCATOR
+                        .allocate_frame()
+                        .ok_or("Sin marcos físicos para segmento PT_LOAD del ELF ARM64")?;
+
+                    let page_end = page_vaddr + PAGE_SIZE as u64;
+                    let copy_start = target_vaddr.max(page_vaddr);
+                    let copy_end = (target_vaddr + file_sz as u64).min(page_end);
+                    if copy_start < copy_end {
+                        let page_off = (copy_start - page_vaddr) as usize;
+                        let data_off = file_offset + (copy_start - target_vaddr) as usize;
+                        let copy_len = (copy_end - copy_start) as usize;
+                        // SAFETY: `phys_frame` es un marco de 4 KiB recién puesto a cero y `data_off + copy_len <= self.data.len()`.
+                        unsafe {
+                            core::ptr::copy_nonoverlapping(
+                                self.data.as_ptr().add(data_off),
+                                (phys_frame + page_off) as *mut u8,
+                                copy_len,
+                            );
+                        }
                     }
-                    core::ptr::copy_nonoverlapping(self.data.as_ptr().add(file_offset), dst, file_sz);
+
+                    Aarch64Mmu::map_user_page(proc_ttbr0, page_vaddr, phys_frame as u64, writable)?;
+                    page_vaddr += PAGE_SIZE as u64;
                 }
                 loaded_count += 1;
             }
@@ -165,14 +182,29 @@ impl<'a> ElfBinary<'a> {
             return Err("El archivo ELF no contiene segmentos cargables PT_LOAD");
         }
 
-        // SAFETY: Sincronizar I-Cache tras copiar código ejecutable ELF64 en arena EL0 y saltar a EL0.
+        const AARCH64_USER_STACK_VADDR: u64 = 0x0000_0000_7000_0000;
+        // Pila privada de usuario EL0 (16 KiB en AARCH64_USER_STACK_VADDR)
+        for i in 0..USER_STACK_PAGES {
+            let stack_frame = FRAME_ALLOCATOR
+                .allocate_frame()
+                .ok_or("Sin marcos para pila EL0")?;
+            let stack_vaddr = AARCH64_USER_STACK_VADDR + (i * PAGE_SIZE) as u64;
+            Aarch64Mmu::map_user_page(proc_ttbr0, stack_vaddr, stack_frame as u64, true)?;
+        }
+        let user_stack_top = AARCH64_USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
+
+        Aarch64Mmu::set_ttbr0(proc_ttbr0);
+        Aarch64Mmu::flush_tlb();
+
+        // SAFETY: Sincronizar I-Cache y transferir control a EL0 bajo `proc_ttbr0` aislado.
         unsafe {
             core::arch::asm!("dsb ish", "ic iallu", "dsb ish", "isb", options(nomem, nostack));
-            let exit_code = crate::syscall::enter_ring3_with_return(entry, EL0_STACK_TOP);
+            let exit_code = crate::syscall::enter_ring3_with_return(entry, user_stack_top);
+            Aarch64Mmu::switch_to_kernel_ttbr0();
             kprint_color!(
                 VgaColor::LightGreen, VgaColor::Black,
-                "[ELF-ARM64] Binario ELF64 finalizado en EL0 (exit code: {}).\n",
-                exit_code
+                "[ELF-ARM64] Binario ELF64 finalizado en EL0 aislado (TTBR0={:#x}, exit code: {}).\n",
+                proc_ttbr0, exit_code
             );
         }
         Ok(())

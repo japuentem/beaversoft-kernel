@@ -163,7 +163,7 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
     // 8.1 Verificación real de cargador ELF64 AArch64 (EM_AARCH64=0xB7) + aislamiento EL0 + SVC #0
     {
         use crate::elf::{Elf64Header, Elf64ProgramHeader, ElfBinary, ELF_CLASS_64, ELF_DATA_2LSB, ELF_MACHINE_AARCH64, ELF_MAGIC, ELF_TYPE_EXEC, PF_R, PF_X, PT_LOAD};
-        const EL0_ENTRY: u64 = 0x4200_0000;
+        const EL0_ENTRY: u64 = 0x6000_0000;
         let code_insns: [u32; 6] = [
             0xD280_04E8, // mov x8, #39 (SYS_GETPID)
             0xD400_0001, // svc #0

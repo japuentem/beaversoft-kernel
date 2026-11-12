@@ -69,6 +69,106 @@ impl Aarch64Mmu {
         }
     }
 
+    /// Devuelve la dirección física de la tabla raíz `KERNEL_L0_TABLE` del supervisor.
+    pub fn kernel_l0_phys() -> u64 {
+        core::ptr::addr_of!(KERNEL_L0_TABLE) as u64
+    }
+
+    /// Restaura `TTBR0_EL1` a la tabla raíz del kernel e invalida TLB.
+    pub fn switch_to_kernel_ttbr0() {
+        Self::set_ttbr0(Self::kernel_l0_phys());
+        Self::flush_tlb();
+    }
+
+    /// Crea un espacio de direcciones `TTBR0_EL1` aislado por proceso usando marcos de 4 KiB.
+    pub fn create_process_address_space() -> Option<u64> {
+        use crate::memory::frame_allocator::FRAME_ALLOCATOR;
+        let proc_l0 = FRAME_ALLOCATOR.allocate_frame()? as u64;
+        let proc_l1 = FRAME_ALLOCATOR.allocate_frame()? as u64;
+        let proc_l2 = FRAME_ALLOCATOR.allocate_frame()? as u64;
+
+        unsafe {
+            let l0_ptr = proc_l0 as *mut u64;
+            let l1_ptr = proc_l1 as *mut u64;
+            let l2_ptr = proc_l2 as *mut u64;
+
+            *l0_ptr = (proc_l1 & 0x0000_FFFF_FFFF_F000) | PTE_VALID | PTE_TABLE;
+            *l1_ptr = KERNEL_L1_TABLE.0[0]; // MMIO 0..1 GiB (EL1-only)
+
+            for i in 0..512 {
+                // Copiar bloques de 2 MiB de RAM sin bit PTE_USER (EL1-only)
+                *l2_ptr.add(i) = KERNEL_L2_RAM.0[i] & !PTE_USER;
+            }
+            *l1_ptr.add(1) = (proc_l2 & 0x0000_FFFF_FFFF_F000) | PTE_VALID | PTE_TABLE;
+
+            for i in 2..512 {
+                *l1_ptr.add(i) = KERNEL_L1_TABLE.0[i];
+            }
+        }
+        Some(proc_l0)
+    }
+
+    /// Mapea una página de 4 KiB accesible desde `EL0` (`PTE_USER`) en un `proc_l0` aislado.
+    pub fn map_user_page(proc_l0: u64, vaddr: u64, phys: u64, writable: bool) -> Result<(), &'static str> {
+        use crate::memory::frame_allocator::FRAME_ALLOCATOR;
+        let l0_idx = ((vaddr >> 39) & 0x1FF) as usize;
+        let l1_idx = ((vaddr >> 30) & 0x1FF) as usize;
+        let l2_idx = ((vaddr >> 21) & 0x1FF) as usize;
+        let l3_idx = ((vaddr >> 12) & 0x1FF) as usize;
+
+        if l0_idx != 0 {
+            return Err("vaddr fuera del espacio inferior TTBR0 (L0[0])");
+        }
+
+        unsafe {
+            let l0_ptr = proc_l0 as *mut u64;
+            let l0_entry = *l0_ptr.add(l0_idx);
+            if (l0_entry & PTE_VALID) == 0 {
+                return Err("L0[0] inválido en proceso ARM64");
+            }
+            let l1_ptr = (l0_entry & 0x0000_FFFF_FFFF_F000) as *mut u64;
+            let mut l1_entry = *l1_ptr.add(l1_idx);
+            if (l1_entry & PTE_VALID) == 0 || (l1_entry & PTE_TABLE) == 0 {
+                let new_l2 = FRAME_ALLOCATOR.allocate_frame().ok_or("Sin marcos para L2 de usuario ARM64")? as u64;
+                l1_entry = (new_l2 & 0x0000_FFFF_FFFF_F000) | PTE_VALID | PTE_TABLE;
+                *l1_ptr.add(l1_idx) = l1_entry;
+            }
+
+            let l2_ptr = (l1_entry & 0x0000_FFFF_FFFF_F000) as *mut u64;
+            let mut l2_entry = *l2_ptr.add(l2_idx);
+            if (l2_entry & PTE_VALID) == 0 || (l2_entry & PTE_TABLE) == 0 {
+                let new_l3 = FRAME_ALLOCATOR.allocate_frame().ok_or("Sin marcos para L3 de usuario ARM64")? as u64;
+                let l3_ptr = new_l3 as *mut u64;
+                if (l2_entry & PTE_VALID) != 0 {
+                    // Dividir bloque de 2 MiB en 512 páginas de 4 KiB manteniendo EL1-only
+                    let block_base = l2_entry & 0x0000_FFFF_FFE0_0000;
+                    for i in 0..512 {
+                        *l3_ptr.add(i) = (block_base + (i as u64) * 4096)
+                            | PTE_VALID
+                            | PTE_PAGE
+                            | PTE_AF
+                            | PTE_SH_INNER
+                            | PTE_ATTR_NORM;
+                    }
+                }
+                l2_entry = (new_l3 & 0x0000_FFFF_FFFF_F000) | PTE_VALID | PTE_TABLE;
+                *l2_ptr.add(l2_idx) = l2_entry;
+            }
+
+            let l3_ptr = (l2_entry & 0x0000_FFFF_FFFF_F000) as *mut u64;
+            let ap2_ro = if writable { 0 } else { 1u64 << 7 };
+            *l3_ptr.add(l3_idx) = (phys & 0x0000_FFFF_FFFF_F000)
+                | PTE_VALID
+                | PTE_PAGE
+                | PTE_AF
+                | PTE_SH_INNER
+                | PTE_ATTR_NORM
+                | PTE_USER
+                | ap2_ro;
+        }
+        Ok(())
+    }
+
     /// Habilita acceso EL0 (PTE_USER) únicamente en el bloque de 2 MiB que contiene `phys_addr` (dentro de 0x4000_0000..0x7FFF_FFFF).
     pub fn allow_el0_2mb_block(phys_addr: u64) {
         if phys_addr < 0x4000_0000 || phys_addr >= 0x8000_0000 {

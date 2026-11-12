@@ -77,7 +77,7 @@ if ($TestArm64) {
         Start-Sleep -Milliseconds 500
         if (Test-Path $ArmLog) {
             $txt = Get-Content $ArmLog -Raw -ErrorAction SilentlyContinue
-            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "VirtIO-net v\d+ operativo.*\[OK\]" -and $txt -match "BeaverFS persistente.*VirtIO-blk \[OK\]" -and $txt -match "Binario ELF64 finalizado en EL0 \(exit code: 42\)" -and $txt -match "Prueba ELF64 \+ EL0 \+ SVC #0 \[OK\]" -and $txt -match "root@beaver:/#") {
+            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "VirtIO-net v\d+ operativo.*\[OK\]" -and $txt -match "BeaverFS persistente.*VirtIO-blk \[OK\]" -and $txt -match "Binario ELF64 finalizado en EL0 aislado.*exit code: 42" -and $txt -match "Prueba ELF64 \+ EL0 \+ SVC #0 \[OK\]" -and $txt -match "root@beaver:/#") {
                 $ok = $true
                 break
             }
