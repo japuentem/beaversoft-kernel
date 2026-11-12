@@ -114,7 +114,7 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
     crate::fs::init_vfs();
     Pl011Uart::write_str("[ARM64] Heap (4 MiB), FrameAllocator y VFS operativos [OK]\n");
 
-    // 7.1 Sondeo real de bus VirtIO MMIO (VirtIO-blk / VirtIO-net)
+    // 7.1 Sondeo real de bus VirtIO MMIO (VirtIO-blk / VirtIO-net) y montaje BeaverFS
     let vio = super::virtio_mmio::probe_and_init_virtio();
     if vio.blk_present {
         let mut sec0 = [0u8; 512];
@@ -125,6 +125,11 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
                 vio.blk_base,
                 (vio.blk_sectors * 512) / (1024 * 1024)
             );
+            crate::storage::block_device::BLOCK_DEVICE.lock().set_use_virtio(true);
+            crate::storage::ab_slot::BOOT_SLOT_MANAGER.lock().init();
+            crate::storage::ab_slot::BOOT_SLOT_MANAGER.lock().mark_boot_successful();
+            crate::storage::beaverfs::init_beaverfs();
+            Pl011Uart::write_str("[ARM64] BeaverFS persistente y Ranuras A/B montados sobre VirtIO-blk [OK]\n");
         } else {
             crate::kprintln!("[ARM64] VirtIO-blk detectado en {:#x} pero fallo lectura LBA 0.", vio.blk_base);
         }

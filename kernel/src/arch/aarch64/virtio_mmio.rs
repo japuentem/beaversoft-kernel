@@ -274,6 +274,15 @@ unsafe fn init_virtio_blk_device(base: u64, version: u32, state: &mut VirtioBlkS
 
 /// Lee un sector real de 512 bytes del disco VirtIO-blk en ARM64.
 pub fn read_sector(lba: u64, buf: &mut [u8; 512]) -> Result<(), &'static str> {
+    submit_blk_request(false, lba, buf.as_mut_ptr() as u64)
+}
+
+/// Escribe un sector real de 512 bytes en el disco VirtIO-blk en ARM64.
+pub fn write_sector(lba: u64, buf: &[u8; 512]) -> Result<(), &'static str> {
+    submit_blk_request(true, lba, buf.as_ptr() as u64)
+}
+
+fn submit_blk_request(is_write: bool, lba: u64, buf_ptr: u64) -> Result<(), &'static str> {
     let mut state = VIRTIO_BLK.lock();
     if !state.initialized {
         return Err("VirtIO-blk no inicializado");
@@ -284,7 +293,7 @@ pub fn read_sector(lba: u64, buf: &mut [u8; 512]) -> Result<(), &'static str> {
 
     // SAFETY: Exclusividad garantizada por `VIRTIO_BLK` SpinMutex; los descriptores apuntan a buffers estáticos/stack válidos durante el poll síncrono.
     unsafe {
-        BLK_REQ.req_type = 0; // VIRTIO_BLK_T_IN
+        BLK_REQ.req_type = if is_write { 1 } else { 0 }; // 1 = VIRTIO_BLK_T_OUT, 0 = VIRTIO_BLK_T_IN
         BLK_REQ.reserved = 0;
         BLK_REQ.sector = lba;
         BLK_STATUS = 0xFF;
@@ -296,9 +305,9 @@ pub fn read_sector(lba: u64, buf: &mut [u8; 512]) -> Result<(), &'static str> {
             next: 1,
         };
         BLK_QUEUE.desc[1] = VringDesc {
-            addr: buf.as_mut_ptr() as u64,
+            addr: buf_ptr,
             len: 512,
-            flags: VRING_DESC_F_NEXT | VRING_DESC_F_WRITE,
+            flags: if is_write { VRING_DESC_F_NEXT } else { VRING_DESC_F_NEXT | VRING_DESC_F_WRITE },
             next: 2,
         };
         BLK_QUEUE.desc[2] = VringDesc {
@@ -340,3 +349,4 @@ pub fn read_sector(lba: u64, buf: &mut [u8; 512]) -> Result<(), &'static str> {
 
     Ok(())
 }
+

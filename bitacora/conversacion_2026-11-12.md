@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 7
+// Total de interacciones del día: 8
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -152,6 +152,25 @@ Se implementó el descubrimiento real de bus **VirtIO MMIO** y el controlador na
 Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
 
 ================================================================================
+
+## Interacción #8 [16:30:00]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el paso que consideres necesario y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se completó la escritura real de sectores en **VirtIO-blk** y se conectó como backend de **BeaverFS** y **Ranuras A/B** en **ARM64 (`aarch64`)**:
+- `kernel/src/arch/aarch64/virtio_mmio.rs`: se añadió `write_sector(lba, buf)` unificado con `read_sector` mediante `submit_blk_request(is_write, lba, buf_ptr)`.
+- `kernel/src/storage/block_device.rs`: se integró `use_virtio` (`set_use_virtio`, `is_using_virtio`) en `BlockDeviceManager` para enrutar lecturas y escrituras en `aarch64` hacia `virtio_mmio`.
+- `kernel/src/arch/aarch64/boot.rs`: al detectar `VirtIO-blk`, se activa `BLOCK_DEVICE.set_use_virtio(true)`, se inicializa `BOOT_SLOT_MANAGER` (ranuras A/B con espejo LBA 16) y se formatea/monta `BeaverFS` persistente en disco.
+- `run.ps1`: `-TestArm64` ahora verifica `[ARM64] BeaverFS persistente y Ranuras A/B montados sobre VirtIO-blk [OK]`.
+
+Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
+
+================================================================================
+
 
 
 

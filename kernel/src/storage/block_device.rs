@@ -15,6 +15,7 @@ pub struct BlockDeviceManager {
     ramdisk: [[u8; SECTOR_SIZE]; RAMDISK_SECTORS],
     use_ata: bool,
     use_ahci: bool,
+    use_virtio: bool,
     ahci_port: u8,
 }
 
@@ -24,6 +25,7 @@ impl BlockDeviceManager {
             ramdisk: [[0; SECTOR_SIZE]; RAMDISK_SECTORS],
             use_ata: false,
             use_ahci: false,
+            use_virtio: false,
             ahci_port: 0,
         }
     }
@@ -37,6 +39,10 @@ impl BlockDeviceManager {
         self.ahci_port = port;
     }
 
+    pub fn set_use_virtio(&mut self, enabled: bool) {
+        self.use_virtio = enabled;
+    }
+
     pub fn is_using_hardware_ata(&self) -> bool {
         self.use_ata
     }
@@ -45,9 +51,15 @@ impl BlockDeviceManager {
         self.use_ahci
     }
 
+    pub fn is_using_virtio(&self) -> bool {
+        self.use_virtio
+    }
+
     pub fn get_storage_medium_name(&self) -> &'static str {
         if self.use_ahci {
             "Serial ATA AHCI DMA (Aceleración Directa)"
+        } else if self.use_virtio {
+            "VirtIO-blk MMIO (ARM64 Nativo)"
         } else if self.use_ata {
             "ATA/IDE PIO Primario Maestro"
         } else {
@@ -56,6 +68,10 @@ impl BlockDeviceManager {
     }
 
     pub fn read_sector(&self, lba: u32, buf: &mut [u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        #[cfg(target_arch = "aarch64")]
+        if self.use_virtio {
+            return crate::arch::aarch64::virtio_mmio::read_sector(lba as u64, buf);
+        }
         if self.use_ahci {
             return crate::storage::ahci::read_sector(self.ahci_port, lba, buf);
         }
@@ -73,6 +89,10 @@ impl BlockDeviceManager {
     }
 
     pub fn write_sector(&mut self, lba: u32, buf: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        #[cfg(target_arch = "aarch64")]
+        if self.use_virtio {
+            return crate::arch::aarch64::virtio_mmio::write_sector(lba as u64, buf);
+        }
         if self.use_ahci {
             return crate::storage::ahci::write_sector(self.ahci_port, lba, buf);
         }
