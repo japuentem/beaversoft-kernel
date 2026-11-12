@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 14
+// Total de interacciones del día: 15
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -275,6 +275,25 @@ continua con el siguiente paso por importancia y al final dime que falta
   - [kernel/src/memory/heap.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/memory/heap.rs): `LinkedListAllocator::size_align` ahora devuelve `Option<(usize, usize)>` con `.ok()?`, manejando fallos de alineación en `alloc` (retornando `null_mut()`) y `dealloc` (retorno temprano seguro).
   - [kernel/src/memory/paging.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/memory/paging.rs): `init_kernel_paging` ahora devuelve `Result<u64, &'static str>` con `.ok_or(...)?` en las asignaciones de PML4, PDPT, PD y PT.
   - [kernel/src/memory/mod.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/memory/mod.rs): Se maneja explícitamente `Err(e)` de `init_kernel_paging()` reportando el error en consola y deteniendo la CPU de forma determinista (`cli; hlt`).
+- Verificación observada tras los cambios finales:
+  - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
+  - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  - `run.ps1 -TestArm64`: **`[PASS-ARM64]`** (0 warnings, `hello.elf` ejecutado desde `/disk/bin/hello.elf` en `EL0` aislado con `exit code: 0`).
+
+================================================================================
+
+## Interacción #15 [17:03:55]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el siguiente paso por importancia y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se implementó sondeo físico real en los controladores `cec.rs` y `touchscreen.rs` respaldado por escaneo multifunción en `pci.rs`:
+  - [kernel/src/drivers/pci.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/drivers/pci.rs): Se añadió `find_device_by_class(target_class, target_subclass)` con escaneo completo de funciones (`0..8` según bit multifunción del `header_type`), unificando `find_vga_device()` sobre el mismo helper.
+  - [kernel/src/drivers/cec.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/drivers/cec.rs): `HdmiCecController` ahora registra `probe_status` y ejecuta `probe_cec_hardware()`: en `x86_64` sondea `USB_MANAGER` (adaptador Pulse-Eight USB-CEC `0x2548`) y el bus PCI para controladores SMBus (`0x0C:0x05`) o Serial Bus I2C (`0x0C:0x80`); en `aarch64` reporta el estado de plataforma sin nodo MMIO CEC.
+  - [kernel/src/drivers/touchscreen.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/drivers/touchscreen.rs): `TouchscreenState` ahora registra `probe_status` y ejecuta `probe_touchscreen_hardware()`: en `x86_64` sondea PCI Input Digitizer (`0x09:0x02`), dispositivos USB HID táctiles (`0x04F3`, `0x0457`, `0x222A`, `0x0EEF`, `0x27C6`) y controladores PCI I2C (`0x0C:0x80`); en `aarch64` reporta el estado de plataforma sin digitalizador I2C/USB.
 - Verificación observada tras los cambios finales:
   - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
   - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).

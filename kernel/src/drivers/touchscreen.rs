@@ -32,6 +32,7 @@ pub struct TouchPoint {
 pub struct TouchscreenState {
     pub hw_present: bool,
     pub is_initialized: bool,
+    pub probe_status: &'static str,
     pub width: u16,
     pub height: u16,
     pub touch_count: u8,
@@ -44,6 +45,7 @@ impl TouchscreenState {
         Self {
             hw_present: false,
             is_initialized: false,
+            probe_status: "Sin sondear",
             width: 1024,
             height: 768,
             touch_count: 0,
@@ -114,10 +116,40 @@ impl TouchscreenState {
 
 pub static TOUCHSCREEN: SpinMutex<TouchscreenState> = SpinMutex::new(TouchscreenState::new());
 
+#[cfg(target_arch = "x86_64")]
+fn probe_touchscreen_hardware() -> (bool, &'static str) {
+    // 1. Sondear bus PCI por dispositivo Input Digitizer (Clase 0x09, Subclase 0x02)
+    if crate::drivers::pci::find_device_by_class(0x09, Some(0x02)).is_some() {
+        return (true, "Digitalizador táctil PCI (0x09:0x02) detectado");
+    }
+
+    // 2. Verificar dispositivos USB HID táctiles conocidos (Elan, SiS, Ilitek, eGalax, Goodix)
+    if let Some(usb) = crate::drivers::usb::USB_MANAGER.try_lock() {
+        const TOUCH_VENDORS: [u16; 5] = [0x04F3, 0x0457, 0x222A, 0x0EEF, 0x27C6];
+        if usb.devices.iter().any(|d| TOUCH_VENDORS.contains(&d.vendor_id)) {
+            return (true, "Panel táctil USB HID detectado");
+        }
+    }
+
+    // 3. Sondear controlador I2C/Serial IO PCI (0x0C:0x80) para paneles GT911 / FT6236
+    if crate::drivers::pci::find_device_by_class(0x0C, Some(0x80)).is_some() {
+        return (false, "Controlador I2C PCI sondeado: sin panel GT911/FT6236");
+    }
+
+    (false, "Buses PCI/USB sondeados: sin digitalizador táctil")
+}
+
+#[cfg(target_arch = "aarch64")]
+fn probe_touchscreen_hardware() -> (bool, &'static str) {
+    (false, "Plataforma virt ARM64 sin digitalizador I2C/USB")
+}
+
 /// Inicializa el subsistema del panel táctil capacitivo
 pub fn init_touchscreen() {
+    let (present, status) = probe_touchscreen_hardware();
     let mut ts = TOUCHSCREEN.lock();
-    ts.hw_present = false;
+    ts.hw_present = present;
+    ts.probe_status = status;
     ts.calibrate(1024, 768);
 }
 

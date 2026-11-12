@@ -70,6 +70,7 @@ impl CecFrame {
 pub struct HdmiCecController {
     pub hw_present: bool,
     pub is_online: bool,
+    pub probe_status: &'static str,
     pub logical_address: u8,
     pub tv_is_on: bool,
     pub last_button_pressed: Option<u8>,
@@ -82,6 +83,7 @@ impl HdmiCecController {
         Self {
             hw_present: false,
             is_online: false,
+            probe_status: "Sin sondear",
             logical_address: CEC_ADDR_PLAYBACK1,
             tv_is_on: false,
             last_button_pressed: None,
@@ -90,10 +92,12 @@ impl HdmiCecController {
         }
     }
 
-    /// Inicializa el decodificador de tramas HDMI-CEC y sondea presencia física
+    /// Inicializa el decodificador de tramas HDMI-CEC y sondea presencia física real en buses PCI/USB
     pub fn init(&mut self) {
-        self.hw_present = false; // En QEMU estándar x86_64/virt no hay puente CEC físico por defecto
-        self.is_online = self.hw_present;
+        let (present, status) = probe_cec_hardware();
+        self.hw_present = present;
+        self.is_online = present;
+        self.probe_status = status;
         self.logical_address = CEC_ADDR_PLAYBACK1;
         self.tv_is_on = false;
     }
@@ -132,6 +136,31 @@ impl HdmiCecController {
 }
 
 pub static HDMI_CEC: SpinMutex<HdmiCecController> = SpinMutex::new(HdmiCecController::new());
+
+#[cfg(target_arch = "x86_64")]
+fn probe_cec_hardware() -> (bool, &'static str) {
+    // 1. Verificar puente físico USB-CEC (Pulse-Eight VID 0x2548) si USB está enumerado
+    if let Some(usb) = crate::drivers::usb::USB_MANAGER.try_lock() {
+        if usb.devices.iter().any(|d| d.vendor_id == 0x2548) {
+            return (true, "Adaptador USB-CEC (0x2548) detectado");
+        }
+    }
+
+    // 2. Sondear bus PCI para controladores SMBus (0x0C:0x05) o Serial Bus I2C (0x0C:0x80)
+    if crate::drivers::pci::find_device_by_class(0x0C, Some(0x05)).is_some()
+        || crate::drivers::pci::find_device_by_class(0x0C, Some(0x80)).is_some()
+    {
+        // Controlador SMBus/I2C presente; sin dispositivo CEC esclavo dedicado en bus DDC
+        return (false, "Bus PCI SMBus/I2C sondeado: sin puente HDMI-CEC");
+    }
+
+    (false, "Bus PCI/USB sondeado: sin controlador SMBus/I2C ni USB-CEC")
+}
+
+#[cfg(target_arch = "aarch64")]
+fn probe_cec_hardware() -> (bool, &'static str) {
+    (false, "Plataforma virt ARM64 sin nodo MMIO HDMI-CEC")
+}
 
 /// Inicializa el subsistema HDMI-CEC
 pub fn init_cec() {
