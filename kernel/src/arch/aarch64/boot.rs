@@ -160,30 +160,69 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
     Pl011Uart::write_str("[ARM64] Habilitando interrupciones de hardware en CPU...\n");
     cpu::enable_interrupts();
 
-    // 8.1 Verificación real de aislamiento EL0 + pasarela SVC #0
-    const EL0_ARENA_BASE: u64 = 0x4200_0000;
-    const EL0_STACK_TOP: u64 = 0x421F_F000;
-    super::mmu::Aarch64Mmu::allow_el0_2mb_block(EL0_ARENA_BASE);
-    let el0_prog: [u32; 6] = [
-        0xD280_04E8, // mov x8, #39 (SYS_GETPID)
-        0xD400_0001, // svc #0
-        0x9100_A800, // add x0, x0, #42
-        0xD280_0788, // mov x8, #60 (SYS_EXIT)
-        0xD400_0001, // svc #0
-        0x1400_0000, // b .
-    ];
-    // SAFETY: `EL0_ARENA_BASE` (0x4200_0000) está mapeado en RAM con PTE_USER, fuera de kernel y heap.
-    unsafe {
-        let dst = EL0_ARENA_BASE as *mut u32;
-        for (i, &insn) in el0_prog.iter().enumerate() {
-            core::ptr::write_volatile(dst.add(i), insn);
+    // 8.1 Verificación real de cargador ELF64 AArch64 (EM_AARCH64=0xB7) + aislamiento EL0 + SVC #0
+    {
+        use crate::elf::{Elf64Header, Elf64ProgramHeader, ElfBinary, ELF_CLASS_64, ELF_DATA_2LSB, ELF_MACHINE_AARCH64, ELF_MAGIC, ELF_TYPE_EXEC, PF_R, PF_X, PT_LOAD};
+        const EL0_ENTRY: u64 = 0x4200_0000;
+        let code_insns: [u32; 6] = [
+            0xD280_04E8, // mov x8, #39 (SYS_GETPID)
+            0xD400_0001, // svc #0
+            0x9100_A800, // add x0, x0, #42
+            0xD280_0788, // mov x8, #60 (SYS_EXIT)
+            0xD400_0001, // svc #0
+            0x1400_0000, // b .
+        ];
+        let hdr_sz = core::mem::size_of::<Elf64Header>();
+        let ph_sz = core::mem::size_of::<Elf64ProgramHeader>();
+        let code_offset = (hdr_sz + ph_sz) as u64;
+        let code_bytes_len = (code_insns.len() * 4) as u64;
+
+        let mut ident = [0u8; 16];
+        ident[0..4].copy_from_slice(&ELF_MAGIC);
+        ident[4] = ELF_CLASS_64;
+        ident[5] = ELF_DATA_2LSB;
+        ident[6] = 1; // EV_CURRENT
+
+        let hdr = Elf64Header {
+            ident,
+            elf_type: ELF_TYPE_EXEC,
+            machine: ELF_MACHINE_AARCH64,
+            version: 1,
+            entry: EL0_ENTRY,
+            ph_offset: hdr_sz as u64,
+            sh_offset: 0,
+            flags: 0,
+            header_size: hdr_sz as u16,
+            ph_entry_size: ph_sz as u16,
+            ph_num: 1,
+            sh_entry_size: 0,
+            sh_num: 0,
+            sh_str_index: 0,
+        };
+        let ph = Elf64ProgramHeader {
+            seg_type: PT_LOAD,
+            flags: PF_R | PF_X,
+            offset: code_offset,
+            vaddr: EL0_ENTRY,
+            paddr: EL0_ENTRY,
+            file_size: code_bytes_len,
+            mem_size: code_bytes_len,
+            align: 0x1000,
+        };
+
+        let mut elf_buf = alloc::vec::Vec::with_capacity(code_offset as usize + code_bytes_len as usize);
+        // SAFETY: `Elf64Header` y `Elf64ProgramHeader` son structs `#[repr(C, packed)]` POD.
+        unsafe {
+            elf_buf.extend_from_slice(core::slice::from_raw_parts(&hdr as *const _ as *const u8, hdr_sz));
+            elf_buf.extend_from_slice(core::slice::from_raw_parts(&ph as *const _ as *const u8, ph_sz));
         }
-        core::arch::asm!("dsb ish", "ic iallu", "dsb ish", "isb", options(nomem, nostack));
-        let exit_code = crate::syscall::enter_ring3_with_return(EL0_ARENA_BASE, EL0_STACK_TOP);
-        if exit_code == 42 {
-            Pl011Uart::write_str("[ARM64] Prueba EL0 + SVC #0 (SYS_GETPID + SYS_EXIT=42) [OK]\n");
-        } else {
-            Pl011Uart::write_str("[ARM64] Prueba EL0 retorno codigo inesperado.\n");
+        for &insn in &code_insns {
+            elf_buf.extend_from_slice(&insn.to_le_bytes());
+        }
+
+        match ElfBinary::parse(&elf_buf).and_then(|bin| bin.load_and_execute()) {
+            Ok(()) => Pl011Uart::write_str("[ARM64] Prueba ELF64 + EL0 + SVC #0 [OK]\n"),
+            Err(e) => crate::kprintln!("[ARM64] Error ejecutando ELF64 en EL0: {}", e),
         }
     }
 

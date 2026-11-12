@@ -21,6 +21,7 @@ pub const ELF_CLASS_64: u8 = 2;
 pub const ELF_DATA_2LSB: u8 = 1; // Little-Endian
 pub const ELF_TYPE_EXEC: u16 = 2; // Archivo ejecutable
 pub const ELF_MACHINE_X86_64: u16 = 0x3E; // AMD x86-64
+pub const ELF_MACHINE_AARCH64: u16 = 0xB7; // ARM64 (AArch64)
 
 pub const PT_LOAD: u32 = 1; // Segmento cargable en memoria
 
@@ -86,8 +87,13 @@ impl<'a> ElfBinary<'a> {
         if header.ident[5] != ELF_DATA_2LSB {
             return Err("Orden de bytes no soportado (Se requiere Little-Endian)");
         }
+        #[cfg(target_arch = "x86_64")]
         if header.machine != ELF_MACHINE_X86_64 {
             return Err("Arquitectura incompatible (Se requiere x86_64)");
+        }
+        #[cfg(target_arch = "aarch64")]
+        if header.machine != ELF_MACHINE_AARCH64 {
+            return Err("Arquitectura incompatible (Se requiere AArch64)");
         }
 
         Ok(Self { data, header })
@@ -113,7 +119,67 @@ impl<'a> ElfBinary<'a> {
         list
     }
 
+    /// Carga el binario en un espacio de direcciones aislado y salta a espacio de usuario (Ring 3 / EL0)
+    #[cfg(target_arch = "aarch64")]
+    pub fn load_and_execute(&self) -> Result<(), &'static str> {
+        const EL0_ARENA_BASE: u64 = 0x4200_0000;
+        const EL0_ARENA_LIMIT: u64 = 0x421E_0000;
+        const EL0_STACK_TOP: u64 = 0x421F_F000;
+
+        let entry = self.header.entry;
+        if entry < EL0_ARENA_BASE || entry >= EL0_ARENA_LIMIT {
+            return Err("Punto de entrada ELF64 fuera de la arena EL0 (0x4200_0000..0x421E_0000)");
+        }
+
+        crate::arch::aarch64::mmu::Aarch64Mmu::allow_el0_2mb_block(EL0_ARENA_BASE);
+        let segments = self.program_headers();
+        let mut loaded_count = 0usize;
+
+        for ph in segments {
+            let seg_type = ph.seg_type;
+            let file_offset = ph.offset as usize;
+            let file_sz = ph.file_size as usize;
+            let mem_sz = ph.mem_size as usize;
+            let vaddr = ph.vaddr;
+
+            if seg_type == PT_LOAD {
+                if vaddr < EL0_ARENA_BASE || vaddr.saturating_add(mem_sz as u64) > EL0_ARENA_LIMIT {
+                    return Err("Segmento PT_LOAD fuera de la arena EL0");
+                }
+                if file_offset + file_sz > self.data.len() {
+                    return Err("El segmento excede los limites del archivo ELF");
+                }
+                // SAFETY: El rango [vaddr .. vaddr + mem_sz] está dentro de la arena EL0 mapeada con PTE_USER.
+                unsafe {
+                    let dst = vaddr as *mut u8;
+                    if mem_sz > file_sz {
+                        core::ptr::write_bytes(dst.add(file_sz), 0, mem_sz - file_sz);
+                    }
+                    core::ptr::copy_nonoverlapping(self.data.as_ptr().add(file_offset), dst, file_sz);
+                }
+                loaded_count += 1;
+            }
+        }
+
+        if loaded_count == 0 {
+            return Err("El archivo ELF no contiene segmentos cargables PT_LOAD");
+        }
+
+        // SAFETY: Sincronizar I-Cache tras copiar código ejecutable ELF64 en arena EL0 y saltar a EL0.
+        unsafe {
+            core::arch::asm!("dsb ish", "ic iallu", "dsb ish", "isb", options(nomem, nostack));
+            let exit_code = crate::syscall::enter_ring3_with_return(entry, EL0_STACK_TOP);
+            kprint_color!(
+                VgaColor::LightGreen, VgaColor::Black,
+                "[ELF-ARM64] Binario ELF64 finalizado en EL0 (exit code: {}).\n",
+                exit_code
+            );
+        }
+        Ok(())
+    }
+
     /// Carga el binario en un espacio de direcciones `CR3` dedicado y salta a Ring 3
+    #[cfg(target_arch = "x86_64")]
     pub fn load_and_execute(&self) -> Result<(), &'static str> {
         let entry_rip = self.header.entry;
         let ph_count = self.header.ph_num;
