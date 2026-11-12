@@ -394,18 +394,51 @@ pub fn render_desktop() {
     Canvas::fill_rect(0, 0, width, 28, topbar_bg);
     Canvas::draw_line_h(0, 27, width, topbar_border);
 
-    // Módulo 1: Botón Lanzador de Aplicaciones Beaver OS (con flecha desplegable)
+    // Módulo 1: Botón Lanzador de Aplicaciones Beaver OS (Color Especial Distintivo)
     let drawer_open = BEAVER_DRAWER.lock().is_open;
-    let launcher_w = 126;
-    let launcher_bg = if drawer_open { 0x1E293B } else { if theme == DesktopTheme::DarkCosmic { 0x111827 } else { 0xF1F5F9 } };
-    let launcher_border = if drawer_open { Color::BEAVER_AMBER } else { pill_border };
+    let launcher_w = 132;
+    let (launcher_bg, launcher_border, l_badge_bg, l_badge_txt, l_title_col, l_arrow_col) = match (theme, drawer_open) {
+        (DesktopTheme::DarkCosmic, false) => (
+            0x2D1703,                 // Fondo ámbar bronce profundo especial
+            Color::BEAVER_AMBER,      // Borde dorado brillante
+            Color::BEAVER_AMBER,      // Fondo del emblema B
+            Color::WHITE,             // Texto B
+            0xFDE68A,                 // Texto dorado "Beaver OS"
+            Color::BEAVER_AMBER,      // Flecha v
+        ),
+        (DesktopTheme::DarkCosmic, true) => (
+            Color::BEAVER_AMBER,      // Fondo ámbar activo radiante
+            0xFBBF24,                 // Borde ámbar brillante
+            0x0F172A,                 // Fondo del emblema B oscuro
+            Color::WHITE,             // Texto B
+            0x0F172A,                 // Texto obsidiana de alto contraste
+            0x0F172A,                 // Flecha ^
+        ),
+        (DesktopTheme::LightNordic, false) => (
+            0xFEF3C7,                 // Fondo crema dorado suave
+            0xF59E0B,                 // Borde ámbar
+            Color::BEAVER_AMBER,      // Badge ámbar
+            Color::WHITE,             // Texto B
+            0x78350F,                 // Texto marrón/dorado elegante
+            0xD97706,                 // Flecha
+        ),
+        (DesktopTheme::LightNordic, true) => (
+            Color::BEAVER_AMBER,
+            0xD97706,
+            0x451A03,
+            Color::WHITE,
+            Color::WHITE,
+            Color::WHITE,
+        ),
+    };
+
     Canvas::fill_rounded_rect(6, 3, launcher_w, 22, 6, launcher_bg);
     Canvas::draw_rounded_rect(6, 3, launcher_w, 22, 6, launcher_border);
 
-    Canvas::fill_rounded_rect(10, 4, 20, 20, 5, Color::BEAVER_AMBER);
-    Canvas::draw_string(16, 6, "B", Color::WHITE, None);
-    Canvas::draw_string_prop(36, 6, "Beaver OS", topbar_text, None);
-    Canvas::draw_string_prop(112, 6, if drawer_open { "^" } else { "v" }, Color::BEAVER_AMBER, None);
+    Canvas::fill_rounded_rect(10, 4, 20, 20, 5, l_badge_bg);
+    Canvas::draw_string(16, 6, "B", l_badge_txt, None);
+    Canvas::draw_string_prop(35, 6, "Beaver OS", l_title_col, None);
+    Canvas::draw_string_prop(118, 6, if drawer_open { "^" } else { "v" }, l_arrow_col, None);
 
     // Separador vertical (Pipe |) entre Lanzador y Pestañas de Ventanas
     let sep1_x = 6 + launcher_w + 8;
@@ -1459,7 +1492,7 @@ fn handle_desktop_click(mx: usize, my: usize) {
     // 1. Clic en la barra superior (Top Bar Modular Deskbar)
     if my <= 28 {
         // Clic en botón [B] Beaver OS (Lanzador / Drawer)
-        if mx >= 6 && mx <= 132 {
+        if mx >= 6 && mx <= 138 {
             crate::drivers::audio::click_feedback();
             let mut drw = BEAVER_DRAWER.lock();
             drw.is_open = !drw.is_open;
@@ -1469,7 +1502,7 @@ fn handle_desktop_click(mx: usize, my: usize) {
         }
 
         // Clic en Pestañas de Tareas de Ventanas (Task Tabs en Top Bar)
-        let sep1_x = 6 + 126 + 8;
+        let sep1_x = 6 + 132 + 8;
         if mx >= sep1_x + 8 {
             let open_wins: Vec<WindowId> = {
                 let mgr = WINDOW_MGR.lock();
