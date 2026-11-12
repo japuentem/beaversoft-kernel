@@ -91,8 +91,9 @@ pub struct DiskInode {
     pub gid: u32,                // Grupo GID (4 bytes)
     pub size_bytes: u32,         // Tamaño exacto en bytes (4 bytes)
     pub block_count: u16,        // Bloques asignados (2 bytes)
-    pub direct_blocks: [u32; 8], // Punteros directos a bloques LBA (32 bytes = 4 KiB)
-    pub indirect_block: u32,     // Puntero indirecto (4 bytes = 128 bloques = 64 KiB)
+    pub direct_blocks: [u32; 7], // Punteros directos a bloques LBA (28 bytes = 3.5 KiB)
+    pub indirect_block: u32,     // Puntero indirecto simple (4 bytes = 128 bloques = 64 KiB)
+    pub double_indirect: u32,    // Puntero doblemente indirecto (4 bytes = 128x128 bloques = 8 MiB)
     pub created_time: u32,       // Ticks o timestamp (4 bytes)
     pub modified_time: u32,      // Ticks o timestamp (4 bytes)
     pub reserved: [u8; 3],       // Relleno a 64 bytes exactos (3 bytes)
@@ -107,8 +108,9 @@ impl DiskInode {
             gid: 0,
             size_bytes: 0,
             block_count: 0,
-            direct_blocks: [0; 8],
+            direct_blocks: [0; 7],
             indirect_block: 0,
+            double_indirect: 0,
             created_time: 0,
             modified_time: 0,
             reserved: [0; 3],
@@ -430,7 +432,7 @@ impl BeaverFs {
                     None => {
                         let mut root_mut = root_inode;
                         let mut allocated = None;
-                        for b in 0..8 {
+                        for b in 0..7 {
                             if root_mut.direct_blocks[b] == 0 {
                                 let new_block = self.alloc_data_block()?;
                                 let empty_entry = DirEntry::empty();
@@ -472,8 +474,9 @@ impl BeaverFs {
 
         // 2. Asignar bloques de datos para el contenido del archivo
         let needed_blocks = if content.is_empty() { 1 } else { (content.len() + SECTOR_SIZE - 1) / SECTOR_SIZE };
-        if needed_blocks > 8 + 128 {
-            return Err("Archivo excede el tamaño máximo soportado en BeaverFS (68 KiB)");
+        const MAX_FILE_BLOCKS: usize = 7 + 128 + (128 * 128); // 16,519 bloques = 8.06 MiB
+        if needed_blocks > MAX_FILE_BLOCKS {
+            return Err("Archivo excede el tamaño máximo soportado en BeaverFS (8 MiB)");
         }
 
         let mut data_blocks = Vec::with_capacity(needed_blocks);
@@ -496,18 +499,20 @@ impl BeaverFs {
         file_inode.size_bytes = content.len() as u32;
         file_inode.block_count = needed_blocks as u16;
 
-        let direct_count = needed_blocks.min(8);
+        let direct_count = needed_blocks.min(7);
         for i in 0..direct_count {
             file_inode.direct_blocks[i] = data_blocks[i];
         }
-        for i in direct_count..8 {
+        for i in direct_count..7 {
             file_inode.direct_blocks[i] = 0;
         }
 
-        if needed_blocks > 8 {
+        // Bloque indirecto simple (hasta 128 bloques = 64 KiB)
+        if needed_blocks > 7 {
             let ind_blk = self.alloc_data_block()?;
             let mut ind_buf = [0_u8; SECTOR_SIZE];
-            for (idx, &blk) in data_blocks[8..].iter().enumerate() {
+            let ind_limit = needed_blocks.min(7 + 128);
+            for (idx, &blk) in data_blocks[7..ind_limit].iter().enumerate() {
                 let bytes = blk.to_le_bytes();
                 ind_buf[idx * 4..idx * 4 + 4].copy_from_slice(&bytes);
             }
@@ -515,6 +520,31 @@ impl BeaverFs {
             file_inode.indirect_block = ind_blk;
         } else {
             file_inode.indirect_block = 0;
+        }
+
+        // Bloque doblemente indirecto (hasta 128 x 128 bloques = 8 MiB)
+        if needed_blocks > 7 + 128 {
+            let dind_blk = self.alloc_data_block()?;
+            let mut dind_buf = [0_u8; SECTOR_SIZE];
+            let remaining = &data_blocks[7 + 128..];
+            let num_tables = (remaining.len() + 127) / 128;
+
+            for t in 0..num_tables {
+                let table_blk = self.alloc_data_block()?;
+                dind_buf[t * 4..t * 4 + 4].copy_from_slice(&table_blk.to_le_bytes());
+
+                let start_idx = t * 128;
+                let end_idx = (start_idx + 128).min(remaining.len());
+                let mut table_buf = [0_u8; SECTOR_SIZE];
+                for (entry, &blk) in remaining[start_idx..end_idx].iter().enumerate() {
+                    table_buf[entry * 4..entry * 4 + 4].copy_from_slice(&blk.to_le_bytes());
+                }
+                BLOCK_DEVICE.lock().write_sector(BEAVERFS_START_LBA + table_blk, &table_buf)?;
+            }
+            BLOCK_DEVICE.lock().write_sector(BEAVERFS_START_LBA + dind_blk, &dind_buf)?;
+            file_inode.double_indirect = dind_blk;
+        } else {
+            file_inode.double_indirect = 0;
         }
 
         self.write_inode(inode_idx, &file_inode)?;
@@ -546,6 +576,25 @@ impl BeaverFs {
                 let blk = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 if blk != 0 && blk != 0xFFFF_FFFF {
                     blocks.push(blk);
+                }
+            }
+        }
+
+        let dind_blk = inode.double_indirect;
+        if dind_blk != 0 {
+            let mut dind_buf = [0_u8; SECTOR_SIZE];
+            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + dind_blk, &mut dind_buf)?;
+            for chunk in dind_buf.chunks_exact(4) {
+                let table_blk = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if table_blk != 0 && table_blk != 0xFFFF_FFFF {
+                    let mut table_buf = [0_u8; SECTOR_SIZE];
+                    BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + table_blk, &mut table_buf)?;
+                    for entry_chunk in table_buf.chunks_exact(4) {
+                        let blk = u32::from_le_bytes([entry_chunk[0], entry_chunk[1], entry_chunk[2], entry_chunk[3]]);
+                        if blk != 0 && blk != 0xFFFF_FFFF {
+                            blocks.push(blk);
+                        }
+                    }
                 }
             }
         }
@@ -628,6 +677,27 @@ impl BeaverFs {
                 let blk = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 if blk != 0 && blk != 0xFFFF_FFFF {
                     blocks_to_free.push(blk);
+                }
+            }
+        }
+
+        let dind_blk = inode.double_indirect;
+        if dind_blk != 0 {
+            blocks_to_free.push(dind_blk);
+            let mut dind_buf = [0_u8; SECTOR_SIZE];
+            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + dind_blk, &mut dind_buf)?;
+            for chunk in dind_buf.chunks_exact(4) {
+                let table_blk = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if table_blk != 0 && table_blk != 0xFFFF_FFFF {
+                    blocks_to_free.push(table_blk);
+                    let mut table_buf = [0_u8; SECTOR_SIZE];
+                    BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + table_blk, &mut table_buf)?;
+                    for entry_chunk in table_buf.chunks_exact(4) {
+                        let blk = u32::from_le_bytes([entry_chunk[0], entry_chunk[1], entry_chunk[2], entry_chunk[3]]);
+                        if blk != 0 && blk != 0xFFFF_FFFF {
+                            blocks_to_free.push(blk);
+                        }
+                    }
                 }
             }
         }

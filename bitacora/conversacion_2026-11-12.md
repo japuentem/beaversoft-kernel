@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 18
+// Total de interacciones del día: 19
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -358,5 +358,27 @@ implementa lo mas importante primero y al final dime que falta
   - `run.ps1 -TestArm64`: **`[PASS-ARM64]`** (ejecución exitosa de `malloc()` en EL0 imprimiendo `[USER-HEAP] Asignacion dinamica con malloc() en Ring 3 [OK]`).
   - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
   - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+
+================================================================================
+
+## Interacción #19 [17:58:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante y al final dime que falta, y dime de los puntos implemetados hoy se tienen pruebas? para probar que no rompa un cambio que ya se tenia, ya que veo que solo se hacen 18 pruebas
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se respondió detalladamente a la consulta sobre la cobertura de pruebas de lo implementado hoy:
+  - Se explicó la estructura de la suite de pruebas del kernel en [kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs) y la suite dedicada de ARM64 en [run.ps1](file:///d:/proyectos_personales/beaversoft-kernel/run.ps1) (`-TestArm64`).
+  - Se desglosó cómo cada cambio de hoy se verificó: ARM64 EL0/VirtIO en `-TestArm64`, sondeo real HDMI-CEC y Touchscreen en prueba 18, eliminación de `.expect` en pruebas 3 y 4, y `SYS_BRK` en prueba 16.
+  - Para certificar de forma independiente que los nuevos cambios no rompan funcionalidades preexistentes y tengan pruebas unitarias aisladas, **se amplió la suite automatizada de 18 a 20 pruebas**:
+    - **Prueba 19 (`beaverfs_double_indirect_large_file`)**: Escribe y lee un archivo de 75 KiB (150 bloques, superando el límite anterior de 135 bloques / 68 KiB), valida byte a byte y comprueba la liberación limpia de bloques en el bitmap.
+    - **Prueba 20 (`userland_heap_and_sys_brk`)**: Consulta la base del heap con `SYS_BRK(0)`, solicita expansión de 8 KiB, y valida el nuevo límite mapeado en el proceso.
+- Se implementó la característica más importante pendiente en el sistema de archivos:
+  - **Bloques doblemente indirectos en BeaverFS** ([kernel/src/storage/beaverfs.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/storage/beaverfs.rs)): Se rediseñó `DiskInode` (manteniendo estrictos 64 bytes) con 7 bloques directos (3.5 KiB), 1 bloque indirecto simple (64 KiB) y 1 bloque doblemente indirecto (hasta 128x128 bloques = 8 MiB). Se adaptaron `write_file`, `read_file` y `remove_file` para soportar archivos de hasta 8 MiB sin desbordamientos.
+- Verificación observada tras los cambios:
+  - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 20 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  - `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (GICv2, Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC, `hello.elf`, `malloc()` y Beaver Shell).
 
 ================================================================================

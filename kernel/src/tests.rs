@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 18] = [
+    let tests: [(&str, fn()); 20] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -83,6 +83,8 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("posix_syscalls_and_beaver_libc",          test_posix_syscalls_and_beaver_libc),
         ("device_profile_detection",                test_device_profile_detection),
         ("cec_and_touchscreen_safe_dispatch",       test_cec_and_touchscreen_safe_dispatch),
+        ("beaverfs_double_indirect_large_file",     test_beaverfs_double_indirect_large_file),
+        ("userland_heap_and_sys_brk",               test_userland_heap_and_sys_brk),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -578,6 +580,55 @@ pub fn test_cec_and_touchscreen_safe_dispatch() {
     inject_touch_event(512, 384, false);
     let after_touch = TOUCHSCREEN.lock().total_events;
     assert_eq!(after_touch, before_touch + 2, "inject_touch_event debe procesar Tap+Release sin deadlock");
+}
+
+/// Test 19: Verificación de bloques doblemente indirectos y soporte de archivos multi-bloque en BeaverFS (> 68 KiB)
+pub fn test_beaverfs_double_indirect_large_file() {
+    use crate::storage::beaverfs::BEAVER_FS;
+    use alloc::vec::Vec;
+
+    // Archivo de 75 KiB (150 bloques x 512 bytes), superando el umbral de 135 bloques (7 directos + 128 indirectos)
+    let file_size = 75 * 1024;
+    let mut large_buf = Vec::with_capacity(file_size);
+    for i in 0..file_size {
+        large_buf.push((i & 0xFF) as u8);
+    }
+
+    let file_name = "test_large.bin";
+    {
+        let mut fs = BEAVER_FS.lock();
+        let write_res = fs.write_file(file_name, &large_buf, 0, 0);
+        assert!(write_res.is_ok(), "Escritura de archivo de 75 KiB con bloques doblemente indirectos debe ser exitosa");
+    }
+
+    {
+        let fs = BEAVER_FS.lock();
+        let read_data = fs.read_file(file_name).expect("Lectura de archivo grande con bloques doblemente indirectos");
+        assert_eq!(read_data.len(), file_size, "El tamaño leído debe ser exactamente 75 KiB");
+        assert_eq!(&read_data[..], &large_buf[..], "La integridad byte a byte del archivo doblemente indirecto debe ser perfecta");
+    }
+
+    {
+        let mut fs = BEAVER_FS.lock();
+        let del_res = fs.remove_file(file_name);
+        assert!(del_res.is_ok(), "Eliminación y liberación de bloques directos/indirectos/dobles debe ser limpia");
+    }
+}
+
+/// Test 20: Verificación de llamada SYS_BRK y expansión dinámica de Heap de usuario en Ring 3
+pub fn test_userland_heap_and_sys_brk() {
+    use crate::syscall::*;
+
+    let initial_brk = syscall_dispatch(SYS_BRK, 0, 0, 0);
+    assert!(initial_brk >= USER_HEAP_START, "SYS_BRK(0) debe devolver la base del heap de usuario");
+
+    // Solicitar expansión de 2 páginas (8 KiB)
+    let requested = initial_brk + 8192;
+    let new_brk = syscall_dispatch(SYS_BRK, requested, 0, 0);
+    assert_eq!(new_brk, requested, "SYS_BRK debe asignar y mapear las páginas solicitadas en el proceso");
+
+    let current = syscall_dispatch(SYS_BRK, 0, 0, 0);
+    assert_eq!(current, requested, "Consulta de program break debe reflejar el nuevo límite");
 }
 
 #[cfg(test)]
