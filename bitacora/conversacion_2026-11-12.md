@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 15
+// Total de interacciones del día: 16
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -298,5 +298,23 @@ continua con el siguiente paso por importancia y al final dime que falta
   - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
   - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
   - `run.ps1 -TestArm64`: **`[PASS-ARM64]`** (0 warnings, `hello.elf` ejecutado desde `/disk/bin/hello.elf` en `EL0` aislado con `exit code: 0`).
+
+================================================================================
+
+## Interacción #16 [17:10:00]
+
+### 👤 Pregunta / Petición del Usuario:
+en el menu no veo una opcion para hasr shutdown o reboot (restart)
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se añadieron las opciones **Reiniciar (Reboot)** y **Apagar (Shutdown)** al menú desplegable del lanzador (`draw_beaver_drawer`) en [kernel/src/gui/desktop.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/desktop.rs):
+  - Se amplió el contenedor del menú de `362 px` a `418 px` de alto (14 entradas en total).
+  - Entrada 12 (`R` naranja): **Reiniciar (Reboot)** — invoca `crate::shell::cmd_sys::hardware_reboot()`.
+  - Entrada 13 (`O` rojo): **Apagar (Shutdown)** — invoca `crate::shell::cmd_sys::hardware_shutdown()`.
+- Verificación observada tras los cambios finales:
+  - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
+  - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
 
 ================================================================================

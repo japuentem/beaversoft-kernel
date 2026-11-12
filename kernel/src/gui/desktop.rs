@@ -44,7 +44,7 @@ pub static BEAVER_DRAWER: SpinMutex<BeaverDrawerState> = SpinMutex::new(BeaverDr
 
 /// Dibuja el Cajón de Aplicaciones Flotante (Beaver App Drawer) desplegado desde la Deskbar
 pub fn draw_beaver_drawer(theme: DesktopTheme) {
-    let (dx, dy, dw, dh) = (6, 30, 230, 362);
+    let (dx, dy, dw, dh) = (6, 30, 230, 418);
     let bg_color = match theme {
         DesktopTheme::DarkCosmic => 0x0B1222,
         DesktopTheme::LightNordic => 0xF8FAFC,
@@ -68,7 +68,7 @@ pub fn draw_beaver_drawer(theme: DesktopTheme) {
     Canvas::fill_rounded_rect(dx + 2, dy + 2, dw - 4, 26, 8, if theme == DesktopTheme::DarkCosmic { 0x1E293B } else { 0xE2E8F0 });
     Canvas::draw_string_prop(dx + 12, dy + 8, "LANZADOR BEAVER OS", Color::BEAVER_AMBER, None);
 
-    let items: [(&str, &str, u32); 12] = [
+    let items: [(&str, &str, u32); 14] = [
         (">_", "Terminal Shell", 0x22C55E),
         ("F",  "BeaverFiles VFS", 0xF59E0B),
         ("=",  "Calculadora", 0x6366F1),
@@ -81,6 +81,8 @@ pub fn draw_beaver_drawer(theme: DesktopTheme) {
         ("H",  "TV / Smart Hub", Color::BEAVER_ACCENT_CYAN),
         ("i",  "Acerca de Beaver", Color::BEAVER_PURPLE),
         ("X",  "Salir a TTY1", Color::BEAVER_RUBY),
+        ("R",  "Reiniciar (Reboot)", 0xF97316),
+        ("O",  "Apagar (Shutdown)", 0xDC2626),
     ];
 
     for (i, (badge, label, badge_col)) in items.iter().enumerate() {
@@ -1403,10 +1405,10 @@ fn handle_desktop_click(mx: usize, my: usize) {
     {
         let drawer_open = BEAVER_DRAWER.lock().is_open;
         if drawer_open {
-            let (dx, dy, dw, dh) = (6, 30, 230, 362);
+            let (dx, dy, dw, dh) = (6, 30, 230, 418);
             if mx >= dx && mx <= dx + dw && my >= dy && my <= dy + dh {
                 if my >= dy + 32 {
-                    let item_idx = ((my - (dy + 32)) / 27).min(11);
+                    let item_idx = ((my - (dy + 32)) / 27).min(13);
                     crate::drivers::audio::click_feedback();
                     BEAVER_DRAWER.lock().is_open = false;
                     match item_idx {
@@ -1476,6 +1478,14 @@ fn handle_desktop_click(mx: usize, my: usize) {
                                 render_fullscreen_cli();
                                 return;
                             }
+                        }
+                        12 => {
+                            #[cfg(target_arch = "x86_64")]
+                            crate::shell::cmd_sys::hardware_reboot();
+                        }
+                        13 => {
+                            #[cfg(target_arch = "x86_64")]
+                            crate::shell::cmd_sys::hardware_shutdown();
                         }
                         _ => {}
                     }
