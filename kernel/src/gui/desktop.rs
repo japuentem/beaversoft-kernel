@@ -315,7 +315,7 @@ pub fn render_desktop() {
     // 1.1 Cuadrícula de Iconos de Escritorio (Desktop Grid Icons estilo Retro-Moderno)
     draw_desktop_grid_icons(theme);
 
-    // 2. Barra Superior de Menú y Estado (Top Bar Estilo Lord OS / macOS con Identidad Beaver)
+    // 2. Barra Superior Modular de Menú y Estado (Top Bar con Marcos y Divisores de Sección)
     let topbar_bg = match theme {
         DesktopTheme::DarkCosmic => Color::BEAVER_OBSIDIAN,
         DesktopTheme::LightNordic => 0xE2E8F0,
@@ -328,30 +328,49 @@ pub fn render_desktop() {
         DesktopTheme::DarkCosmic => Color::WHITE,
         DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
     };
+    let pill_bg = if theme == DesktopTheme::DarkCosmic { Color::SLATE_800 } else { Color::WHITE };
+    let pill_border = if theme == DesktopTheme::DarkCosmic { Color::SLATE_700 } else { Color::BEAVER_BORDER_LIGHT };
 
     Canvas::fill_rect(0, 0, width, 28, topbar_bg);
     Canvas::draw_line_h(0, 27, width, topbar_border);
 
-    // Logotipo e Identidad Beaver
-    Canvas::fill_rounded_rect(8, 4, 20, 20, 5, Color::BEAVER_AMBER);
-    Canvas::draw_string(14, 6, "B", Color::WHITE, None);
-    Canvas::draw_string_prop(34, 6, "Beaver OS", topbar_text, None);
-
-    // Menús principales del sistema operativo con tipografía proporcional
+    // Módulo 1: Marco de Identidad Beaver y Menús Principales
     let mut menu_x = 110;
     menu_x += Canvas::draw_string_prop(menu_x, 6, "Archivo", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
     menu_x += Canvas::draw_string_prop(menu_x, 6, "Red Mesh", Color::BEAVER_TEAL_BRIGHT, None) + 16;
     menu_x += Canvas::draw_string_prop(menu_x, 6, "Sincronizacion", Color::BEAVER_AMBER, None) + 16;
     menu_x += Canvas::draw_string_prop(menu_x, 6, "Audio", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
-    Canvas::draw_string_prop(menu_x, 6, "Ayuda", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None);
+    let menu_end_x = menu_x + Canvas::draw_string_prop(menu_x, 6, "Ayuda", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None);
 
-    // Botón Buscador / Spotlight en Top Bar
-    let pill_bg = if theme == DesktopTheme::DarkCosmic { Color::SLATE_800 } else { Color::WHITE };
-    Canvas::fill_rounded_rect(390, 4, 85, 20, 10, pill_bg);
-    draw_sidebar_icon(396, 6, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
-    Canvas::draw_string_prop(416, 6, "Buscar", topbar_text, None);
+    // Marco exterior para Módulo 1
+    let mod1_w = menu_end_x + 10;
+    Canvas::fill_rounded_rect(4, 3, mod1_w, 22, 6, if theme == DesktopTheme::DarkCosmic { 0x111827 } else { 0xF1F5F9 });
+    Canvas::draw_rounded_rect(4, 3, mod1_w, 22, 6, pill_border);
 
-    // Pildora de estado de la malla: nodos descubiertos por BeaverSync (Fase 5)
+    // Redibujar contenido de Módulo 1 dentro de su marco
+    Canvas::fill_rounded_rect(8, 4, 20, 20, 5, Color::BEAVER_AMBER);
+    Canvas::draw_string(14, 6, "B", Color::WHITE, None);
+    Canvas::draw_string_prop(34, 6, "Beaver OS", topbar_text, None);
+    let mut mx_draw = 110;
+    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Archivo", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
+    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Red Mesh", Color::BEAVER_TEAL_BRIGHT, None) + 16;
+    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Sincronizacion", Color::BEAVER_AMBER, None) + 16;
+    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Audio", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
+    Canvas::draw_string_prop(mx_draw, 6, "Ayuda", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None);
+
+    // Separador vertical (Pipe |) entre Módulo 1 y Módulo 2
+    let sep1_x = mod1_w + 12;
+    Canvas::draw_line_v(sep1_x, 5, 18, Color::SLATE_600);
+
+    // Módulo 2: Buscador / Spotlight Enmarcado
+    let spot_x = sep1_x + 12;
+    let spot_w = 82;
+    Canvas::fill_rounded_rect(spot_x, 4, spot_w, 20, 10, pill_bg);
+    Canvas::draw_rounded_rect(spot_x, 4, spot_w, 20, 10, pill_border);
+    draw_sidebar_icon(spot_x + 6, 6, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
+    Canvas::draw_string_prop(spot_x + 24, 6, "Buscar", topbar_text, None);
+
+    // Módulo 2.5: Píldora de estado de la malla BeaverMesh enmarcada
     let online_nodes = {
         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
         mgr.online_count()
@@ -362,43 +381,68 @@ pub fn render_desktop() {
         alloc::string::String::from("Mesh: sin nodos")
     };
     let mesh_w = Canvas::string_width_prop(&mesh_pill_text);
-    let mesh_pill_w = (mesh_w + 22).min(210);
-    Canvas::fill_rounded_rect(485, 4, mesh_pill_w, 20, 10, pill_bg);
+    let mesh_pill_w = (mesh_w + 22).min(180);
+    let mesh_x = spot_x + spot_w + 8;
+    Canvas::fill_rounded_rect(mesh_x, 4, mesh_pill_w, 20, 10, pill_bg);
+    Canvas::draw_rounded_rect(mesh_x, 4, mesh_pill_w, 20, 10, pill_border);
     let dot_color = if online_nodes > 0 { Color::BEAVER_TEAL_BRIGHT } else { Color::SLATE_400 };
-    Canvas::fill_circle(495, 14, 3, dot_color);
-    Canvas::draw_string_prop(503, 6, &mesh_pill_text, topbar_text, None);
+    Canvas::fill_circle(mesh_x + 10, 14, 3, dot_color);
+    Canvas::draw_string_prop(mesh_x + 18, 6, &mesh_pill_text, topbar_text, None);
 
-    // Botón Conmutador de Tema (Día / Noche)
-    Canvas::fill_rounded_rect(704, 4, 85, 20, 10, pill_bg);
-    match theme {
-        DesktopTheme::DarkCosmic => {
-            Canvas::fill_circle(717, 14, 6, Color::BEAVER_AMBER);
-            Canvas::fill_circle(720, 12, 5, pill_bg);
-            Canvas::draw_string_prop(730, 6, "Noche", Color::BEAVER_AMBER, None);
-        }
-        DesktopTheme::LightNordic => {
-            Canvas::fill_circle(717, 14, 4, Color::BEAVER_AMBER);
-            Canvas::draw_line_h(709, 14, 3, Color::BEAVER_AMBER);
-            Canvas::draw_line_h(723, 14, 3, Color::BEAVER_AMBER);
-            Canvas::draw_line_v(717, 6, 3, Color::BEAVER_AMBER);
-            Canvas::draw_line_v(717, 20, 3, Color::BEAVER_AMBER);
-            Canvas::draw_string_prop(730, 6, "Dia", Color::BEAVER_AMBER_DARK, None);
-        }
+    // Separador vertical (Pipe |) después del bloque central
+    let sep2_x = mesh_x + mesh_pill_w + 12;
+    if sep2_x < width.saturating_sub(320) {
+        Canvas::draw_line_v(sep2_x, 5, 18, Color::SLATE_600);
     }
 
-    // Botón Conmutador a Smart Hub (TV & Kiosco Domótico)
-    Canvas::fill_rounded_rect(795, 4, 76, 20, 10, pill_bg);
-    Canvas::fill_rounded_rect(801, 8, 12, 12, 3, Color::BEAVER_ACCENT_CYAN);
-    Canvas::draw_string_prop(818, 6, "TV/Hub", Color::BEAVER_ACCENT_CYAN, None);
-
-    // Fecha y hora LOCAL (RTC en UTC + desfase TZ_OFFSET_HOURS), usuario y tiempo de actividad
+    // Módulo 4: Fecha y hora LOCAL (RTC), usuario y tiempo de actividad en Cápsula Enmarcada
     let rtc = crate::drivers::timer::local_datetime();
     let (_, _, curr_user) = SCHEDULER.lock().current_credentials();
     let uptime = get_uptime_seconds();
     let status_right = format!("{:02}/{:02} {:02}:{:02} | {} ({}s)", rtc.day, rtc.month, rtc.hour, rtc.minute, curr_user, uptime);
     let right_w = Canvas::string_width_prop(&status_right);
-    let right_x = width.saturating_sub(right_w + 14);
-    Canvas::draw_string_prop(right_x, 6, &status_right, topbar_text, None);
+    let right_pill_w = right_w + 18;
+    let right_pill_x = width.saturating_sub(right_pill_w + 8);
+
+    // Módulo 3: Botones Conmutadores a la derecha (calculados respecto a right_pill_x para evitar solapamientos)
+    let tv_w = 76;
+    let tv_x = right_pill_x.saturating_sub(tv_w + 8);
+    let theme_w = 78;
+    let theme_x = tv_x.saturating_sub(theme_w + 8);
+
+    // Separador vertical (Pipe |) antes de los conmutadores de control
+    let sep3_x = theme_x.saturating_sub(10);
+    Canvas::draw_line_v(sep3_x, 5, 18, Color::SLATE_600);
+
+    // Botón Conmutador de Tema (Día / Noche) Enmarcado
+    Canvas::fill_rounded_rect(theme_x, 4, theme_w, 20, 10, pill_bg);
+    Canvas::draw_rounded_rect(theme_x, 4, theme_w, 20, 10, pill_border);
+    match theme {
+        DesktopTheme::DarkCosmic => {
+            Canvas::fill_circle(theme_x + 12, 14, 6, Color::BEAVER_AMBER);
+            Canvas::fill_circle(theme_x + 15, 12, 5, pill_bg);
+            Canvas::draw_string_prop(theme_x + 24, 6, "Noche", Color::BEAVER_AMBER, None);
+        }
+        DesktopTheme::LightNordic => {
+            Canvas::fill_circle(theme_x + 12, 14, 4, Color::BEAVER_AMBER);
+            Canvas::draw_line_h(theme_x + 4, 14, 3, Color::BEAVER_AMBER);
+            Canvas::draw_line_h(theme_x + 18, 14, 3, Color::BEAVER_AMBER);
+            Canvas::draw_line_v(theme_x + 12, 6, 3, Color::BEAVER_AMBER);
+            Canvas::draw_line_v(theme_x + 12, 20, 3, Color::BEAVER_AMBER);
+            Canvas::draw_string_prop(theme_x + 24, 6, "Dia", Color::BEAVER_AMBER_DARK, None);
+        }
+    }
+
+    // Botón Conmutador a Smart Hub (TV & Kiosco Domótico) Enmarcado
+    Canvas::fill_rounded_rect(tv_x, 4, tv_w, 20, 10, pill_bg);
+    Canvas::draw_rounded_rect(tv_x, 4, tv_w, 20, 10, Color::BEAVER_ACCENT_CYAN);
+    Canvas::fill_rounded_rect(tv_x + 6, 8, 12, 12, 3, Color::BEAVER_ACCENT_CYAN);
+    Canvas::draw_string_prop(tv_x + 22, 6, "TV/Hub", Color::BEAVER_ACCENT_CYAN, None);
+
+    // Cápsula de Telemetría Hardware Enmarcada
+    Canvas::fill_rounded_rect(right_pill_x, 4, right_pill_w, 20, 10, pill_bg);
+    Canvas::draw_rounded_rect(right_pill_x, 4, right_pill_w, 20, 10, pill_border);
+    Canvas::draw_string_prop(right_pill_x + 9, 6, &status_right, topbar_text, None);
 
     // 3. Renderizado de Ventanas según Z-Order dinámico en BACKBUFFER
     let z_order = WINDOW_MGR.lock().z_order;
@@ -1288,9 +1332,11 @@ fn handle_desktop_click(mx: usize, my: usize) {
         }
     }
 
-    // 1. Clic en la barra superior (Top Bar)
+    // 1. Clic en la barra superior (Top Bar Modular Enmarcada)
     if my <= 28 {
-        if mx >= 390 && mx <= 475 {
+        // Módulo 2: Buscador Spotlight (sep1_x + 12 .. + 82)
+        // mod1_w está alrededor de ~380 px
+        if mx >= 380 && mx <= 480 {
             crate::drivers::audio::click_feedback();
             let mut spot = SPOTLIGHT.lock();
             spot.is_open = !spot.is_open;
@@ -1299,7 +1345,20 @@ fn handle_desktop_click(mx: usize, my: usize) {
             return;
         }
 
-        if mx >= 704 && mx <= 790 {
+        // Módulos de la derecha calculados dinámicamente según la resolución
+        let rtc = crate::drivers::timer::local_datetime();
+        let (_, _, curr_user) = SCHEDULER.lock().current_credentials();
+        let uptime = get_uptime_seconds();
+        let status_right = format!("{:02}/{:02} {:02}:{:02} | {} ({}s)", rtc.day, rtc.month, rtc.hour, rtc.minute, curr_user, uptime);
+        let right_w = Canvas::string_width_prop(&status_right);
+        let right_pill_w = right_w + 18;
+        let right_pill_x = scr_w.saturating_sub(right_pill_w + 8);
+        let tv_w = 76;
+        let tv_x = right_pill_x.saturating_sub(tv_w + 8);
+        let theme_w = 78;
+        let theme_x = tv_x.saturating_sub(theme_w + 8);
+
+        if mx >= theme_x && mx <= theme_x + theme_w {
             crate::drivers::audio::click_feedback();
             {
                 let mut th = CURRENT_THEME.lock();
@@ -1312,7 +1371,7 @@ fn handle_desktop_click(mx: usize, my: usize) {
             return;
         }
 
-        if mx >= 795 && mx <= 875 {
+        if mx >= tv_x && mx <= tv_x + tv_w {
             crate::drivers::audio::click_feedback();
             crate::gui::smart_hub::enter_smart_hub();
             return;
