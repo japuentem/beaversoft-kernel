@@ -31,6 +31,246 @@ pub enum DesktopTheme {
 
 pub static CURRENT_THEME: SpinMutex<DesktopTheme> = SpinMutex::new(DesktopTheme::DarkCosmic);
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Cuadrícula de Iconos de Escritorio (Desktop Grid Icons estilo Retro-Moderno)
+// ──────────────────────────────────────────────────────────────────────────────
+pub const GRID_START_X: usize = 28;
+pub const GRID_START_Y: usize = 42;
+pub const GRID_CELL_W: usize = 84;
+pub const GRID_CELL_H: usize = 88;
+pub const ICON_BOX_SIZE: usize = 48;
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum DesktopIconAction {
+    OpenWindow(WindowId),
+    OpenSmartHub,
+    OpenTrash,
+    ToggleTheme,
+    OpenBio,
+    OpenCalculator,
+}
+
+pub struct DesktopGridIcon {
+    pub col: usize,
+    pub row: usize,
+    pub label: &'static str,
+    pub icon_kind: SidebarIconKind,
+    pub bg_color: u32,
+    pub border_color: u32,
+    pub action: DesktopIconAction,
+}
+
+pub const DESKTOP_GRID_ICONS: [DesktopGridIcon; 12] = [
+    // Columna 0: Herramientas del Sistema y Productividad
+    DesktopGridIcon {
+        col: 0,
+        row: 0,
+        label: "Terminal",
+        icon_kind: SidebarIconKind::Terminal,
+        bg_color: 0x0F172A,
+        border_color: 0x22C55E, // Acento verde fósforo estilo KneOS / hacker
+        action: DesktopIconAction::OpenWindow(WindowId::Terminal),
+    },
+    DesktopGridIcon {
+        col: 0,
+        row: 1,
+        label: "Archivos",
+        icon_kind: SidebarIconKind::Home,
+        bg_color: 0x1E293B,
+        border_color: 0xF59E0B, // Ámbar dorado Beaver
+        action: DesktopIconAction::OpenWindow(WindowId::Files),
+    },
+    DesktopGridIcon {
+        col: 0,
+        row: 2,
+        label: "BeaverNote",
+        icon_kind: SidebarIconKind::Settings,
+        bg_color: 0x1E293B,
+        border_color: 0xD97706,
+        action: DesktopIconAction::OpenWindow(WindowId::Note),
+    },
+    DesktopGridIcon {
+        col: 0,
+        row: 3,
+        label: "Monitor",
+        icon_kind: SidebarIconKind::Settings,
+        bg_color: 0x064E3B,
+        border_color: 0x10B981, // Esmeralda vivo
+        action: DesktopIconAction::OpenWindow(WindowId::Monitor),
+    },
+    DesktopGridIcon {
+        col: 0,
+        row: 4,
+        label: "Calculadora",
+        icon_kind: SidebarIconKind::Settings,
+        bg_color: 0x1E1B4B,
+        border_color: 0x818CF8,
+        action: DesktopIconAction::OpenCalculator,
+    },
+    DesktopGridIcon {
+        col: 0,
+        row: 5,
+        label: "Papelera",
+        icon_kind: SidebarIconKind::Trash,
+        bg_color: 0x1E293B,
+        border_color: 0x64748B,
+        action: DesktopIconAction::OpenTrash,
+    },
+
+    // Columna 1: Malla, Multimedia y Conectividad
+    DesktopGridIcon {
+        col: 1,
+        row: 0,
+        label: "BeaverMesh",
+        icon_kind: SidebarIconKind::Mesh,
+        bg_color: 0x172554,
+        border_color: 0x38BDF8, // Cyan brillante
+        action: DesktopIconAction::OpenWindow(WindowId::Sync),
+    },
+    DesktopGridIcon {
+        col: 1,
+        row: 1,
+        label: "Audio",
+        icon_kind: SidebarIconKind::Music,
+        bg_color: 0x3B0764,
+        border_color: 0xC084FC, // Púrpura eléctrico
+        action: DesktopIconAction::OpenWindow(WindowId::Player),
+    },
+    DesktopGridIcon {
+        col: 1,
+        row: 2,
+        label: "Fotos",
+        icon_kind: SidebarIconKind::Photos,
+        bg_color: 0x082F49,
+        border_color: 0x38BDF8,
+        action: DesktopIconAction::OpenWindow(WindowId::Photos),
+    },
+    DesktopGridIcon {
+        col: 1,
+        row: 3,
+        label: "Calendario",
+        icon_kind: SidebarIconKind::Calendar,
+        bg_color: 0x450A0A,
+        border_color: 0xF87171, // Rubí
+        action: DesktopIconAction::OpenWindow(WindowId::Calendar),
+    },
+    DesktopGridIcon {
+        col: 1,
+        row: 4,
+        label: "TV / Hub",
+        icon_kind: SidebarIconKind::Home,
+        bg_color: 0x164E63,
+        border_color: 0x22D3EE, // Turquesa
+        action: DesktopIconAction::OpenSmartHub,
+    },
+    DesktopGridIcon {
+        col: 1,
+        row: 5,
+        label: "BeaverInfo",
+        icon_kind: SidebarIconKind::Settings,
+        bg_color: 0x2E1065,
+        border_color: 0xE879F9,
+        action: DesktopIconAction::OpenBio,
+    },
+];
+
+pub fn draw_desktop_grid_icons(theme: DesktopTheme) {
+    let text_color = match theme {
+        DesktopTheme::DarkCosmic => Color::WHITE,
+        DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
+    };
+    let shadow_color = match theme {
+        DesktopTheme::DarkCosmic => 0x020617,
+        DesktopTheme::LightNordic => 0xCBD5E1,
+    };
+
+    for item in &DESKTOP_GRID_ICONS {
+        let cell_x = GRID_START_X + item.col * GRID_CELL_W;
+        let cell_y = GRID_START_Y + item.row * GRID_CELL_H;
+        let icon_x = cell_x + (GRID_CELL_W.saturating_sub(ICON_BOX_SIZE)) / 2;
+        let icon_y = cell_y + 2;
+
+        // 1. Sombra sutil del tile
+        Canvas::fill_rounded_rect(icon_x + 2, icon_y + 3, ICON_BOX_SIZE, ICON_BOX_SIZE, 12, shadow_color);
+
+        // 2. Fondo y borde redondeado
+        let tile_bg = match theme {
+            DesktopTheme::DarkCosmic => item.bg_color,
+            DesktopTheme::LightNordic => 0xF1F5F9,
+        };
+        Canvas::fill_rounded_rect(icon_x, icon_y, ICON_BOX_SIZE, ICON_BOX_SIZE, 12, tile_bg);
+        Canvas::draw_rounded_rect(icon_x, icon_y, ICON_BOX_SIZE, ICON_BOX_SIZE, 12, item.border_color);
+
+        // 3. Resplandor superior de relieve
+        Canvas::draw_line_h(icon_x + 8, icon_y + 2, ICON_BOX_SIZE.saturating_sub(16), 0x94A3B8);
+
+        // 4. Glifo interior personalizado
+        match item.action {
+            DesktopIconAction::OpenWindow(WindowId::Terminal) => {
+                Canvas::fill_rounded_rect(icon_x + 6, icon_y + 8, 36, 28, 4, 0x020617);
+                Canvas::draw_rounded_rect(icon_x + 6, icon_y + 8, 36, 28, 4, 0x22C55E);
+                Canvas::draw_string(icon_x + 11, icon_y + 14, ">_", 0x22C55E, None);
+            }
+            DesktopIconAction::OpenWindow(WindowId::Files) => {
+                draw_beaver_folder(icon_x + 8, icon_y + 12, 32, 24, false);
+            }
+            DesktopIconAction::OpenWindow(WindowId::Note) => {
+                draw_file_document(icon_x + 12, icon_y + 8, 24, 30, "TXT", Color::BEAVER_AMBER);
+            }
+            DesktopIconAction::OpenWindow(WindowId::Monitor) => {
+                Canvas::fill_rounded_rect(icon_x + 6, icon_y + 8, 36, 28, 4, 0x022C22);
+                Canvas::draw_rounded_rect(icon_x + 6, icon_y + 8, 36, 28, 4, 0x10B981);
+                Canvas::draw_line_h(icon_x + 8, icon_y + 22, 6, 0x10B981);
+                Canvas::put_pixel(icon_x + 14, icon_y + 20, 0x10B981);
+                Canvas::put_pixel(icon_x + 16, icon_y + 14, 0x34D399);
+                Canvas::put_pixel(icon_x + 18, icon_y + 28, 0x34D399);
+                Canvas::put_pixel(icon_x + 20, icon_y + 18, 0x10B981);
+                Canvas::draw_line_h(icon_x + 22, icon_y + 22, 18, 0x10B981);
+            }
+            DesktopIconAction::OpenCalculator => {
+                Canvas::fill_rounded_rect(icon_x + 10, icon_y + 7, 28, 33, 4, 0x312E81);
+                Canvas::fill_rect(icon_x + 13, icon_y + 11, 22, 6, 0xC7D2FE);
+                Canvas::fill_rect(icon_x + 14, icon_y + 20, 4, 4, Color::WHITE);
+                Canvas::fill_rect(icon_x + 21, icon_y + 20, 4, 4, Color::WHITE);
+                Canvas::fill_rect(icon_x + 28, icon_y + 20, 4, 4, Color::BEAVER_AMBER);
+                Canvas::fill_rect(icon_x + 14, icon_y + 27, 4, 4, Color::WHITE);
+                Canvas::fill_rect(icon_x + 21, icon_y + 27, 4, 4, Color::WHITE);
+                Canvas::fill_rect(icon_x + 28, icon_y + 27, 4, 4, Color::BEAVER_TEAL_BRIGHT);
+            }
+            DesktopIconAction::OpenSmartHub => {
+                Canvas::fill_rounded_rect(icon_x + 6, icon_y + 9, 36, 24, 3, 0x0E7490);
+                Canvas::draw_rounded_rect(icon_x + 6, icon_y + 9, 36, 24, 3, Color::WHITE);
+                Canvas::draw_line_h(icon_x + 18, icon_y + 35, 12, 0x22D3EE);
+                Canvas::draw_line_v(icon_x + 24, icon_y + 33, 3, 0x22D3EE);
+            }
+            DesktopIconAction::OpenBio => {
+                draw_file_document(icon_x + 12, icon_y + 8, 24, 30, "CV", Color::BEAVER_PURPLE);
+            }
+            _ => {
+                draw_sidebar_icon(icon_x + 16, icon_y + 16, item.icon_kind, Color::WHITE);
+            }
+        }
+
+        // 5. Etiqueta de texto debajo del icono
+        let tw = Canvas::string_width_prop(item.label);
+        let tx = cell_x + (GRID_CELL_W.saturating_sub(tw)) / 2;
+        let ty = cell_y + 54;
+        Canvas::draw_string_prop(tx + 1, ty + 1, item.label, shadow_color, None);
+        Canvas::draw_string_prop(tx, ty, item.label, text_color, None);
+    }
+}
+
+pub fn hit_test_desktop_grid(mx: usize, my: usize) -> Option<DesktopIconAction> {
+    for item in &DESKTOP_GRID_ICONS {
+        let cell_x = GRID_START_X + item.col * GRID_CELL_W;
+        let cell_y = GRID_START_Y + item.row * GRID_CELL_H;
+        if mx >= cell_x && mx < cell_x + GRID_CELL_W && my >= cell_y && my < cell_y + GRID_CELL_H {
+            return Some(item.action);
+        }
+    }
+    None
+}
+
 /// Redibuja únicamente una ventana específica como región sucia (Dirty Rect)
 /// incluyendo su sombra difusa (+8px) y actualiza el sprite del cursor sin tocar el resto de la pantalla.
 pub fn render_window_dirty(win_id: WindowId) {
@@ -71,6 +311,9 @@ pub fn render_desktop() {
         DesktopTheme::DarkCosmic => Canvas::draw_cosmic_wallpaper(width, height),
         DesktopTheme::LightNordic => Canvas::draw_nordic_wallpaper(width, height),
     }
+
+    // 1.1 Cuadrícula de Iconos de Escritorio (Desktop Grid Icons estilo Retro-Moderno)
+    draw_desktop_grid_icons(theme);
 
     // 2. Barra Superior de Menú y Estado (Top Bar Estilo Lord OS / macOS con Identidad Beaver)
     let topbar_bg = match theme {
@@ -1064,6 +1307,59 @@ fn handle_desktop_click(mx: usize, my: usize) {
             crate::gui::smart_hub::enter_smart_hub();
             return;
         }
+    }
+
+    // 1.5 Clic en la cuadrícula de iconos del escritorio (Desktop Grid Icons)
+    if let Some(action) = hit_test_desktop_grid(mx, my) {
+        crate::drivers::audio::click_feedback();
+        match action {
+            DesktopIconAction::OpenWindow(win_id) => {
+                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                    mgr.unminimize_and_focus(win_id);
+                    drop(mgr);
+                    render_desktop();
+                }
+            }
+            DesktopIconAction::OpenSmartHub => {
+                crate::gui::smart_hub::enter_smart_hub();
+            }
+            DesktopIconAction::ToggleTheme => {
+                {
+                    let mut th = CURRENT_THEME.lock();
+                    *th = match *th {
+                        DesktopTheme::DarkCosmic => DesktopTheme::LightNordic,
+                        DesktopTheme::LightNordic => DesktopTheme::DarkCosmic,
+                    };
+                }
+                render_desktop();
+            }
+            DesktopIconAction::OpenTrash => {
+                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                    mgr.unminimize_and_focus(WindowId::Files);
+                    drop(mgr);
+                    render_desktop();
+                }
+            }
+            DesktopIconAction::OpenBio => {
+                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                    mgr.unminimize_and_focus(WindowId::Note);
+                    drop(mgr);
+                    render_desktop();
+                }
+            }
+            DesktopIconAction::OpenCalculator => {
+                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                    mgr.unminimize_and_focus(WindowId::Terminal);
+                    drop(mgr);
+                    if let Some(mut state) = GUI_TERMINAL.try_lock() {
+                        state.lines.push(String::from("[CALC] Beaver Calc en Terminal activa. Escribe expresiones matematicas."));
+                        drop(state);
+                    }
+                    render_desktop();
+                }
+            }
+        }
+        return;
     }
 
     // 2. Clic en la barra Dock (Launcher inferior de 10 aplicaciones) independiente de la resolución
