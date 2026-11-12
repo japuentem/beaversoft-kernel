@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 13
+// Total de interacciones del día: 14
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -260,5 +260,24 @@ continua con el siguiente paso por importancia y al final dime que falta
   - `run.ps1 -TestArm64`: **`[PASS-ARM64]`** (0 warnings, `hello.elf` ejecutado desde `/disk/bin/hello.elf` en `EL0` aislado con `exit code: 0`).
   - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
   - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+
+================================================================================
+
+## Interacción #14 [17:00:12]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el siguiente paso por importancia y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se eliminaron los últimos `.expect(...)` en el subsistema de memoria de arranque temprano:
+  - [kernel/src/memory/heap.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/memory/heap.rs): `LinkedListAllocator::size_align` ahora devuelve `Option<(usize, usize)>` con `.ok()?`, manejando fallos de alineación en `alloc` (retornando `null_mut()`) y `dealloc` (retorno temprano seguro).
+  - [kernel/src/memory/paging.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/memory/paging.rs): `init_kernel_paging` ahora devuelve `Result<u64, &'static str>` con `.ok_or(...)?` en las asignaciones de PML4, PDPT, PD y PT.
+  - [kernel/src/memory/mod.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/memory/mod.rs): Se maneja explícitamente `Err(e)` de `init_kernel_paging()` reportando el error en consola y deteniendo la CPU de forma determinista (`cli; hlt`).
+- Verificación observada tras los cambios finales:
+  - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
+  - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  - `run.ps1 -TestArm64`: **`[PASS-ARM64]`** (0 warnings, `hello.elf` ejecutado desde `/disk/bin/hello.elf` en `EL0` aislado con `exit code: 0`).
 
 ================================================================================

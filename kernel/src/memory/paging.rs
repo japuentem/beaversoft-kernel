@@ -131,13 +131,19 @@ pub fn process_cr3_count() -> usize {
 /// Inicializa las tablas de páginas propias del kernel en páginas de 4 KiB para los primeros 64 MiB
 /// y páginas supervisoras de 2 MiB para el resto de los 4 GiB (incluyendo MMIO VBE, E1000 y APIC).
 /// Todas las entradas del kernel tienen `PAGE_USER = 0` (estrictamente Ring 0 Supervisor).
-pub fn init_kernel_paging() -> u64 {
-    let pml4_phys = FRAME_ALLOCATOR.allocate_frame().expect("[PAGING] Sin marcos para PML4 del kernel") as u64;
-    let pdpt_phys = FRAME_ALLOCATOR.allocate_frame().expect("[PAGING] Sin marcos para PDPT del kernel") as u64;
+pub fn init_kernel_paging() -> Result<u64, &'static str> {
+    let pml4_phys = FRAME_ALLOCATOR
+        .allocate_frame()
+        .ok_or("[PAGING] Sin marcos para PML4 del kernel")? as u64;
+    let pdpt_phys = FRAME_ALLOCATOR
+        .allocate_frame()
+        .ok_or("[PAGING] Sin marcos para PDPT del kernel")? as u64;
 
     let mut pd_phys = [0u64; 4];
     for i in 0..4 {
-        pd_phys[i] = FRAME_ALLOCATOR.allocate_frame().expect("[PAGING] Sin marcos para PD del kernel") as u64;
+        pd_phys[i] = FRAME_ALLOCATOR
+            .allocate_frame()
+            .ok_or("[PAGING] Sin marcos para PD del kernel")? as u64;
     }
 
     // 1. Enlazar PML4[0] -> PDPT (Supervisor: PAGE_PRESENT | PAGE_WRITABLE, sin PAGE_USER)
@@ -155,7 +161,9 @@ pub fn init_kernel_paging() -> u64 {
     // 2. Poblar los primeros 64 MiB (PD[0], entradas 0..32) con 32 tablas PT de páginas finas de 4 KiB
     let mut fine_pages = 0usize;
     for pd_idx in 0..KERNEL_FINE_PT_TABLES {
-        let pt_phys = FRAME_ALLOCATOR.allocate_frame().expect("[PAGING] Sin marcos para PT de 4 KiB") as u64;
+        let pt_phys = FRAME_ALLOCATOR
+            .allocate_frame()
+            .ok_or("[PAGING] Sin marcos para PT de 4 KiB")? as u64;
         // SAFETY: `pt_phys` y `pd_phys[0]` son marcos físicos válidos de 4 KiB pertenecientes al kernel.
         unsafe {
             let pd0 = &mut *(pd_phys[0] as *mut PageTable);
@@ -195,7 +203,7 @@ pub fn init_kernel_paging() -> u64 {
         write_cr3(pml4_phys);
     }
 
-    pml4_phys
+    Ok(pml4_phys)
 }
 
 /// Crea un nuevo espacio de direcciones aislado para un proceso de usuario (`CR3` propio).

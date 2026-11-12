@@ -118,13 +118,13 @@ impl LinkedListAllocator {
         }
     }
 
-    fn size_align(layout: Layout) -> (usize, usize) {
+    fn size_align(layout: Layout) -> Option<(usize, usize)> {
         let layout = layout
             .align_to(align_of::<ListNode>())
-            .expect("Alineación no válida")
+            .ok()?
             .pad_to_align();
         let size = layout.size().max(size_of::<ListNode>());
-        (size, layout.align())
+        Some((size, layout.align()))
     }
 }
 
@@ -207,7 +207,9 @@ impl LockedHeap {
 unsafe impl GlobalAlloc for LockedHeap {
     // SAFETY: `layout` tiene tamaño y alineación ajustados a `ListNode`, y el acceso a la lista libre está serializado por `self.0.lock()`.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let (size, align) = LinkedListAllocator::size_align(layout);
+        let Some((size, align)) = LinkedListAllocator::size_align(layout) else {
+            return null_mut();
+        };
         let mut allocator = self.0.lock();
 
         if let Some((region, alloc_start)) = allocator.find_region(size, align) {
@@ -227,7 +229,9 @@ unsafe impl GlobalAlloc for LockedHeap {
 
     // SAFETY: `ptr` y `layout` provienen de una asignación previa de este mismo `LockedHeap`, protegida por `self.0.lock()`.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let (size, _) = LinkedListAllocator::size_align(layout);
+        let Some((size, _)) = LinkedListAllocator::size_align(layout) else {
+            return;
+        };
         let mut allocator = self.0.lock();
         allocator.add_free_region(ptr as usize, size);
         allocator.allocated_bytes = allocator.allocated_bytes.saturating_sub(size);

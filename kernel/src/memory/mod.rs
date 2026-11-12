@@ -63,7 +63,16 @@ pub fn init_memory(memmap: &MemMap) {
     FRAME_ALLOCATOR.init_from_memmap(memmap);
 
     // 2.1 Construir y activar tablas de paginación propias del kernel (16,384 páginas de 4 KiB con PAGE_USER = 0)
-    let kernel_cr3 = paging::init_kernel_paging();
+    let kernel_cr3 = match paging::init_kernel_paging() {
+        Ok(cr3) => cr3,
+        Err(e) => {
+            kprint_color!(VgaColor::LightRed, VgaColor::Black, "{}\n", e);
+            loop {
+                // SAFETY: Sin tablas de paginación del kernel el arranque no puede continuar; detenemos CPU limpiamente.
+                unsafe { core::arch::asm!("cli", "hlt"); }
+            }
+        }
+    };
 
     // 3. Imprimir estado de memoria (sin f32, solo KiB y MiB enteros)
     let k_size_kib  = k_size / 1024;
