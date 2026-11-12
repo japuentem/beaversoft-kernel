@@ -12,6 +12,7 @@ pub mod timer;
 pub mod mmu;
 pub mod exceptions;
 pub mod dtb;
+pub mod virtio_mmio;
 pub mod boot;
 
 pub use cpu::*;

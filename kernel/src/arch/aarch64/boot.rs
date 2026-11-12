@@ -114,6 +114,27 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
     crate::fs::init_vfs();
     Pl011Uart::write_str("[ARM64] Heap (4 MiB), FrameAllocator y VFS operativos [OK]\n");
 
+    // 7.1 Sondeo real de bus VirtIO MMIO (VirtIO-blk / VirtIO-net)
+    let vio = super::virtio_mmio::probe_and_init_virtio();
+    if vio.blk_present {
+        let mut sec0 = [0u8; 512];
+        if super::virtio_mmio::read_sector(0, &mut sec0).is_ok() {
+            crate::kprintln!(
+                "[ARM64] VirtIO-blk v{} operativo en {:#x} ({} MiB, sector 0 leido) [OK]",
+                vio.blk_version,
+                vio.blk_base,
+                (vio.blk_sectors * 512) / (1024 * 1024)
+            );
+        } else {
+            crate::kprintln!("[ARM64] VirtIO-blk detectado en {:#x} pero fallo lectura LBA 0.", vio.blk_base);
+        }
+    } else {
+        Pl011Uart::write_str("[ARM64] Sin disco VirtIO-blk MMIO conectado (solo RAM/VFS).\n");
+    }
+    if vio.net_present {
+        crate::kprintln!("[ARM64] Controlador VirtIO-net MMIO detectado en {:#x} [OK]", vio.net_base);
+    }
+
     // 8. Habilitar Interrupciones en el Núcleo (DAIFCLR #2)
     Pl011Uart::write_str("[ARM64] Habilitando interrupciones de hardware en CPU...\n");
     cpu::enable_interrupts();

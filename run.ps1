@@ -63,14 +63,21 @@ if ($TestArm64) {
     if (Test-Path $ArmLog) { Remove-Item $ArmLog -Force }
     if (Test-Path $ArmErr) { Remove-Item $ArmErr -Force }
 
-    Write-Host "[TEST-ARM64] Iniciando QEMU virt (cortex-a72) para verificar MMU, Heap, VFS, EL0+SVC y Shell..." -ForegroundColor Cyan
-    $p = Start-Process -FilePath "C:\Program Files\qemu\qemu-system-aarch64.exe" -ArgumentList "-M","virt","-cpu","cortex-a72","-m","256M","-nographic","-kernel",$ArmBin -RedirectStandardOutput $ArmLog -RedirectStandardError $ArmErr -PassThru
+    $ArmDisk = "target\disk_arm64.img"
+    if (-not (Test-Path $ArmDisk)) {
+        $fs = [System.IO.File]::Create($ArmDisk)
+        $fs.SetLength(10 * 1024 * 1024)
+        $fs.Close()
+    }
+
+    Write-Host "[TEST-ARM64] Iniciando QEMU virt (cortex-a72 + virtio-blk) para verificar MMU, Heap, VFS, VirtIO-blk, EL0+SVC y Shell..." -ForegroundColor Cyan
+    $p = Start-Process -FilePath "C:\Program Files\qemu\qemu-system-aarch64.exe" -ArgumentList "-M","virt","-cpu","cortex-a72","-m","256M","-nographic","-drive","file=$ArmDisk,if=none,format=raw,id=hd0","-device","virtio-blk-device,drive=hd0","-kernel",$ArmBin -RedirectStandardOutput $ArmLog -RedirectStandardError $ArmErr -PassThru
     $ok = $false
     for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Milliseconds 500
         if (Test-Path $ArmLog) {
             $txt = Get-Content $ArmLog -Raw -ErrorAction SilentlyContinue
-            if ($txt -match "Prueba EL0 \+ SVC #0.*\[OK\]" -and $txt -match "root@beaver:/#") {
+            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "Prueba EL0 \+ SVC #0.*\[OK\]" -and $txt -match "root@beaver:/#") {
                 $ok = $true
                 break
             }
@@ -79,10 +86,10 @@ if ($TestArm64) {
     if (-not $p.HasExited) { $p.Kill() }
     Get-Content $ArmLog -ErrorAction SilentlyContinue | Select-Object -Last 20
     if ($ok) {
-        Write-Host "[PASS-ARM64] Arranque ARM64 completo: GICv2, Timer, MMU, Heap, VFS, EL0+SVC y Beaver Shell [OK]." -ForegroundColor Green
+        Write-Host "[PASS-ARM64] Arranque ARM64 completo: GICv2, Timer, MMU, Heap, VFS, VirtIO-blk, EL0+SVC y Beaver Shell [OK]." -ForegroundColor Green
         exit 0
     } else {
-        Write-Error "[FAIL-ARM64] No se detectó inicialización completa ARM64 (MMU / EL0+SVC / Shell)."
+        Write-Error "[FAIL-ARM64] No se detectó inicialización completa ARM64 (MMU / VirtIO-blk / EL0+SVC / Shell)."
         exit 1
     }
 }

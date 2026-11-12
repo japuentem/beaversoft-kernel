@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 6
+// Total de interacciones del día: 7
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -135,5 +135,23 @@ Se implementó el aislamiento real en espacio de usuario **EL0** y la pasarela d
 Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
 
 ================================================================================
+
+## Interacción #7 [16:26:30]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el paso que consideres necesario y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementó el descubrimiento real de bus **VirtIO MMIO** y el controlador nativo **VirtIO-blk** para **ARM64 (`aarch64`)**:
+- `kernel/src/arch/aarch64/virtio_mmio.rs`: sondeo de los 32 slots VirtIO MMIO (`0x0A00_0000..0x0A00_3E00`) detectando dispositivos `VirtIO-blk` (`DeviceID=2`) y `VirtIO-net` (`DeviceID=1`), inicialización de VirtQueue 0 compatible con VirtIO v1 (legacy) y v2 (modern), lectura de capacidad real y lectura síncrona de sectores de 512 bytes (`read_sector(lba, buf)`).
+- `kernel/src/arch/aarch64/boot.rs` y `mod.rs`: sondeo real de VirtIO MMIO y lectura verificada del sector 0 en el arranque ARM64.
+- `run.ps1`: `-TestArm64` ahora adjunta un disco real (`target\disk_arm64.img`) como `virtio-blk-device` y valida `[ARM64] VirtIO-blk v1 operativo en 0xa003e00 (10 MiB, sector 0 leido) [OK]`.
+
+Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
+
+================================================================================
+
 
 
