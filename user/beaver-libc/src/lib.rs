@@ -29,7 +29,7 @@ pub unsafe fn syscall0(nr: u64) -> u64 {
     #[cfg(target_arch = "x86_64")]
     asm!("syscall", inout("rax") nr => ret, out("rcx") _, out("r11") _, options(nostack));
     #[cfg(target_arch = "aarch64")]
-    asm!("svc #0", inout("x8") nr => ret, options(nostack));
+    asm!("svc #0", in("x8") nr, lateout("x0") ret, options(nostack));
     ret
 }
 
@@ -39,7 +39,7 @@ pub unsafe fn syscall1(nr: u64, a0: u64) -> u64 {
     #[cfg(target_arch = "x86_64")]
     asm!("syscall", inout("rax") nr => ret, in("rdi") a0, out("rcx") _, out("r11") _, options(nostack));
     #[cfg(target_arch = "aarch64")]
-    asm!("svc #0", inout("x8") nr => ret, in("x0") a0, options(nostack));
+    asm!("svc #0", in("x8") nr, inout("x0") a0 => ret, options(nostack));
     ret
 }
 
@@ -49,7 +49,7 @@ pub unsafe fn syscall2(nr: u64, a0: u64, a1: u64) -> u64 {
     #[cfg(target_arch = "x86_64")]
     asm!("syscall", inout("rax") nr => ret, in("rdi") a0, in("rsi") a1, out("rcx") _, out("r11") _, options(nostack));
     #[cfg(target_arch = "aarch64")]
-    asm!("svc #0", inout("x8") nr => ret, in("x0") a0, in("x1") a1, options(nostack));
+    asm!("svc #0", in("x8") nr, inout("x0") a0 => ret, in("x1") a1, options(nostack));
     ret
 }
 
@@ -59,7 +59,7 @@ pub unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> u64 {
     #[cfg(target_arch = "x86_64")]
     asm!("syscall", inout("rax") nr => ret, in("rdi") a0, in("rsi") a1, in("rdx") a2, out("rcx") _, out("r11") _, options(nostack));
     #[cfg(target_arch = "aarch64")]
-    asm!("svc #0", inout("x8") nr => ret, in("x0") a0, in("x1") a1, in("x2") a2, options(nostack));
+    asm!("svc #0", in("x8") nr, inout("x0") a0 => ret, in("x1") a1, in("x2") a2, options(nostack));
     ret
 }
 

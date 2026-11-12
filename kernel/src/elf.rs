@@ -9,10 +9,16 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use crate::memory::frame_allocator::{FRAME_ALLOCATOR, PAGE_SIZE};
+#[cfg(target_arch = "x86_64")]
 use crate::memory::paging::{self, USER_ELF_VADDR, USER_STACK_PAGES, USER_STACK_VADDR};
+#[cfg(target_arch = "aarch64")]
+use crate::memory::paging::{USER_ELF_VADDR, USER_STACK_PAGES};
+#[cfg(target_arch = "x86_64")]
 use crate::task::scheduler::SCHEDULER;
 use crate::vga::VgaColor;
-use crate::{kprintln, kprint_color};
+#[cfg(target_arch = "x86_64")]
+use crate::kprintln;
+use crate::kprint_color;
 
 /// Número mágico de cabecera ELF: 0x7F, 'E', 'L', 'F'
 pub const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];

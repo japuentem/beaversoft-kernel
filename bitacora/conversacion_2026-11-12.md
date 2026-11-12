@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 11
+// Total de interacciones del día: 12
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -226,3 +226,22 @@ Se implementó el **aislamiento real por proceso (`TTBR0_EL1` dedicado con tabla
 
 
 
+
+## Interacción #12 [16:51:35]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el siguiente paso por importancia y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se corrigió la ABI de `svc #0` en [user/beaver-libc/src/lib.rs](file:///d:/proyectos_personales/beaversoft-kernel/user/beaver-libc/src/lib.rs) para `aarch64` (`syscall0`..`syscall3`): el número de syscall entra por `x8` y el valor de retorno se lee desde `x0` (`lateout("x0") ret` / `inout("x0") a0 => ret`), alineándolo con el despachador `svc_el0_handler` del kernel.
+- Se creó el script de enlazado [user/user_aarch64.ld](file:///d:/proyectos_personales/beaversoft-kernel/user/user_aarch64.ld) con punto de entrada `_start` en `0x60000000` (alineación de página 4 KiB) para binarios EL0 aislados bajo `TTBR0_EL1`.
+- Se verificó la compilación en `aarch64-unknown-none` de los binarios de espacio de usuario `beaver-hello`, `beaver-sh` y `beaver-bench` mediante `cargo rustc --release --target aarch64-unknown-none -p <crate> -- -C link-arg=-Tuser/user_aarch64.ld` sin errores ni advertencias.
+- Se limpiaron los 3 warnings de imports no usados en [kernel/src/elf.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/elf.rs) al compilar para `aarch64` mediante `#[cfg(target_arch = "x86_64")]` / `#[cfg(target_arch = "aarch64")]`.
+- Verificación ejecutada tras los cambios finales:
+  - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: OK.
+  - `run.ps1 -TestArm64`: `[PASS-ARM64]` (GICv2, Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC exit 42 y Beaver Shell).
+  - `run.ps1 -Test`: `[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente` (`[PASS] QEMU finalizo con codigo 33`).
+
+================================================================================
