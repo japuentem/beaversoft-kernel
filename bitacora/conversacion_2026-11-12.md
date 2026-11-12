@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 8
+// Total de interacciones del día: 9
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -170,6 +170,23 @@ Se completó la escritura real de sectores en **VirtIO-blk** y se conectó como 
 Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
 
 ================================================================================
+
+## Interacción #9 [16:35:30]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el siguiente paso por importancia y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementó el controlador nativo **VirtIO-net MMIO** (TX/RX) para **ARM64 (`aarch64`)** y su integración en la pila de red real del kernel (`drivers/net.rs`):
+- `kernel/src/arch/aarch64/virtio_mmio.rs`: inicialización de colas RX (16 buffers de 1536 bytes) y TX para `DeviceID=1` compatible con VirtIO v1/v2, lectura de MAC real desde Config Space (`0x100..0x105`), y funciones `net_send` y `net_poll_rx`.
+- `kernel/src/drivers/net.rs`: se unificó el envío en `transmit_raw_frame` (E1000 en `x86_64` o VirtIO-net en `aarch64`) y se añadió sondeo `virtio_mmio::net_poll_rx` dentro de `net_poll_rx()`.
+- `kernel/src/arch/aarch64/boot.rs`: registra MAC/IP en `NET_INTERFACE`, emite anuncio real `BeaverMesh` al arrancar y sondea `net_poll_rx()` en el bucle principal.
+- `run.ps1`: `-TestArm64` ahora adjunta `-netdev user,id=net0 -device virtio-net-device,netdev=net0` y verifica `VirtIO-net v1 operativo ... [OK]`.
+
+================================================================================
+
 
 
 

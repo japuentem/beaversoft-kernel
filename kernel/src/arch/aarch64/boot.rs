@@ -137,7 +137,23 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
         Pl011Uart::write_str("[ARM64] Sin disco VirtIO-blk MMIO conectado (solo RAM/VFS).\n");
     }
     if vio.net_present {
-        crate::kprintln!("[ARM64] Controlador VirtIO-net MMIO detectado en {:#x} [OK]", vio.net_base);
+        {
+            let mut net = crate::drivers::net::NET_INTERFACE.lock();
+            net.card_detected = true;
+            net.card_name = "VirtIO-net MMIO (ARM64)";
+            net.mmio_base = vio.net_base;
+            net.mac_address = vio.net_mac;
+            net.ip_address = crate::drivers::net::Ipv4Addr::new(10, 0, 2, 15);
+            net.gateway = crate::drivers::net::Ipv4Addr::new(10, 0, 2, 2);
+        }
+        crate::kprintln!(
+            "[ARM64] VirtIO-net v{} operativo en {:#x} (MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}) [OK]",
+            vio.net_version,
+            vio.net_base,
+            vio.net_mac[0], vio.net_mac[1], vio.net_mac[2],
+            vio.net_mac[3], vio.net_mac[4], vio.net_mac[5]
+        );
+        crate::drivers::mesh::send_mesh_announce_now();
     }
 
     // 8. Habilitar Interrupciones en el Núcleo (DAIFCLR #2)
@@ -175,8 +191,9 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
 
     crate::shell::SHELL.lock().prompt();
 
-    // 9. Bucle interactivo UART PL011 + ahorro determinista WFI
+    // 9. Bucle interactivo UART PL011 + red VirtIO-net + ahorro determinista WFI
     loop {
+        crate::drivers::net::net_poll_rx();
         while let Some(byte) = Pl011Uart::read_byte() {
             let ch = if byte == b'\r' { '\n' } else { byte as char };
             crate::shell::SHELL.lock().handle_char(ch);

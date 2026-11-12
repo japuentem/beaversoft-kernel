@@ -70,14 +70,14 @@ if ($TestArm64) {
         $fs.Close()
     }
 
-    Write-Host "[TEST-ARM64] Iniciando QEMU virt (cortex-a72 + virtio-blk) para verificar MMU, Heap, VFS, VirtIO-blk, EL0+SVC y Shell..." -ForegroundColor Cyan
-    $p = Start-Process -FilePath "C:\Program Files\qemu\qemu-system-aarch64.exe" -ArgumentList "-M","virt","-cpu","cortex-a72","-m","256M","-nographic","-drive","file=$ArmDisk,if=none,format=raw,id=hd0","-device","virtio-blk-device,drive=hd0","-kernel",$ArmBin -RedirectStandardOutput $ArmLog -RedirectStandardError $ArmErr -PassThru
+    Write-Host "[TEST-ARM64] Iniciando QEMU virt (cortex-a72 + virtio-blk + virtio-net) para verificar MMU, Heap, VFS, VirtIO, EL0+SVC y Shell..." -ForegroundColor Cyan
+    $p = Start-Process -FilePath "C:\Program Files\qemu\qemu-system-aarch64.exe" -ArgumentList "-M","virt","-cpu","cortex-a72","-m","256M","-nographic","-drive","file=$ArmDisk,if=none,format=raw,id=hd0","-device","virtio-blk-device,drive=hd0","-netdev","user,id=net0","-device","virtio-net-device,netdev=net0","-kernel",$ArmBin -RedirectStandardOutput $ArmLog -RedirectStandardError $ArmErr -PassThru
     $ok = $false
     for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Milliseconds 500
         if (Test-Path $ArmLog) {
             $txt = Get-Content $ArmLog -Raw -ErrorAction SilentlyContinue
-            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "BeaverFS persistente.*VirtIO-blk \[OK\]" -and $txt -match "Prueba EL0 \+ SVC #0.*\[OK\]" -and $txt -match "root@beaver:/#") {
+            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "VirtIO-net v\d+ operativo.*\[OK\]" -and $txt -match "BeaverFS persistente.*VirtIO-blk \[OK\]" -and $txt -match "Prueba EL0 \+ SVC #0.*\[OK\]" -and $txt -match "root@beaver:/#") {
                 $ok = $true
                 break
             }

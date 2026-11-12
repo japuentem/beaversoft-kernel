@@ -249,8 +249,24 @@ pub fn internet_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
+/// Envía una trama Ethernet cruda por el controlador físico activo (E1000 en x86_64 o VirtIO-net en ARM64).
+fn transmit_raw_frame(frame: &[u8]) {
+    if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
+        if e1000.initialized {
+            e1000.send(frame);
+            return;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if crate::arch::aarch64::virtio_mmio::net_is_initialized() {
+            crate::arch::aarch64::virtio_mmio::net_send(frame);
+        }
+    }
+}
+
 /// Construye y envía una trama Ethernet II.
-/// Si el driver E1000 DMA está inicializado, transmite por hardware real.
+/// Si el driver físico está inicializado, transmite por hardware real.
 /// Si no, descarta silenciosamente (sin loopback — el loopback enmascaraba fallos).
 pub fn send_ethernet_frame(dest_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
     let frame_len = 14 + payload.len();
@@ -271,14 +287,7 @@ pub fn send_ethernet_frame(dest_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
         net.tx_bytes += frame.len() as u64;
     }
 
-    // Transmitir por hardware real E1000 DMA (Fase 4).
-    // Si el driver no está inicializado (sin tarjeta), el paquete se descarta.
-    // NO hay loopback — eso enmascaraba que la red no funcionaba.
-    if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
-        if e1000.initialized {
-            e1000.send(&frame);
-        }
-    }
+    transmit_raw_frame(&frame);
 }
 
 /// Construye y transmite una solicitud ARP (¿Quién tiene la IP X? Avisa a Y)
@@ -518,11 +527,7 @@ pub fn send_tcp_segment_direct(
     net.tx_packets += 1;
     net.tx_bytes += eth.len() as u64;
 
-    if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
-        if e1000.initialized {
-            e1000.send(&eth);
-        }
-    }
+    transmit_raw_frame(&eth);
 }
 
 /// Procesa paquetes entrantes: actualiza contadores, tabla ARP,
@@ -585,9 +590,7 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
             eth.extend_from_slice(&arp_reply);
             net.tx_packets += 1;
             net.tx_bytes += eth.len() as u64;
-            if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
-                if e1000.initialized { e1000.send(&eth); }
-            }
+            transmit_raw_frame(&eth);
         }
 
     } else if ethertype == ETHERTYPE_IPV4 && payload.len() >= 20 {
@@ -825,28 +828,29 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
 /// Llamar desde el bucle principal del kernel o desde el tick del PIT.
 /// Usa try_lock para no bloquear nunca el hilo principal.
 pub fn net_poll_rx() {
-    // Intentar adquirir el driver; si está ocupado, omitir esta ronda
-    let e1000_guard = match crate::drivers::e1000::E1000.try_lock() {
-        Some(g) => g,
-        None    => return,
-    };
-    if !e1000_guard.initialized {
-        return;
-    }
-
-    // Recolectar tramas en un buffer temporal (sin mantener el lock de e1000 durante el proceso)
-    // Necesitamos liberar e1000 antes de llamar process_incoming_packet que puede lock net.
-    // Usamos un arreglo de trama fija en el stack (sin heap extra).
-    // Procesamos hasta 8 tramas por llamada para no monopolizar la CPU.
     const MAX_FRAMES: usize = 8;
     let mut frames: [([u8; 1536], usize); MAX_FRAMES] = [([0u8; 1536], 0); MAX_FRAMES];
     let mut count = 0usize;
 
-    // Necesitamos &mut para poll_rx — drop el guard inmutabel y re-acquire como mutable
-    drop(e1000_guard);
-
+    let mut polled_hw = false;
     if let Some(mut e1000) = crate::drivers::e1000::E1000.try_lock() {
-        e1000.poll_rx(|frame| {
+        if e1000.initialized {
+            polled_hw = true;
+            e1000.poll_rx(|frame| {
+                if count < MAX_FRAMES && frame.len() <= 1536 {
+                    let len = frame.len();
+                    frames[count].0[..len].copy_from_slice(frame);
+                    frames[count].1 = len;
+                    count += 1;
+                }
+            });
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    if !polled_hw && crate::arch::aarch64::virtio_mmio::net_is_initialized() {
+        polled_hw = true;
+        crate::arch::aarch64::virtio_mmio::net_poll_rx(|frame| {
             if count < MAX_FRAMES && frame.len() <= 1536 {
                 let len = frame.len();
                 frames[count].0[..len].copy_from_slice(frame);
@@ -854,6 +858,10 @@ pub fn net_poll_rx() {
                 count += 1;
             }
         });
+    }
+
+    if !polled_hw {
+        return;
     }
 
     // Procesar cada trama fuera del lock del E1000
