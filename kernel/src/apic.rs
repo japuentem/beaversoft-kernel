@@ -209,8 +209,8 @@ fn find_rsdp() -> Option<u64> {
     None
 }
 
-/// Busca la tabla `"APIC"` (MADT) dentro de una RSDT (32 bits) o XSDT (64 bits).
-fn find_madt_in_sdt(sdt_addr: u64, is_xsdt: bool) -> Option<u64> {
+/// Busca una tabla ACPI por firma de 4 bytes dentro de una RSDT (32 bits) o XSDT (64 bits).
+fn find_table_in_sdt(sdt_addr: u64, is_xsdt: bool, target_sig: &[u8; 4]) -> Option<u64> {
     if sdt_addr < 0x1000 || sdt_addr >= 0xFFE0_0000 {
         return None;
     }
@@ -238,7 +238,7 @@ fn find_madt_in_sdt(sdt_addr: u64, is_xsdt: bool) -> Option<u64> {
             };
             if table_addr >= 0x1000 && table_addr < 0xFFE0_0000 {
                 let t_sig = core::slice::from_raw_parts(table_addr as *const u8, 4);
-                if t_sig == b"APIC" {
+                if t_sig == target_sig {
                     return Some(table_addr);
                 }
             }
@@ -247,8 +247,8 @@ fn find_madt_in_sdt(sdt_addr: u64, is_xsdt: bool) -> Option<u64> {
     None
 }
 
-/// Parsea la tabla ACPI MADT (`"APIC"`) y devuelve `(madt_addr, lapic_phys_base, lista_de_apic_ids)`.
-pub fn discover_madt_cores() -> Option<(u64, u64, Vec<u32>)> {
+/// Busca y devuelve la dirección física de una tabla ACPI por su firma de 4 bytes (ej. `"APIC"`, `"FACP"`).
+pub fn find_acpi_table(sig: &[u8; 4]) -> Option<u64> {
     let rsdp_addr = find_rsdp()?;
     // SAFETY: `rsdp_addr` ya fue validado por `is_valid_rsdp`.
     let (revision, rsdt_addr, xsdt_addr) = unsafe {
@@ -263,11 +263,16 @@ pub fn discover_madt_cores() -> Option<(u64, u64, Vec<u32>)> {
         (rev, rsdt, xsdt)
     };
 
-    let madt_addr = if revision >= 2 && xsdt_addr != 0 {
-        find_madt_in_sdt(xsdt_addr, true).or_else(|| find_madt_in_sdt(rsdt_addr, false))?
+    if revision >= 2 && xsdt_addr != 0 {
+        find_table_in_sdt(xsdt_addr, true, sig).or_else(|| find_table_in_sdt(rsdt_addr, false, sig))
     } else {
-        find_madt_in_sdt(rsdt_addr, false)?
-    };
+        find_table_in_sdt(rsdt_addr, false, sig)
+    }
+}
+
+/// Parsea la tabla ACPI MADT (`"APIC"`) y devuelve `(madt_addr, lapic_phys_base, lista_de_apic_ids)`.
+pub fn discover_madt_cores() -> Option<(u64, u64, Vec<u32>)> {
+    let madt_addr = find_acpi_table(b"APIC")?;
 
     let mut apic_ids = Vec::new();
     // SAFETY: `madt_addr` apunta a una tabla ACPI `"APIC"` verificada en memoria física.

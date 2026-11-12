@@ -42,12 +42,13 @@ impl IpcManager {
     }
 
     pub fn get_or_create_mailbox(&mut self, name: &str) -> &mut Mailbox {
-        if let Some(idx) = self.mailboxes.iter().position(|m| m.name == name) {
-            &mut self.mailboxes[idx]
+        let idx = if let Some(idx) = self.mailboxes.iter().position(|m| m.name == name) {
+            idx
         } else {
             self.mailboxes.push(Mailbox::new(name));
-            self.mailboxes.last_mut().unwrap()
-        }
+            self.mailboxes.len() - 1
+        };
+        &mut self.mailboxes[idx]
     }
 
     pub fn get_mailbox(&self, name: &str) -> Option<&Mailbox> {

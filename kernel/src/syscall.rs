@@ -507,11 +507,9 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
 
         // SYS_OPEN: path=arg0, flags=arg1
         SYS_OPEN => {
-            let path_opt = read_user_string(arg0, 256);
-            if path_opt.is_none() {
+            let Some(path) = read_user_string(arg0, 256) else {
                 return (-14_isize) as u64; // -EFAULT
-            }
-            let path = path_opt.unwrap();
+            };
             let flags = arg1 as u32;
 
             let exists = VFS.lock().exists(&path);

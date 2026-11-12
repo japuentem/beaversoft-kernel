@@ -93,7 +93,7 @@ impl HdmiCecController {
     /// Inicializa el decodificador de tramas HDMI-CEC y sondea presencia física
     pub fn init(&mut self) {
         self.hw_present = false; // En QEMU estándar x86_64/virt no hay puente CEC físico por defecto
-        self.is_online = true;
+        self.is_online = self.hw_present;
         self.logical_address = CEC_ADDR_PLAYBACK1;
         self.tv_is_on = false;
     }

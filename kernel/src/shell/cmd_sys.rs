@@ -656,6 +656,10 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             print_touchscreen_status(args);
         }
 
+        "profile" | "hw" => {
+            print_device_profile();
+        }
+
         "gui-off" => {
             let vbe = crate::drivers::vbe::VBE.lock();
             if vbe.is_active {
@@ -1240,5 +1244,25 @@ pub fn print_touchscreen_status(args: &[&str]) {
     kprintln!("  Eventos Procesados:  {}", ts.total_events);
     kprintln!("  Uso interactivo:     touch <x> <y>  (ej. 'touch 300 200')");
     kprintln!("=========================================================================");
+}
+
+pub fn print_device_profile() {
+    let p = crate::drivers::profile::detect_device_profile();
+    kprintln!("==================== PERFIL DE HARDWARE REAL (BEAVER OS) ====================");
+    kprintln!("  Clase Detectada:     {}", p.class.as_str());
+    kprintln!("  Fuente Principal:    {}", p.source);
+    match p.acpi_pm_profile {
+        Some(v) => kprintln!("  ACPI FADT PM_Profile: {} (tabla FACP real)", v),
+        None => kprintln!("  ACPI FADT PM_Profile: No presente"),
+    }
+    match p.smbios_chassis_type {
+        Some(c) => kprintln!("  SMBIOS Type 3 Chasis: 0x{:02X} (tabla SMBIOS real)", c),
+        None => kprintln!("  SMBIOS Type 3 Chasis: No presente"),
+    }
+    kprintln!("  Display VBE/GOP/FB:  {}", if p.has_display { "SI (Activo)" } else { "NO (Headless)" });
+    kprintln!("  HDMI-CEC Fisico:     {}", if p.has_cec { "DETECTADO" } else { "NO DETECTADO" });
+    kprintln!("  Sensor Tactil I2C:   {}", if p.has_touch { "DETECTADO" } else { "NO DETECTADO" });
+    kprintln!("  Nucleos CPU (SMP):   {}", p.cpu_cores);
+    kprintln!("=============================================================================");
 }
 

@@ -280,29 +280,27 @@ extern "C" fn userland_crash_task() {
 /// Prepara un espacio de direcciones (`CR3`) dedicado para la tarea de usuario actual,
 /// mapeando su código en `USER_CODE_VADDR` (solo lectura/ejecución `PAGE_USER`) y su pila
 /// privada de 16 KiB en `USER_STACK_VADDR` (`PAGE_USER | PAGE_WRITABLE`).
-fn prepare_isolated_user_space(fn_ptr: *const u8) -> (u64, u64, u64) {
+fn prepare_isolated_user_space(fn_ptr: *const u8) -> Result<(u64, u64, u64), &'static str> {
     let proc_cr3 = paging::create_process_address_space()
-        .expect("[RING3] Sin memoria para crear tabla CR3 de proceso");
+        .ok_or("[RING3] Sin memoria para crear tabla CR3 de proceso")?;
 
     let code_frame = FRAME_ALLOCATOR
         .allocate_frame()
-        .expect("[RING3] Sin marcos fisicos para codigo de usuario");
+        .ok_or("[RING3] Sin marcos fisicos para codigo de usuario")?;
 
     // SAFETY: Se copia una página de 4 KiB de instrucciones máquina de la función Ring 3 al marco físico privado.
     unsafe {
         core::ptr::copy_nonoverlapping(fn_ptr, code_frame as *mut u8, 4096);
     }
 
-    paging::map_user_page(proc_cr3, USER_CODE_VADDR, code_frame as u64, false)
-        .expect("[RING3] Error mapeando pagina de codigo USER_CODE_VADDR");
+    paging::map_user_page(proc_cr3, USER_CODE_VADDR, code_frame as u64, false)?;
 
     for i in 0..USER_STACK_PAGES {
         let stack_frame = FRAME_ALLOCATOR
             .allocate_frame()
-            .expect("[RING3] Sin marcos fisicos para pila de usuario");
+            .ok_or("[RING3] Sin marcos fisicos para pila de usuario")?;
         let vaddr = USER_STACK_VADDR + (i * PAGE_SIZE) as u64;
-        paging::map_user_page(proc_cr3, vaddr, stack_frame as u64, true)
-            .expect("[RING3] Error mapeando pagina de pila USER_STACK_VADDR");
+        paging::map_user_page(proc_cr3, vaddr, stack_frame as u64, true)?;
     }
 
     let user_stack_top = USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
@@ -313,13 +311,18 @@ fn prepare_isolated_user_space(fn_ptr: *const u8) -> (u64, u64, u64) {
         paging::write_cr3(proc_cr3);
     }
 
-    (proc_cr3, USER_CODE_VADDR, user_stack_top)
+    Ok((proc_cr3, USER_CODE_VADDR, user_stack_top))
 }
 
 /// Worker que corre la tarea normal de userland en Ring 3
 pub fn spawn_normal_user_task() {
-    let (proc_cr3, entry, user_stack_top) =
-        prepare_isolated_user_space(userland_normal_task as *const u8);
+    let (proc_cr3, entry, user_stack_top) = match prepare_isolated_user_space(userland_normal_task as *const u8) {
+        Ok(vals) => vals,
+        Err(e) => {
+            kprint_color!(VgaColor::LightRed, VgaColor::Black, "\n[RING3-ERROR] {}\n", e);
+            return;
+        }
+    };
 
     let guard_top = core::ptr::addr_of!(KERNEL_GUARD_STACK) as u64 + KERNEL_GUARD_STACK_SIZE as u64;
     set_tss_rsp0(guard_top);
@@ -344,8 +347,13 @@ pub fn spawn_normal_user_task() {
 
 /// Worker que corre la tarea de crash de userland en Ring 3 (demuestra aislamiento)
 pub fn spawn_crash_user_task() {
-    let (proc_cr3, entry, user_stack_top) =
-        prepare_isolated_user_space(userland_crash_task as *const u8);
+    let (proc_cr3, entry, user_stack_top) = match prepare_isolated_user_space(userland_crash_task as *const u8) {
+        Ok(vals) => vals,
+        Err(e) => {
+            kprint_color!(VgaColor::LightRed, VgaColor::Black, "\n[RING3-ERROR] {}\n", e);
+            return;
+        }
+    };
 
     let guard_top = core::ptr::addr_of!(KERNEL_GUARD_STACK) as u64 + KERNEL_GUARD_STACK_SIZE as u64;
     set_tss_rsp0(guard_top);
@@ -493,8 +501,13 @@ extern "C" fn userland_shell_task() {
 /// Worker que lanza el Shell interactivo en Ring 3
 #[cfg(target_arch = "x86_64")]
 pub fn spawn_userland_shell() {
-    let (proc_cr3, entry, user_stack_top) =
-        prepare_isolated_user_space(userland_shell_task as *const u8);
+    let (proc_cr3, entry, user_stack_top) = match prepare_isolated_user_space(userland_shell_task as *const u8) {
+        Ok(vals) => vals,
+        Err(e) => {
+            kprint_color!(VgaColor::LightRed, VgaColor::Black, "\n[RING3-ERROR] {}\n", e);
+            return;
+        }
+    };
 
     let guard_top = core::ptr::addr_of!(KERNEL_GUARD_STACK) as u64 + KERNEL_GUARD_STACK_SIZE as u64;
     set_tss_rsp0(guard_top);

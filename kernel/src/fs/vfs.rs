@@ -465,11 +465,9 @@ impl VirtualFileSystem {
             .filter(|s| !s.is_empty())
             .collect();
 
-        if segments.is_empty() {
+        let Some(file_name) = segments.pop() else {
             return Err("Nombre de archivo no especificado");
-        }
-
-        let file_name = segments.pop().unwrap();
+        };
         let mut current = &mut self.root;
 
         for seg in segments {
@@ -537,11 +535,9 @@ impl VirtualFileSystem {
             .filter(|s| !s.is_empty())
             .collect();
 
-        if segments.is_empty() {
+        let Some(dir_name) = segments.pop() else {
             return Err("Nombre de directorio no especificado");
-        }
-
-        let dir_name = segments.pop().unwrap();
+        };
         let mut current = &mut self.root;
 
         for seg in segments {
@@ -588,11 +584,9 @@ impl VirtualFileSystem {
             .filter(|s| !s.is_empty())
             .collect();
 
-        if segments.is_empty() {
+        let Some(file_name) = segments.pop() else {
             return Err("Nombre de archivo no especificado");
-        }
-
-        let file_name = segments.pop().unwrap();
+        };
         let mut current = &mut self.root;
 
         for seg in segments {

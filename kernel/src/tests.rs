@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 16] = [
+    let tests: [(&str, fn()); 18] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -81,6 +81,8 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("ahci_sata_dma_controller",                test_ahci_sata_dma_controller),
         ("tcp_state_machine_and_http_parser",       test_tcp_state_machine_and_http_parser),
         ("posix_syscalls_and_beaver_libc",          test_posix_syscalls_and_beaver_libc),
+        ("device_profile_detection",                test_device_profile_detection),
+        ("cec_and_touchscreen_safe_dispatch",       test_cec_and_touchscreen_safe_dispatch),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -536,6 +538,42 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     assert!(bs_res.is_ok(), "BeaverScript debe ejecutarse en Ring 3 sin fallos");
 }
 
+/// Test 17: Verificación de detección real de perfil de dispositivo (ACPI FADT / SMBIOS / Periféricos)
+pub fn test_device_profile_detection() {
+    use crate::drivers::profile::{detect_device_profile, DeviceClass};
+
+    let p = detect_device_profile();
+    assert!(p.cpu_cores >= 1, "Debe detectarse al menos 1 nucleo CPU");
+    assert!(!p.source.is_empty(), "La fuente de clasificacion no puede estar vacia");
+    assert_eq!(p.has_cec, crate::drivers::cec::HDMI_CEC.lock().hw_present, "has_cec debe reflejar hw_present real");
+    assert_eq!(p.has_touch, crate::drivers::touchscreen::TOUCHSCREEN.lock().hw_present, "has_touch debe reflejar hw_present real");
+    assert_ne!(p.class, DeviceClass::Unknown, "El perfil del dispositivo debe resolverse deterministicamente");
+}
+
+/// Test 18: Verificación de estado honesto de HDMI-CEC y despacho seguro sin deadlock en CEC/Touchscreen
+pub fn test_cec_and_touchscreen_safe_dispatch() {
+    use crate::drivers::cec::{init_cec, inject_cec_key, CEC_USER_UP, HDMI_CEC};
+    use crate::drivers::touchscreen::{init_touchscreen, inject_touch_event, TOUCHSCREEN};
+
+    init_cec();
+    {
+        let cec = HDMI_CEC.lock();
+        assert_eq!(cec.is_online, cec.hw_present, "is_online de CEC no debe fingirse cuando hw_present es false");
+    }
+
+    let before_cec = HDMI_CEC.lock().frames_received;
+    inject_cec_key(CEC_USER_UP);
+    let after_cec = HDMI_CEC.lock().frames_received;
+    assert_eq!(after_cec, before_cec + 1, "inject_cec_key debe incrementar frames_received sin deadlock");
+
+    init_touchscreen();
+    let before_touch = TOUCHSCREEN.lock().total_events;
+    inject_touch_event(512, 384, true);
+    inject_touch_event(512, 384, false);
+    let after_touch = TOUCHSCREEN.lock().total_events;
+    assert_eq!(after_touch, before_touch + 2, "inject_touch_event debe procesar Tap+Release sin deadlock");
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -624,4 +662,16 @@ fn ut_tcp_state_machine() {
 #[test_case]
 fn ut_posix_syscalls() {
     test_posix_syscalls_and_beaver_libc();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_device_profile() {
+    test_device_profile_detection();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_cec_touchscreen_safe() {
+    test_cec_and_touchscreen_safe_dispatch();
 }

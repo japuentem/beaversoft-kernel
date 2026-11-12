@@ -17,3 +17,4 @@ pub mod usb;
 pub mod mesh;
 pub mod touchscreen;
 pub mod cec;
+pub mod profile;
