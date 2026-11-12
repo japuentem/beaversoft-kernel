@@ -51,8 +51,23 @@ if ($Clean) {
 }
 
 if ($TestArm64) {
+    Write-Host "[TASK] Compilando binarios de usuario (user/) para aarch64-unknown-none..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path "assets\user_arm64" -Force | Out-Null
+    foreach ($u in @(
+        @{ Pkg = "beaver-hello"; Out = "assets\user_arm64\hello.elf" },
+        @{ Pkg = "beaver-bench"; Out = "assets\user_arm64\bench.elf" },
+        @{ Pkg = "beaver-sh";    Out = "assets\user_arm64\sh.elf" }
+    )) {
+        cargo rustc --release --target aarch64-unknown-none -p $u.Pkg -- -C link-arg=-Tuser/user_aarch64.ld -C link-arg=-z -C link-arg=max-page-size=4096
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "[ERROR] Falló la compilación ARM64 de $($u.Pkg)."
+            exit $LASTEXITCODE
+        }
+        Copy-Item "target\aarch64-unknown-none\release\$($u.Pkg)" -Destination $u.Out -Force
+    }
+
     Write-Host "[TASK] Compilando kernel para arquitectura aarch64-unknown-none en modo release..." -ForegroundColor Yellow
-    cargo build --release --target aarch64-unknown-none
+    cargo build --release --target aarch64-unknown-none -p beaver-kernel
     if ($LASTEXITCODE -ne 0) {
         Write-Error "[ERROR] Falló la compilación ARM64."
         exit $LASTEXITCODE
@@ -77,7 +92,7 @@ if ($TestArm64) {
         Start-Sleep -Milliseconds 500
         if (Test-Path $ArmLog) {
             $txt = Get-Content $ArmLog -Raw -ErrorAction SilentlyContinue
-            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "VirtIO-net v\d+ operativo.*\[OK\]" -and $txt -match "BeaverFS persistente.*VirtIO-blk \[OK\]" -and $txt -match "Binario ELF64 finalizado en EL0 aislado.*exit code: 42" -and $txt -match "Prueba ELF64 \+ EL0 \+ SVC #0 \[OK\]" -and $txt -match "root@beaver:/#") {
+            if ($txt -match "VirtIO-blk v\d+ operativo.*\[OK\]" -and $txt -match "VirtIO-net v\d+ operativo.*\[OK\]" -and $txt -match "BeaverFS persistente.*VirtIO-blk \[OK\]" -and $txt -match "Binario ELF64 finalizado en EL0 aislado.*exit code: 42" -and $txt -match "Prueba ELF64 \+ EL0 \+ SVC #0 \[OK\]" -and $txt -match "\[HELLO\.ELF\] Hola Mundo desde Espacio de Usuario" -and $txt -match "Binario Rust user/hello \(hello\.elf\) ejecutado en EL0 \[OK\]" -and $txt -match "root@beaver:/#") {
                 $ok = $true
                 break
             }

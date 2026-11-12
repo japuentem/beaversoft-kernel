@@ -226,6 +226,49 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
         }
     }
 
+    // 8.2 Despliegue en /disk/bin y ejecución en vivo de binarios Rust reales compilados para AArch64 EL0
+    {
+        static ARM64_HELLO_ELF: &[u8] = include_bytes!("../../../../assets/user_arm64/hello.elf");
+        static ARM64_BENCH_ELF: &[u8] = include_bytes!("../../../../assets/user_arm64/bench.elf");
+        static ARM64_SH_ELF: &[u8] = include_bytes!("../../../../assets/user_arm64/sh.elf");
+
+        {
+            let mut vfs = crate::fs::vfs::VFS.lock();
+            if !vfs.exists("/disk/bin") {
+                let _ = vfs.create_dir("/disk/bin", 0, 0);
+            }
+            if let Err(e) = vfs.create_file("/disk/bin/hello.elf", ARM64_HELLO_ELF, 0, 0) {
+                crate::kprintln!("[ARM64] WARN create_file hello.elf: {}", e);
+            }
+            if let Err(e) = vfs.create_file("/disk/bin/bench.elf", ARM64_BENCH_ELF, 0, 0) {
+                crate::kprintln!("[ARM64] WARN create_file bench.elf: {}", e);
+            }
+            if let Err(e) = vfs.create_file("/disk/bin/sh.elf", ARM64_SH_ELF, 0, 0) {
+                crate::kprintln!("[ARM64] WARN create_file sh.elf: {}", e);
+            }
+        }
+
+        let hello_bytes = {
+            let vfs = crate::fs::vfs::VFS.lock();
+            match vfs.read_file_bytes("/disk/bin/hello.elf", 0, 0) {
+                Ok(b) if b.len() >= 64 => b,
+                Ok(b) => {
+                    crate::kprintln!("[ARM64] WARN read_file_bytes(/disk/bin/hello.elf) devolvio {} bytes; usando binario embebido ({} bytes)", b.len(), ARM64_HELLO_ELF.len());
+                    ARM64_HELLO_ELF.to_vec()
+                }
+                Err(e) => {
+                    crate::kprintln!("[ARM64] WARN read_file_bytes(/disk/bin/hello.elf): {}; usando binario embebido", e);
+                    ARM64_HELLO_ELF.to_vec()
+                }
+            }
+        };
+
+        match crate::elf::ElfBinary::parse(&hello_bytes).and_then(|bin| bin.load_and_execute()) {
+            Ok(()) => Pl011Uart::write_str("[ARM64] Binario Rust user/hello (hello.elf) ejecutado en EL0 [OK]\n"),
+            Err(e) => crate::kprintln!("[ARM64] Error ejecutando user/hello ELF64 en EL0: {}", e),
+        }
+    }
+
     Pl011Uart::write_str("[ARM64] Beaver OS ARM64 completamente operativo. Iniciando Beaver Shell...\n\n");
 
     crate::shell::SHELL.lock().prompt();
