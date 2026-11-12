@@ -205,6 +205,7 @@ impl<'a> ElfBinary<'a> {
         // SAFETY: Sincronizar I-Cache y transferir control a EL0 bajo `proc_ttbr0` aislado.
         unsafe {
             core::arch::asm!("dsb ish", "ic iallu", "dsb ish", "isb", options(nomem, nostack));
+            crate::syscall::CURRENT_USER_BRK.store(crate::syscall::USER_HEAP_START, core::sync::atomic::Ordering::Release);
             let exit_code = crate::syscall::enter_ring3_with_return(entry, user_stack_top);
             Aarch64Mmu::switch_to_kernel_ttbr0();
             kprint_color!(
@@ -322,6 +323,7 @@ impl<'a> ElfBinary<'a> {
         crate::gdt::set_tss_rsp0(guard_top);
 
         // Salto a Ring 3 con retorno seguro al supervisor
+        crate::syscall::CURRENT_USER_BRK.store(crate::syscall::USER_HEAP_START, core::sync::atomic::Ordering::Release);
         let exit_code = unsafe { crate::syscall::enter_ring3_with_return(entry_rip, user_stack_top) };
         kprint_color!(
             VgaColor::LightGreen, VgaColor::Black,

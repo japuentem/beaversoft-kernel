@@ -54,6 +54,7 @@ pub const SYS_OPEN:     u64 = 2;
 pub const SYS_CLOSE:    u64 = 3;
 pub const SYS_STAT:     u64 = 4;
 pub const SYS_LSEEK:    u64 = 8;
+pub const SYS_BRK:      u64 = 12;
 pub const SYS_YIELD:    u64 = 24;
 pub const SYS_GETPID:   u64 = 39;
 pub const SYS_EXECVE:   u64 = 59;
@@ -71,6 +72,16 @@ pub const SYS_MUTEX_LOCK:   u64 = 114;
 pub const SYS_MUTEX_UNLOCK: u64 = 115;
 pub const SYS_SEM_WAIT:     u64 = 116;
 pub const SYS_SEM_POST:     u64 = 117;
+
+// Límites y estado del Heap para procesos de usuario Ring 3 / EL0
+#[cfg(target_arch = "x86_64")]
+pub const USER_HEAP_START: u64 = 0x0000_0000_2000_0000;
+#[cfg(target_arch = "aarch64")]
+pub const USER_HEAP_START: u64 = 0x0000_0000_6800_0000;
+
+pub const USER_HEAP_MAX: u64 = 0x0000_0000_6F00_0000;
+
+pub static CURRENT_USER_BRK: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tabla de Descriptores de Archivos Abiertos (File Descriptor Table)
@@ -603,6 +614,78 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
             }
             (-9_isize) as u64
         }
+
+        SYS_BRK => {
+            let requested_brk = arg0;
+            let current_brk = CURRENT_USER_BRK.load(core::sync::atomic::Ordering::Acquire);
+            let cur = if current_brk == 0 { USER_HEAP_START } else { current_brk };
+
+            if requested_brk == 0 {
+                return cur;
+            }
+
+            if requested_brk < USER_HEAP_START || requested_brk > USER_HEAP_MAX {
+                return cur;
+            }
+
+            let cur_aligned = (cur + 0xFFF) & !0xFFF;
+            let req_aligned = (requested_brk + 0xFFF) & !0xFFF;
+
+            if req_aligned > cur_aligned {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    let proc_cr3 = crate::task::scheduler::SCHEDULER.lock().current_cr3();
+                    if proc_cr3 == 0 {
+                        return cur;
+                    }
+                    let mut page_vaddr = cur_aligned;
+                    let mut all_ok = true;
+                    while page_vaddr < req_aligned {
+                        if let Some(frame) = crate::memory::frame_allocator::FRAME_ALLOCATOR.allocate_frame() {
+                            if crate::memory::paging::map_user_page(proc_cr3, page_vaddr, frame as u64, true).is_err() {
+                                all_ok = false;
+                                break;
+                            }
+                        } else {
+                            all_ok = false;
+                            break;
+                        }
+                        page_vaddr += 0x1000;
+                    }
+                    if !all_ok {
+                        return cur;
+                    }
+                }
+
+                #[cfg(target_arch = "aarch64")]
+                {
+                    let proc_ttbr0 = crate::arch::aarch64::mmu::CURRENT_USER_TTBR0.load(core::sync::atomic::Ordering::Acquire);
+                    if proc_ttbr0 == 0 {
+                        return cur;
+                    }
+                    let mut page_vaddr = cur_aligned;
+                    let mut all_ok = true;
+                    while page_vaddr < req_aligned {
+                        if let Some(frame) = crate::memory::frame_allocator::FRAME_ALLOCATOR.allocate_frame() {
+                            if crate::arch::aarch64::mmu::Aarch64Mmu::map_user_page(proc_ttbr0, page_vaddr, frame as u64, true).is_err() {
+                                all_ok = false;
+                                break;
+                            }
+                        } else {
+                            all_ok = false;
+                            break;
+                        }
+                        page_vaddr += 0x1000;
+                    }
+                    if !all_ok {
+                        return cur;
+                    }
+                }
+            }
+
+            CURRENT_USER_BRK.store(requested_brk, core::sync::atomic::Ordering::Release);
+            requested_brk
+        },
 
         // SYS_YIELD: voluntariamente ceder tiempo de CPU
         SYS_YIELD => {

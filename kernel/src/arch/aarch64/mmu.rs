@@ -31,6 +31,8 @@ static mut KERNEL_L0_TABLE: PageTable512 = PageTable512([0; 512]);
 static mut KERNEL_L1_TABLE: PageTable512 = PageTable512([0; 512]);
 static mut KERNEL_L2_RAM: PageTable512 = PageTable512([0; 512]);
 
+pub static CURRENT_USER_TTBR0: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
 impl Aarch64Mmu {
     /// Construye tablas L0->L1->L2 con mapeo de identidad (MMIO Device + RAM 2MiB blocks) y activa el MMU.
     pub fn init_and_enable_identity_mmu(fb_phys: u64) {
@@ -213,6 +215,7 @@ impl Aarch64Mmu {
 
     /// Carga la tabla de páginas de espacio de usuario (EL0)
     pub fn set_ttbr0(table_phys_addr: u64) {
+        CURRENT_USER_TTBR0.store(table_phys_addr, core::sync::atomic::Ordering::Release);
         unsafe {
             asm!("msr ttbr0_el1, {}", in(reg) table_phys_addr, options(nomem, nostack));
             asm!("isb", options(nomem, nostack));

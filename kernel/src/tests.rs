@@ -536,6 +536,12 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     let test_bs = "let x = 12\nlet y = 8\nlet sum = x + y\nprintln \"Ring 3 BS OK: \" + sum\n";
     let bs_res = crate::task::script::run_script_in_ring3(test_bs);
     assert!(bs_res.is_ok(), "BeaverScript debe ejecutarse en Ring 3 sin fallos");
+
+    // 6. Verificación de SYS_BRK (heap dinámico de usuario en Ring 3)
+    let cur_brk = syscall_dispatch(SYS_BRK, 0, 0, 0);
+    assert!(cur_brk >= USER_HEAP_START, "SYS_BRK(0) debe retornar al menos USER_HEAP_START");
+    let new_brk = syscall_dispatch(SYS_BRK, cur_brk + 4096, 0, 0);
+    assert_eq!(new_brk, cur_brk + 4096, "SYS_BRK debe expandir el heap de usuario");
 }
 
 /// Test 17: Verificación de detección real de perfil de dispositivo (ACPI FADT / SMBIOS / Periféricos)

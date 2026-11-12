@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 17
+// Total de interacciones del día: 18
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -337,5 +337,26 @@ en otras ocasiones he preguntado si falta algo y has respondido que ya esta func
     4. Arquitectura GUI: todas las apps gráficas corren en Ring 0 en el kernel; no hay protocolo gráfico IPC para que procesos Ring 3 dibujen ventanas.
     5. Espacio de usuario (`beaver-libc`): sin asignador dinámico (`malloc`/`free`) ni syscalls `mmap`/`brk`.
     6. Hardware: audio PCM nativo (solo PC Speaker y detección Intel HDA), USB Mass Storage, y soporte de disposiciones de teclado (solo US QWERTY).
+
+================================================================================
+
+## Interacción #18 [17:48:40]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante primero y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se implementó la gestión de Heap dinámico y memoria para el Espacio de Usuario (Ring 3 / EL0):
+  - **Llamada al sistema `SYS_BRK` (Syscall 12)** en [kernel/src/syscall.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/syscall.rs): Permite consultar el program break (`brk(0)`) y solicitar la expansión de memoria de usuario (`USER_HEAP_START = 0x20000000` en x86_64 y `0x68000000` en ARM64). El kernel asigna marcos físicos de 4 KiB bajo demanda y los mapea con `PAGE_USER | PAGE_WRITABLE` en el espacio de direcciones aislado del proceso (`proc_cr3` en x86_64 o `proc_ttbr0` en ARM64).
+  - **Seguimiento atómico de TTBR0 en ARM64** en [kernel/src/arch/aarch64/mmu.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/arch/aarch64/mmu.rs): Se implementó `CURRENT_USER_TTBR0` para registrar el espacio de direcciones activo de EL0 de forma segura.
+  - **Biblioteca estándar [user/beaver-libc/src/lib.rs](file:///d:/proyectos_personales/beaversoft-kernel/user/beaver-libc/src/lib.rs)**: Se agregaron las primitivas `brk(addr)`, `sbrk(increment)`, el asignador dinámico `malloc(size)` y `free(ptr)` con lista de bloques reciclados alineada a 16 bytes, y el `GlobalAlloc` (`BeaverUserAllocator`) para soportar colecciones dinámicas de Rust (`Vec`, `String`, etc.) en Ring 3 / EL0.
+  - **Prueba en vivo de `malloc()` en [user/hello/src/main.rs](file:///d:/proyectos_personales/beaversoft-kernel/user/hello/src/main.rs)**: Asigna dinámicamente un buffer en el heap de Ring 3, copia texto, lo escribe vía `SYS_WRITE` (`[USER-HEAP] Asignacion dinamica con malloc() en Ring 3 [OK]`) y lo libera con `free()`.
+  - **Automatización de verificación en [run.ps1](file:///d:/proyectos_personales/beaversoft-kernel/run.ps1) y [kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs)**: Se incluyó validación de `SYS_BRK` en la prueba 16 y en el runner de ARM64.
+- Verificación observada tras los cambios:
+  - `run.ps1 -TestArm64`: **`[PASS-ARM64]`** (ejecución exitosa de `malloc()` en EL0 imprimiendo `[USER-HEAP] Asignacion dinamica con malloc() en Ring 3 [OK]`).
+  - `cargo check --target x86_64-unknown-none` y `cargo build --release --target x86_64-unknown-none`: **OK**.
+  - `run.ps1 -Test`: **`[SUITE OK] Todas las 18 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
 
 ================================================================================
