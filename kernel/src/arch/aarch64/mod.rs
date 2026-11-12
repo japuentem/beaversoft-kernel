@@ -11,6 +11,7 @@ pub mod gic;
 pub mod timer;
 pub mod mmu;
 pub mod exceptions;
+pub mod dtb;
 pub mod boot;
 
 pub use cpu::*;

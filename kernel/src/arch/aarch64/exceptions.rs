@@ -60,7 +60,7 @@ pub fn init_exceptions() {
 
 /// Enrutador principal de interrupciones de hardware (IRQ) para AArch64
 #[no_mangle]
-pub extern "C" fn aarch64_handle_irq(frame: &mut TrapFrame) {
+pub extern "C" fn aarch64_handle_irq(_frame: &mut TrapFrame) {
     let irq_id = super::gic::GicV2::acknowledge_irq();
 
     if irq_id == 30 {
@@ -69,7 +69,7 @@ pub extern "C" fn aarch64_handle_irq(frame: &mut TrapFrame) {
     } else if irq_id == 33 {
         // Interrupción de datos entrantes por PL011 UART (SPI 1)
         if let Some(ch) = super::uart::Pl011Uart::read_byte() {
-            let _ = ch;
+            crate::interrupts::push_input_char(ch as char);
         }
     }
 

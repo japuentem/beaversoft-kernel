@@ -37,8 +37,11 @@ pub mod apic;
 pub mod crypto;
 pub mod tests;
 
+#[cfg(target_arch = "x86_64")]
 use alloc::boxed::Box;
+#[cfg(target_arch = "x86_64")]
 use alloc::string::String;
+#[cfg(target_arch = "x86_64")]
 use alloc::vec::Vec;
 use core::arch::global_asm;
 use core::panic::PanicInfo;

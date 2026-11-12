@@ -30,6 +30,7 @@ pub struct TouchPoint {
 
 /// Estado global del digitalizador táctil
 pub struct TouchscreenState {
+    pub hw_present: bool,
     pub is_initialized: bool,
     pub width: u16,
     pub height: u16,
@@ -41,6 +42,7 @@ pub struct TouchscreenState {
 impl TouchscreenState {
     pub const fn new() -> Self {
         Self {
+            hw_present: false,
             is_initialized: false,
             width: 1024,
             height: 768,
@@ -57,13 +59,20 @@ impl TouchscreenState {
         self.is_initialized = true;
     }
 
-    /// Procesa una trama de coordenadas del sensor y despacha el evento al Smart Hub
-    pub fn process_raw_touch(&mut self, id: u8, raw_x: u16, raw_y: u16, max_x: u16, max_y: u16, is_down: bool) {
+    /// Registra una trama de coordenadas y devuelve `(screen_x, screen_y)` si debe despacharse un toque
+    pub fn record_raw_touch(
+        &mut self,
+        id: u8,
+        raw_x: u16,
+        raw_y: u16,
+        max_x: u16,
+        max_y: u16,
+        is_down: bool,
+    ) -> Option<(usize, usize)> {
         if max_x == 0 || max_y == 0 {
-            return;
+            return None;
         }
 
-        // Normalizar coordenadas a la resolución del monitor/pantalla
         let screen_x = ((raw_x as u32 * self.width as u32) / max_x as u32) as u16;
         let screen_y = ((raw_y as u32 * self.height as u32) / max_y as u32) as u16;
 
@@ -95,22 +104,31 @@ impl TouchscreenState {
 
         self.total_events = self.total_events.wrapping_add(1);
 
-        // Despachar el evento táctil directamente a la interfaz Beaver Smart Hub
-        crate::gui::smart_hub::handle_click(screen_x as usize, screen_y as usize);
+        if is_down && phase == TouchPhase::Down {
+            Some((screen_x as usize, screen_y as usize))
+        } else {
+            None
+        }
     }
 }
 
 pub static TOUCHSCREEN: SpinMutex<TouchscreenState> = SpinMutex::new(TouchscreenState::new());
 
-/// Inicializa el controlador del panel táctil capacitivo
+/// Inicializa el subsistema del panel táctil capacitivo
 pub fn init_touchscreen() {
     let mut ts = TOUCHSCREEN.lock();
+    ts.hw_present = false;
     ts.calibrate(1024, 768);
-    crate::kprintln!("[TOUCH] Controlador de Digitalizador Táctil Capacitivo registrado (1024x768).");
 }
 
-/// Inyecta un toque simulado por hardware para verificación diagnóstica
+/// Procesa un toque táctil liberando primero el lock del driver antes de notificar a la GUI
 pub fn inject_touch_event(x: u16, y: u16, is_down: bool) {
-    let mut ts = TOUCHSCREEN.lock();
-    ts.process_raw_touch(0, x, y, 1024, 768, is_down);
+    let coords = {
+        let mut ts = TOUCHSCREEN.lock();
+        ts.record_raw_touch(0, x, y, 1024, 768, is_down)
+    };
+
+    if let Some((sx, sy)) = coords {
+        crate::gui::smart_hub::handle_click(sx, sy);
+    }
 }

@@ -6,7 +6,10 @@
 // ============================================================================
 
 use core::fmt::{self, Write};
-use crate::vga::{VgaColor, VGA_WRITER};
+use crate::vga::VgaColor;
+#[cfg(target_arch = "x86_64")]
+use crate::vga::VGA_WRITER;
+#[cfg(target_arch = "x86_64")]
 use crate::serial::SERIAL;
 
 pub fn _kprint(args: fmt::Arguments) {

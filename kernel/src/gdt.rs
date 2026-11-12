@@ -6,6 +6,8 @@
 //              Phase 6: Ring 3 user-mode segments + syscall/sysret support
 // ============================================================================
 
+#![cfg_attr(target_arch = "aarch64", allow(dead_code, unused_imports))]
+
 #[cfg(target_arch = "x86_64")]
 use core::arch::asm;
 use core::mem::size_of;

@@ -24,8 +24,11 @@
 // 102 = SYS_SLEEP   – suspende la ejecución por N ticks
 // ============================================================================
 
+#![cfg_attr(target_arch = "aarch64", allow(dead_code, unused_imports))]
+
 extern crate alloc;
 
+#[cfg(target_arch = "x86_64")]
 use core::arch::asm;
 use alloc::string::String;
 use alloc::vec::Vec;

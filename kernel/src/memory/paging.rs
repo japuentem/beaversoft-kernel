@@ -6,6 +6,7 @@
 //              Per-Process CR3 Address Spaces & Strict PAGE_USER Ring 3 Isolation)
 // ============================================================================
 
+#[cfg(target_arch = "x86_64")]
 use core::arch::asm;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use crate::memory::frame_allocator::{FRAME_ALLOCATOR, PAGE_SIZE};
@@ -51,6 +52,7 @@ pub fn read_cr3() -> u64 {
     #[cfg(target_arch = "x86_64")]
     {
         let cr3: u64;
+        // SAFETY: La lectura de `CR3` en Ring 0 es una operación no destructiva que obtiene la base física del PML4 activo.
         unsafe {
             asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
         }
@@ -59,6 +61,7 @@ pub fn read_cr3() -> u64 {
     #[cfg(target_arch = "aarch64")]
     {
         let ttbr0: u64;
+        // SAFETY: Lectura no destructiva del registro `TTBR0_EL1` en EL1.
         unsafe {
             core::arch::asm!("mrs {}, ttbr0_el1", out(reg) ttbr0, options(nomem, nostack));
         }
@@ -68,6 +71,7 @@ pub fn read_cr3() -> u64 {
 
 /// Carga una nueva tabla PML4 / Translation Table física en el registro de traducción.
 #[inline(always)]
+// SAFETY: El llamador garantiza que `pml4_phys` apunta a una tabla de páginas física válida de 4 KiB que incluye el mapeo supervisor del kernel.
 pub unsafe fn write_cr3(pml4_phys: u64) {
     let aligned = pml4_phys & PAGE_ADDR_MASK;
     #[cfg(target_arch = "x86_64")]
@@ -84,6 +88,7 @@ pub unsafe fn write_cr3(pml4_phys: u64) {
 #[inline(always)]
 pub fn flush_tlb_page(vaddr: u64) {
     #[cfg(target_arch = "x86_64")]
+    // SAFETY: `invlpg` solo invalida una línea de traducción en el TLB del procesador actual.
     unsafe {
         asm!("invlpg [{}]", in(reg) vaddr, options(nostack, preserves_flags));
     }

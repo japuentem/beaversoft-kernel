@@ -1009,7 +1009,16 @@ pub fn print_cpuinfo() {
 
 #[cfg(target_arch = "aarch64")]
 pub fn hardware_reboot() -> ! {
-    kprintln!("[SISTEMA] Reiniciando equipo ARM64 (PSCI SYSTEM_RESET)...");
+    kprintln!("[SISTEMA] Reiniciando equipo ARM64 (PSCI SYSTEM_RESET 0x84000009)...");
+    // SAFETY: Invocación estándar ARM PSCI 0.2 SYSTEM_RESET mediante hiperllamada HVC #0 en EL1.
+    unsafe {
+        core::arch::asm!(
+            "movz x0, #0x0009",
+            "movk x0, #0x8400, lsl #16",
+            "hvc #0",
+            options(nomem, nostack)
+        );
+    }
     loop {
         crate::arch::aarch64::cpu::wfi();
     }
@@ -1017,7 +1026,16 @@ pub fn hardware_reboot() -> ! {
 
 #[cfg(target_arch = "aarch64")]
 pub fn hardware_shutdown() -> ! {
-    kprintln!("[SISTEMA] Apagando el sistema ARM64 (PSCI SYSTEM_OFF)...");
+    kprintln!("[SISTEMA] Apagando el sistema ARM64 (PSCI SYSTEM_OFF 0x84000008)...");
+    // SAFETY: Invocación estándar ARM PSCI 0.2 SYSTEM_OFF mediante hiperllamada HVC #0 en EL1.
+    unsafe {
+        core::arch::asm!(
+            "movz x0, #0x0008",
+            "movk x0, #0x8400, lsl #16",
+            "hvc #0",
+            options(nomem, nostack)
+        );
+    }
     loop {
         crate::arch::aarch64::cpu::wfi();
     }
@@ -1156,38 +1174,31 @@ pub fn run_ipc_demo() {
 }
 
 pub fn print_cec_status(args: &[&str]) {
-    let mut cec = crate::drivers::cec::HDMI_CEC.lock();
     if !args.is_empty() {
         match args[0] {
             "play" => {
-                kprintln!("[HDMI-CEC] Enviando comando <User Control: Play>...");
-                cec.handle_frame(&crate::drivers::cec::CecFrame {
-                    initiator: crate::drivers::cec::CEC_ADDR_TV,
-                    destination: crate::drivers::cec::CEC_ADDR_PLAYBACK1,
-                    opcode: crate::drivers::cec::CEC_OP_USER_CONTROL_PRESSED,
-                    operands: [crate::drivers::cec::CEC_USER_PLAY, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    operand_count: 1,
-                });
+                kprintln!("[HDMI-CEC] Procesando comando <User Control: Play>...");
+                crate::drivers::cec::inject_cec_key(crate::drivers::cec::CEC_USER_PLAY);
                 return;
             }
             "up" => {
                 crate::drivers::cec::inject_cec_key(crate::drivers::cec::CEC_USER_UP);
-                kprintln!("[HDMI-CEC] Pulsacion <D-Pad Up> inyectada.");
+                kprintln!("[HDMI-CEC] Pulsacion <D-Pad Up> procesada.");
                 return;
             }
             "down" => {
                 crate::drivers::cec::inject_cec_key(crate::drivers::cec::CEC_USER_DOWN);
-                kprintln!("[HDMI-CEC] Pulsacion <D-Pad Down> inyectada.");
+                kprintln!("[HDMI-CEC] Pulsacion <D-Pad Down> procesada.");
                 return;
             }
             "select" | "ok" => {
                 crate::drivers::cec::inject_cec_key(crate::drivers::cec::CEC_USER_SELECT);
-                kprintln!("[HDMI-CEC] Pulsacion <Select / OK> inyectada.");
+                kprintln!("[HDMI-CEC] Pulsacion <Select / OK> procesada.");
                 return;
             }
             "active" => {
-                cec.announce_active_source();
-                kprintln!("[HDMI-CEC] Anuncio <Active Source> emitido a la TV.");
+                crate::drivers::cec::HDMI_CEC.lock().announce_active_source();
+                kprintln!("[HDMI-CEC] Anuncio <Active Source> registrado.");
                 return;
             }
             _ => {
@@ -1197,35 +1208,36 @@ pub fn print_cec_status(args: &[&str]) {
         }
     }
 
+    let cec = crate::drivers::cec::HDMI_CEC.lock();
     kprintln!("==================== CONTROLADOR HDMI-CEC (Smart TV) ====================");
-    kprintln!("  Estado del Bus:      {}", if cec.is_online { "[EN LINEA - Conectado]" } else { "[DESCONECTADO]" });
+    kprintln!("  Hardware Físico:     {}", if cec.hw_present { "[DETECTADO]" } else { "[NO DETECTADO EN BUS PCI/MMIO]" });
+    kprintln!("  Estado del Subsistema:{}", if cec.is_online { "[LISTO - Receptor de Eventos]" } else { "[INACTIVO]" });
     kprintln!("  Direccion Logica:    0x{:02X} (Playback Device 1)", cec.logical_address);
-    kprintln!("  Pantalla / TV:       {}", if cec.tv_is_on { "[ENCENDIDA]" } else { "[STANDBY]" });
-    kprintln!("  Tramas Recibidas:    {}", cec.frames_received);
+    kprintln!("  Tramas Procesadas:   {}", cec.frames_received);
     kprintln!("  Tramas Emitidas:     {}", cec.frames_sent);
     kprintln!("  Ultimo Boton Remoto: {:?}", cec.last_button_pressed);
-    kprintln!("  Integracion UI:      Mapeado automatico a Beaver Smart Hub (10-Foot UI)");
+    kprintln!("  Integracion UI:      Mapeado a Beaver Smart Hub (10-Foot UI)");
     kprintln!("=========================================================================");
 }
 
 pub fn print_touchscreen_status(args: &[&str]) {
-    let mut ts = crate::drivers::touchscreen::TOUCHSCREEN.lock();
     if args.len() >= 2 {
         let x = args[0].parse::<u16>().unwrap_or(512);
         let y = args[1].parse::<u16>().unwrap_or(384);
-        ts.process_raw_touch(0, x, y, 1024, 768, true);
-        kprintln!("[TOUCH] Evento tactil (Tap Down) inyectado en ({}, {}).", x, y);
-        ts.process_raw_touch(0, x, y, 1024, 768, false);
+        crate::drivers::touchscreen::inject_touch_event(x, y, true);
+        kprintln!("[TOUCH] Evento tactil (Tap Down) procesado en ({}, {}).", x, y);
+        crate::drivers::touchscreen::inject_touch_event(x, y, false);
         kprintln!("[TOUCH] Evento tactil (Release) completado.");
         return;
     }
 
+    let ts = crate::drivers::touchscreen::TOUCHSCREEN.lock();
     kprintln!("==================== DIGITALIZADOR TACTIL (I2C / HID) ====================");
-    kprintln!("  Estado del Sensor:   {}", if ts.is_initialized { "[CALIBRADO Y ACTIVO]" } else { "[NO INICIALIZADO]" });
+    kprintln!("  Hardware Físico:     {}", if ts.hw_present { "[SENSOR I2C/USB DETECTADO]" } else { "[SIN SENSOR I2C FISICO DETECTADO]" });
+    kprintln!("  Estado Calibracion:  {}", if ts.is_initialized { "[CALIBRADO 1024x768]" } else { "[NO INICIALIZADO]" });
     kprintln!("  Resolucion Virtual:  {} x {} px", ts.width, ts.height);
     kprintln!("  Puntos Multitouch:   5 puntos de contacto simultaneos");
     kprintln!("  Eventos Procesados:  {}", ts.total_events);
-    kprintln!("  Integracion UI:      Eventos directos a Beaver Smart Hub / GUI Canvas");
     kprintln!("  Uso interactivo:     touch <x> <y>  (ej. 'touch 300 200')");
     kprintln!("=========================================================================");
 }

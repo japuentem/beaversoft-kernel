@@ -20,8 +20,11 @@
 //   MATA sólo esa tarea, y devuelve control al scheduler – el sistema sigue.
 // ============================================================================
 
+#[cfg(target_arch = "x86_64")]
 use core::arch::asm;
-use crate::gdt::{SELECTOR_USER_CODE, SELECTOR_USER_DATA, set_tss_rsp0};
+use crate::gdt::set_tss_rsp0;
+#[cfg(target_arch = "x86_64")]
+use crate::gdt::{SELECTOR_USER_CODE, SELECTOR_USER_DATA};
 use crate::memory::frame_allocator::{FRAME_ALLOCATOR, PAGE_SIZE};
 use crate::memory::paging::{
     self, USER_CODE_VADDR, USER_STACK_PAGES, USER_STACK_VADDR,
@@ -95,6 +98,7 @@ pub fn jump_to_ring3(_entry: u64, _user_stack_top: u64) -> ! {
 macro_rules! syscall {
     ($nr:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de la instrucción `syscall` con la convención de registros de Beaver OS y MSRs previamente configurados.
         unsafe {
             asm!(
                 "syscall",
@@ -108,6 +112,7 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de `syscall` pasando 1 argumento en `rdi` y preservando la pila de usuario.
         unsafe {
             asm!(
                 "syscall",
@@ -122,6 +127,7 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de `syscall` pasando 2 argumentos en `rdi` y `rsi` según la ABI del kernel.
         unsafe {
             asm!(
                 "syscall",
@@ -137,6 +143,7 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr, $a2:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de `syscall` pasando 3 argumentos en `rdi`, `rsi` y `rdx` según la ABI estándar.
         unsafe {
             asm!(
                 "syscall",
@@ -157,6 +164,7 @@ macro_rules! syscall {
 macro_rules! syscall {
     ($nr:expr) => {{
         let ret: u64;
+        // SAFETY: Invocación de excepción supervisora `svc #0` conforme a la ABI AArch64 de Beaver OS.
         unsafe {
             core::arch::asm!(
                 "svc #0",
@@ -168,7 +176,8 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr) => {{
         let ret: u64;
-        let mut x0 = $a0 as u64;
+        let x0 = $a0 as u64;
+        // SAFETY: Invocación `svc #0` pasando 1 argumento en `x0` y número de syscall en `x8`.
         unsafe {
             core::arch::asm!(
                 "svc #0",
@@ -181,7 +190,8 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr) => {{
         let ret: u64;
-        let mut x0 = $a0 as u64;
+        let x0 = $a0 as u64;
+        // SAFETY: Invocación `svc #0` pasando 2 argumentos en `x0` y `x1` y número de syscall en `x8`.
         unsafe {
             core::arch::asm!(
                 "svc #0",
@@ -195,7 +205,8 @@ macro_rules! syscall {
     }};
     ($nr:expr, $a0:expr, $a1:expr, $a2:expr) => {{
         let ret: u64;
-        let mut x0 = $a0 as u64;
+        let x0 = $a0 as u64;
+        // SAFETY: Invocación `svc #0` pasando 3 argumentos en `x0`, `x1` y `x2` y número de syscall en `x8`.
         unsafe {
             core::arch::asm!(
                 "svc #0",
@@ -505,6 +516,6 @@ pub fn spawn_userland_shell() {
 
 #[cfg(target_arch = "aarch64")]
 pub fn spawn_userland_shell() {
-    crate::kprintln!("\n[AArch64] Shell interactivo EL0 iniciado.");
+    crate::kprintln!("\n[AArch64] Ejecucion EL0 pendiente de activacion de tablas TTBR0 en este target.");
 }
 
