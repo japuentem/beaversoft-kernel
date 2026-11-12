@@ -79,13 +79,54 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
     crate::drivers::touchscreen::init_touchscreen();
     crate::drivers::cec::init_cec();
 
-    // 7. Habilitar Interrupciones en el Núcleo (DAIFCLR #2)
+    // 7. Activar MMU (TTBR0/TTBR1), Heap Dinámico (4 MiB), Frame Allocator y VFS
+    let fb_phys = fb_opt.map(|f| f.phys_base).unwrap_or(0);
+    super::mmu::Aarch64Mmu::init_and_enable_identity_mmu(fb_phys);
+    Pl011Uart::write_str("[ARM64] MMU L0->L1 (TTBR0/TTBR1 + I/D-Cache) activado [OK]\n");
+
+    let heap_start = (crate::memory::kernel_end() + 0xFFFF) & !0xFFFF;
+    const AARCH64_HEAP_SIZE: usize = 4 * 1024 * 1024;
+    // SAFETY: `heap_start..heap_start + AARCH64_HEAP_SIZE` queda inmediatamente después de `_kernel_end` en RAM física mapeada.
+    unsafe {
+        crate::memory::heap::HEAP_ALLOCATOR.init(heap_start, AARCH64_HEAP_SIZE);
+    }
+
+    let (ram_base, ram_size) = {
+        let st = dtb::DTB_STATE.lock();
+        if st.ram_size != 0 {
+            (st.ram_base, st.ram_size)
+        } else {
+            (0x4000_0000u64, 256 * 1024 * 1024u64)
+        }
+    };
+    let heap_end = (heap_start + AARCH64_HEAP_SIZE) as u64;
+    let ram_end = ram_base.saturating_add(ram_size);
+    let mut memmap = crate::memory::MemMap::empty();
+    if ram_end > heap_end {
+        memmap.regions[0] = crate::memory::memmap::MemRegion {
+            start: heap_end,
+            len: ram_end - heap_end,
+            usable: true,
+        };
+        memmap.count = 1;
+    }
+    crate::memory::frame_allocator::FRAME_ALLOCATOR.init_from_memmap(&memmap);
+    crate::fs::init_vfs();
+    Pl011Uart::write_str("[ARM64] Heap (4 MiB), FrameAllocator y VFS operativos [OK]\n");
+
+    // 8. Habilitar Interrupciones en el Núcleo (DAIFCLR #2)
     Pl011Uart::write_str("[ARM64] Habilitando interrupciones de hardware en CPU...\n");
     cpu::enable_interrupts();
-    Pl011Uart::write_str("[ARM64] Beaver OS ARM64 completamente operativo. Entrando a bucle supervisor...\n\n");
+    Pl011Uart::write_str("[ARM64] Beaver OS ARM64 completamente operativo. Iniciando Beaver Shell...\n\n");
 
-    // 8. Bucle supervisor determinista con instrucción de bajo consumo WFI
+    crate::shell::SHELL.lock().prompt();
+
+    // 9. Bucle interactivo UART PL011 + ahorro determinista WFI
     loop {
+        while let Some(byte) = Pl011Uart::read_byte() {
+            let ch = if byte == b'\r' { '\n' } else { byte as char };
+            crate::shell::SHELL.lock().handle_char(ch);
+        }
         cpu::halt();
     }
 }

@@ -24,7 +24,45 @@ pub const PTE_USER: u64     = 1 << 6;  // Permiso AP[1]=1 (Accesible desde Ring 
 
 pub struct Aarch64Mmu;
 
+#[repr(C, align(4096))]
+struct PageTable512([u64; 512]);
+
+static mut KERNEL_L0_TABLE: PageTable512 = PageTable512([0; 512]);
+static mut KERNEL_L1_TABLE: PageTable512 = PageTable512([0; 512]);
+
 impl Aarch64Mmu {
+    /// Construye tablas L0->L1 con mapeo de identidad (Device MMIO 0..1GiB + RAM Normal 1..2GiB) y activa el MMU.
+    pub fn init_and_enable_identity_mmu(fb_phys: u64) {
+        unsafe {
+            let l1_addr = core::ptr::addr_of!(KERNEL_L1_TABLE) as u64;
+            let l0_addr = core::ptr::addr_of!(KERNEL_L0_TABLE) as u64;
+
+            // L0[0] -> Tabla L1 (cubre los primeros 512 GiB)
+            KERNEL_L0_TABLE.0[0] = (l1_addr & 0x0000_FFFF_FFFF_F000) | PTE_VALID | PTE_TABLE;
+
+            // L1[0]: 0x0000_0000 .. 0x3FFF_FFFF (1 GiB Device-nGnRnE: GICv2, PL011 UART, VirtIO, PCIe MMIO)
+            KERNEL_L1_TABLE.0[0] = 0x0000_0000 | PTE_VALID | PTE_AF | PTE_ATTR_DEV;
+
+            // L1[1]: 0x4000_0000 .. 0x7FFF_FFFF (1 GiB Normal Write-Back Inner-Shareable: RAM, Kernel, Heap, DTB)
+            KERNEL_L1_TABLE.0[1] = 0x4000_0000 | PTE_VALID | PTE_AF | PTE_SH_INNER | PTE_ATTR_NORM;
+
+            // Si el bootloader móvil entrega un SimpleFB >= 2 GiB, mapear su bloque de 1 GiB como Device/FB
+            if fb_phys >= 0x8000_0000 {
+                let l1_idx = (fb_phys >> 30) as usize;
+                if l1_idx < 512 {
+                    let block_base = (l1_idx as u64) << 30;
+                    KERNEL_L1_TABLE.0[l1_idx] = block_base | PTE_VALID | PTE_AF | PTE_ATTR_DEV;
+                }
+            }
+
+            Self::configure_attributes();
+            Self::set_ttbr0(l0_addr);
+            Self::set_ttbr1(l0_addr);
+            Self::flush_tlb();
+            Self::enable_mmu();
+        }
+    }
+
     /// Inicializa registros de control del MMU (MAIR, TCR) antes de habilitar paginación
     pub fn configure_attributes() {
         let mair = MAIR_DEVICE_NGNRNE | (MAIR_NORMAL_WB << 8);
