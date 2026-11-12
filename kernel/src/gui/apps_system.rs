@@ -94,6 +94,7 @@ pub enum FilesViewTab {
     Home,
     Proc,
     Sys,
+    Trash,
 }
 
 pub static FILES_VIEW_TAB: SpinMutex<FilesViewTab> = SpinMutex::new(FilesViewTab::Net);
@@ -120,11 +121,12 @@ pub fn draw_files_window() {
     Canvas::draw_string_prop(x + 12, y + 42, "UBICACIONES", Color::BEAVER_TEXT_MUTED, None);
 
     let tabs = [
-        (FilesViewTab::Net,  "Red Mesh",     SidebarIconKind::Mesh,     60),
-        (FilesViewTab::Disk, "Disco (/disk)",SidebarIconKind::Disk,     84),
-        (FilesViewTab::Home, "Home (/home)", SidebarIconKind::Home,     108),
-        (FilesViewTab::Proc, "Proc (/proc)", SidebarIconKind::Settings, 132),
-        (FilesViewTab::Sys,  "Sys (/sys)",   SidebarIconKind::Terminal, 156),
+        (FilesViewTab::Net,   "Red Mesh",         SidebarIconKind::Mesh,     56),
+        (FilesViewTab::Disk,  "Disco (/disk)",    SidebarIconKind::Disk,     78),
+        (FilesViewTab::Home,  "Home (/home)",     SidebarIconKind::Home,     100),
+        (FilesViewTab::Proc,  "Proc (/proc)",     SidebarIconKind::Settings, 122),
+        (FilesViewTab::Sys,   "Sys (/sys)",       SidebarIconKind::Terminal, 144),
+        (FilesViewTab::Trash, "Papelera (/trash)",SidebarIconKind::Trash,    166),
     ];
 
     for (t, label, icon_kind, ty) in &tabs {
@@ -170,8 +172,9 @@ pub fn draw_files_window() {
         FilesViewTab::Home => "Home",
         FilesViewTab::Proc => "Proc",
         FilesViewTab::Sys => "Sistema",
+        FilesViewTab::Trash => "Papelera (/trash)",
     };
-    Canvas::fill_rounded_rect(main_x + 54, y + 36, 120, 22, 4, Color::BEAVER_TITANIUM_BAR);
+    Canvas::fill_rounded_rect(main_x + 54, y + 36, 140, 22, 4, Color::BEAVER_TITANIUM_BAR);
     Canvas::draw_string_prop(main_x + 64, y + 39, path_label, Color::BEAVER_TEXT_DARK, None);
 
     let search_w = 140;
@@ -228,6 +231,16 @@ pub fn draw_files_window() {
                 }
             }
         }
+        FilesViewTab::Trash => {
+            Canvas::fill_rounded_rect(main_x + 12, y + 78, main_w.saturating_sub(24), 130, 8, Color::WHITE);
+            Canvas::draw_rounded_rect(main_x + 12, y + 78, main_w.saturating_sub(24), 130, 8, Color::BEAVER_BORDER_LIGHT);
+
+            draw_sidebar_icon(main_x + 24, y + 96, SidebarIconKind::Trash, Color::SLATE_400);
+            Canvas::draw_string_prop(main_x + 50, y + 96, "Papelera de Reciclaje (Vacia)", Color::BEAVER_TEXT_DARK, None);
+            Canvas::draw_string_prop(main_x + 50, y + 116, "Los archivos eliminados en BeaverFS se depositan aqui.", Color::BEAVER_TEXT_MUTED, None);
+            Canvas::draw_string_prop(main_x + 50, y + 134, "Cero elementos pendientes de purga o restauracion en disco.", Color::BEAVER_TEXT_MUTED, None);
+            Canvas::draw_string_prop(main_x + 50, y + 154, "Almacenamiento: Libre | BeaverFS Paridad OK", Color::BEAVER_EMERALD, None);
+        }
         _ => {
             Canvas::fill_rounded_rect(main_x + 8, y + 78, main_w.saturating_sub(16), 80, 8, Color::WHITE);
             Canvas::draw_rounded_rect(main_x + 8, y + 78, main_w.saturating_sub(16), 80, 8, Color::BEAVER_BORDER_LIGHT);
@@ -237,7 +250,11 @@ pub fn draw_files_window() {
     }
 
     let footer_y = y + h - 22;
-    Canvas::draw_string_prop(main_x + 12, footer_y + 3, "5 elementos, 2.4 MB disponibles en BeaverFS", Color::BEAVER_TEXT_MUTED, None);
+    let footer_text = match tab {
+        FilesViewTab::Trash => "0 elementos en Papelera, 2.4 MB disponibles en BeaverFS",
+        _ => "5 elementos, 2.4 MB disponibles en BeaverFS",
+    };
+    Canvas::draw_string_prop(main_x + 12, footer_y + 3, footer_text, Color::BEAVER_TEXT_MUTED, None);
 }
 
 pub fn render_files_window() {
@@ -253,16 +270,18 @@ pub fn render_files_window() {
 
 pub fn handle_files_click(mx: usize, my: usize, wx: usize, wy: usize) {
     if mx >= wx && mx <= wx + 140 {
-        if my >= wy + 50 && my <= wy + 72 {
+        if my >= wy + 46 && my <= wy + 66 {
             *FILES_VIEW_TAB.lock() = FilesViewTab::Net;
-        } else if my >= wy + 74 && my <= wy + 96 {
+        } else if my >= wy + 68 && my <= wy + 88 {
             *FILES_VIEW_TAB.lock() = FilesViewTab::Disk;
-        } else if my >= wy + 98 && my <= wy + 120 {
+        } else if my >= wy + 90 && my <= wy + 110 {
             *FILES_VIEW_TAB.lock() = FilesViewTab::Home;
-        } else if my >= wy + 122 && my <= wy + 144 {
+        } else if my >= wy + 112 && my <= wy + 132 {
             *FILES_VIEW_TAB.lock() = FilesViewTab::Proc;
-        } else if my >= wy + 146 && my <= wy + 168 {
+        } else if my >= wy + 134 && my <= wy + 154 {
             *FILES_VIEW_TAB.lock() = FilesViewTab::Sys;
+        } else if my >= wy + 156 && my <= wy + 178 {
+            *FILES_VIEW_TAB.lock() = FilesViewTab::Trash;
         }
     }
 
@@ -596,6 +615,297 @@ pub fn draw_spotlight_overlay(screen_w: usize, _screen_h: usize) {
             }
             Canvas::draw_string_prop(modal_x + 24, ry + 4, &res.title, if is_selected { Color::WHITE } else { Color::BEAVER_AMBER }, None);
             Canvas::draw_string_prop(modal_x + 24, ry + 18, &res.desc, Color::SLATE_400, None);
+        }
+    }
+}
+
+// ============================================================================
+// Calculadora - Beaver OS (Ring 3 Ready)
+// ============================================================================
+
+pub struct CalcState {
+    pub display: String,
+    pub operand: i64,
+    pub pending_op: Option<char>,
+    pub fresh_input: bool,
+}
+
+pub static CALC_STATE: SpinMutex<CalcState> = SpinMutex::new(CalcState {
+    display: String::new(),
+    operand: 0,
+    pending_op: None,
+    fresh_input: true,
+});
+
+pub fn draw_calculator_window() {
+    let (x, y, w, h, is_active) = {
+        let mgr = WINDOW_MGR.lock();
+        if let Some(win) = mgr.get_window(WindowId::Calculator) {
+            (win.x, win.y, win.width, win.height, mgr.is_active(WindowId::Calculator))
+        } else {
+            return;
+        }
+    };
+
+    Canvas::draw_window(x, y, w, h, "Calculadora - Beaver OS", is_active);
+
+    // 1. Pantalla LCD Digital
+    let disp_x = x + 12;
+    let disp_y = y + 36;
+    let disp_w = w.saturating_sub(24);
+    let disp_h = 44;
+    Canvas::fill_rounded_rect(disp_x, disp_y, disp_w, disp_h, 6, 0x020617);
+    Canvas::draw_rounded_rect(disp_x, disp_y, disp_w, disp_h, 6, 0x334155);
+
+    let (disp_text, op_hint) = {
+        let st = CALC_STATE.lock();
+        let txt = if st.display.is_empty() { String::from("0") } else { st.display.clone() };
+        let op = st.pending_op.map(|c| format!("Op: {}", c)).unwrap_or_default();
+        (txt, op)
+    };
+
+    if !op_hint.is_empty() {
+        Canvas::draw_string_prop(disp_x + 8, disp_y + 4, &op_hint, Color::BEAVER_AMBER, None);
+    }
+    let tw = Canvas::string_width_prop(&disp_text);
+    let tx = (disp_x + disp_w).saturating_sub(tw + 12);
+    Canvas::draw_string_prop(tx, disp_y + 16, &disp_text, Color::BEAVER_GREEN, None);
+
+    // 2. Cuadrícula de Botones (4 columnas x 5 filas)
+    let btn_labels = [
+        ["C", "(", ")", "/"],
+        ["7", "8", "9", "*"],
+        ["4", "5", "6", "-"],
+        ["1", "2", "3", "+"],
+        ["0", "00", "DEL", "="],
+    ];
+
+    let grid_x = x + 12;
+    let grid_y = y + 90;
+    let btn_w = (disp_w.saturating_sub(18)) / 4;
+    let btn_h = 42;
+    let gap = 6;
+
+    for row in 0..5 {
+        for col in 0..4 {
+            let bx = grid_x + col * (btn_w + gap);
+            let by = grid_y + row * (btn_h + gap);
+            let lbl = btn_labels[row][col];
+
+            let (bg_col, text_col, border_col) = match lbl {
+                "C" => (0x7F1D1D, Color::WHITE, 0xDC2626),
+                "=" => (0x065F46, Color::WHITE, Color::BEAVER_GREEN),
+                "/" | "*" | "-" | "+" => (0x78350F, Color::BEAVER_AMBER_LIGHT, 0xF59E0B),
+                "DEL" => (0x334155, Color::WHITE, Color::SLATE_400),
+                _ => (Color::BEAVER_TITANIUM_BAR, Color::BEAVER_TEXT_DARK, Color::BEAVER_BORDER_LIGHT),
+            };
+
+            Canvas::fill_rounded_rect(bx, by, btn_w, btn_h, 6, bg_col);
+            Canvas::draw_rounded_rect(bx, by, btn_w, btn_h, 6, border_col);
+            let lw = Canvas::string_width_prop(lbl);
+            let lx = bx + (btn_w.saturating_sub(lw)) / 2;
+            let ly = by + 12;
+            Canvas::draw_string_prop(lx, ly, lbl, text_col, None);
+        }
+    }
+}
+
+pub fn render_calculator_window() {
+    draw_calculator_window();
+    let mgr = WINDOW_MGR.lock();
+    if let Some(win) = mgr.get_window(WindowId::Calculator) {
+        let (x, y, w, h) = (win.x, win.y, win.width, win.height);
+        drop(mgr);
+        Canvas::mark_dirty_rect(x, y, w + 8, h + 8);
+        Canvas::present_dirty();
+    }
+}
+
+pub fn handle_calculator_click(mx: usize, my: usize, wx: usize, wy: usize) {
+    let win = WINDOW_MGR.lock().get_window(WindowId::Calculator).cloned();
+    if let Some(w) = win {
+        let disp_w = w.width.saturating_sub(24);
+        let grid_x = wx + 12;
+        let grid_y = wy + 90;
+        let btn_w = (disp_w.saturating_sub(18)) / 4;
+        let btn_h = 42;
+        let gap = 6;
+
+        let btn_labels = [
+            ["C", "(", ")", "/"],
+            ["7", "8", "9", "*"],
+            ["4", "5", "6", "-"],
+            ["1", "2", "3", "+"],
+            ["0", "00", "DEL", "="],
+        ];
+
+        for row in 0..5 {
+            for col in 0..4 {
+                let bx = grid_x + col * (btn_w + gap);
+                let by = grid_y + row * (btn_h + gap);
+                if mx >= bx && mx <= bx + btn_w && my >= by && my <= by + btn_h {
+                    crate::drivers::audio::click_feedback();
+                    let lbl = btn_labels[row][col];
+                    let mut st = CALC_STATE.lock();
+                    match lbl {
+                        "C" => {
+                            st.display.clear();
+                            st.operand = 0;
+                            st.pending_op = None;
+                            st.fresh_input = true;
+                        }
+                        "DEL" => {
+                            st.display.pop();
+                        }
+                        "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                            if st.fresh_input {
+                                st.display.clear();
+                                st.fresh_input = false;
+                            }
+                            if st.display.len() < 14 {
+                                st.display.push_str(lbl);
+                            }
+                        }
+                        "00" => {
+                            if st.fresh_input {
+                                st.display.clear();
+                                st.fresh_input = false;
+                            }
+                            if st.display.len() < 13 && !st.display.is_empty() {
+                                st.display.push_str("00");
+                            }
+                        }
+                        "+" | "-" | "*" | "/" => {
+                            let curr_val = parse_int_i64(&st.display);
+                            st.operand = curr_val;
+                            st.pending_op = lbl.chars().next();
+                            st.fresh_input = true;
+                        }
+                        "=" => {
+                            if let Some(op) = st.pending_op {
+                                let rhs = parse_int_i64(&st.display);
+                                let res = match op {
+                                    '+' => st.operand.checked_add(rhs),
+                                    '-' => st.operand.checked_sub(rhs),
+                                    '*' => st.operand.checked_mul(rhs),
+                                    '/' => if rhs != 0 { st.operand.checked_div(rhs) } else { None },
+                                    _ => None,
+                                };
+                                match res {
+                                    Some(val) => {
+                                        st.display = format!("{}", val);
+                                        st.operand = val;
+                                    }
+                                    None => {
+                                        st.display = String::from("Error");
+                                    }
+                                }
+                                st.pending_op = None;
+                                st.fresh_input = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                    drop(st);
+                    render_calculator_window();
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn parse_int_i64(s: &str) -> i64 {
+    let mut val: i64 = 0;
+    let mut neg = false;
+    for ch in s.chars() {
+        if ch == '-' {
+            neg = true;
+        } else if ch.is_ascii_digit() {
+            val = val.saturating_mul(10).saturating_add((ch as u8 - b'0') as i64);
+        }
+    }
+    if neg { -val } else { val }
+}
+
+// ============================================================================
+// Acerca de Beaver OS - Ventana Institucional (BeaverInfo)
+// ============================================================================
+
+pub fn draw_about_window() {
+    let (x, y, w, h, is_active) = {
+        let mgr = WINDOW_MGR.lock();
+        if let Some(win) = mgr.get_window(WindowId::About) {
+            (win.x, win.y, win.width, win.height, mgr.is_active(WindowId::About))
+        } else {
+            return;
+        }
+    };
+
+    Canvas::draw_window(x, y, w, h, "Acerca de Beaver OS", is_active);
+
+    // Cabecera con Logotipo
+    Canvas::fill_rounded_rect(x + 20, y + 42, 44, 44, 10, Color::BEAVER_AMBER);
+    Canvas::draw_rounded_rect(x + 20, y + 42, 44, 44, 10, Color::BEAVER_AMBER_LIGHT);
+    Canvas::draw_string(x + 36, y + 54, "B", Color::WHITE, None);
+
+    Canvas::draw_string_prop(x + 76, y + 42, "Beaver OS v0.9.0 (beaver-kernel)", Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop(x + 76, y + 58, "Marca: Beaversoft | Autor: Jose Alberto Puente Maldonado", Color::BEAVER_AMBER_DARK, None);
+    Canvas::draw_string_prop(x + 76, y + 74, "Rust Bare-Metal Kernel (x86_64 & AArch64)", Color::BEAVER_TEXT_MUTED, None);
+
+    Canvas::draw_line_h(x + 20, y + 96, w.saturating_sub(40), Color::BEAVER_BORDER_LIGHT);
+
+    // Especificaciones Técnicas Reales
+    let specs = [
+        ("Arquitectura:", "Microkernel hibrido en Rust (no_std, Ring 0 / Ring 3)"),
+        ("Seguridad:", "Aislamiento de procesos por CR3 y MSR Syscalls LSTAR"),
+        ("Almacenamiento:", "BeaverFS transaccional con proteccion A/B anti-brickeo"),
+        ("Red & Mesh:", "Controlador RTL8139 TCP/IP y BeaverMesh P2P (:4242)"),
+        ("Graficos:", "VESA VBE TrueColor (1024x768) con Dirty Rects y Doble Bufer"),
+        ("Entorno Dual:", "Beaver Desktop (Ventanas) + Beaver Shell (CLI)"),
+    ];
+
+    for (i, (k, v)) in specs.iter().enumerate() {
+        let sy = y + 108 + i * 22;
+        Canvas::draw_string_prop(x + 24, sy, k, Color::BEAVER_TEXT_DARK, None);
+        Canvas::draw_string_prop(x + 130, sy, v, Color::BEAVER_TEXT_MUTED, None);
+    }
+
+    // Botón Aceptar / Cerrar
+    let btn_w = 110;
+    let btn_h = 28;
+    let btn_x = x + (w.saturating_sub(btn_w)) / 2;
+    let btn_y = y + h.saturating_sub(38);
+    Canvas::fill_rounded_rect(btn_x, btn_y, btn_w, btn_h, 6, Color::BEAVER_AMBER);
+    Canvas::draw_rounded_rect(btn_x, btn_y, btn_w, btn_h, 6, Color::BEAVER_AMBER_DARK);
+    let tw = Canvas::string_width_prop("Aceptar");
+    Canvas::draw_string_prop(btn_x + (btn_w.saturating_sub(tw)) / 2, btn_y + 6, "Aceptar", Color::WHITE, None);
+}
+
+pub fn render_about_window() {
+    draw_about_window();
+    let mgr = WINDOW_MGR.lock();
+    if let Some(win) = mgr.get_window(WindowId::About) {
+        let (x, y, w, h) = (win.x, win.y, win.width, win.height);
+        drop(mgr);
+        Canvas::mark_dirty_rect(x, y, w + 8, h + 8);
+        Canvas::present_dirty();
+    }
+}
+
+pub fn handle_about_click(mx: usize, my: usize, wx: usize, wy: usize) {
+    let win = WINDOW_MGR.lock().get_window(WindowId::About).cloned();
+    if let Some(w) = win {
+        let btn_w = 110;
+        let btn_h = 28;
+        let btn_x = wx + (w.width.saturating_sub(btn_w)) / 2;
+        let btn_y = wy + w.height.saturating_sub(38);
+        if mx >= btn_x && mx <= btn_x + btn_w && my >= btn_y && my <= btn_y + btn_h {
+            crate::drivers::audio::click_feedback();
+            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                mgr.minimize(WindowId::About);
+            }
+            crate::gui::desktop::render_desktop();
         }
     }
 }

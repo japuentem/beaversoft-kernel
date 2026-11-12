@@ -20,6 +20,8 @@ pub enum WindowId {
     Sync = 5,
     Photos = 6,
     Calendar = 7,
+    Calculator = 8,
+    About = 9,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -47,7 +49,7 @@ pub struct Window {
 
 pub struct WindowManager {
     pub windows: Vec<Window>,
-    pub z_order: [WindowId; 8], // Índice 0 = fondo, Índice 7 = frente (activa)
+    pub z_order: [WindowId; 10], // Índice 0 = fondo, Índice 9 = frente (activa)
     pub dragging_window: Option<WindowId>,
     pub drag_offset_x: usize,
     pub drag_offset_y: usize,
@@ -57,7 +59,18 @@ impl WindowManager {
     pub const fn new() -> Self {
         Self {
             windows: Vec::new(),
-            z_order: [WindowId::Photos, WindowId::Calendar, WindowId::Sync, WindowId::Note, WindowId::Monitor, WindowId::Files, WindowId::Player, WindowId::Terminal],
+            z_order: [
+                WindowId::About,
+                WindowId::Calculator,
+                WindowId::Photos,
+                WindowId::Calendar,
+                WindowId::Sync,
+                WindowId::Note,
+                WindowId::Monitor,
+                WindowId::Files,
+                WindowId::Player,
+                WindowId::Terminal,
+            ],
             dragging_window: None,
             drag_offset_x: 0,
             drag_offset_y: 0,
@@ -178,7 +191,46 @@ impl WindowManager {
                 restore_w: 480,
                 restore_h: 370,
             });
-            self.z_order = [WindowId::Photos, WindowId::Calendar, WindowId::Sync, WindowId::Note, WindowId::Monitor, WindowId::Files, WindowId::Player, WindowId::Terminal];
+            self.windows.push(Window {
+                id: WindowId::Calculator,
+                title: "Calculadora - Beaver OS",
+                x: 370,
+                y: 110,
+                width: 270,
+                height: 360,
+                minimized: true,
+                maximized: false,
+                restore_x: 370,
+                restore_y: 110,
+                restore_w: 270,
+                restore_h: 360,
+            });
+            self.windows.push(Window {
+                id: WindowId::About,
+                title: "Acerca de Beaver OS",
+                x: 270,
+                y: 120,
+                width: 480,
+                height: 320,
+                minimized: true,
+                maximized: false,
+                restore_x: 270,
+                restore_y: 120,
+                restore_w: 480,
+                restore_h: 320,
+            });
+            self.z_order = [
+                WindowId::About,
+                WindowId::Calculator,
+                WindowId::Photos,
+                WindowId::Calendar,
+                WindowId::Sync,
+                WindowId::Note,
+                WindowId::Monitor,
+                WindowId::Files,
+                WindowId::Player,
+                WindowId::Terminal,
+            ];
         }
     }
 
@@ -270,7 +322,7 @@ impl WindowManager {
 
     /// Trae la ventana seleccionada al frente en el orden Z
     pub fn bring_to_front(&mut self, id: WindowId) {
-        let mut new_order = [WindowId::Monitor; 8];
+        let mut new_order = [WindowId::Monitor; 10];
         let mut idx = 0;
         for &w in &self.z_order {
             if w != id {
@@ -278,12 +330,12 @@ impl WindowManager {
                 idx += 1;
             }
         }
-        new_order[7] = id;
+        new_order[9] = id;
         self.z_order = new_order;
     }
 
     pub fn is_active(&self, id: WindowId) -> bool {
-        self.z_order[7] == id
+        self.z_order[9] == id
     }
 
     /// Comprueba si las coordenadas (mx, my) caen en la barra de título de una ventana

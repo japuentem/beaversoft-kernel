@@ -46,8 +46,6 @@ pub enum DesktopIconAction {
     OpenSmartHub,
     OpenTrash,
     ToggleTheme,
-    OpenBio,
-    OpenCalculator,
 }
 
 pub struct DesktopGridIcon {
@@ -105,7 +103,7 @@ pub const DESKTOP_GRID_ICONS: [DesktopGridIcon; 12] = [
         icon_kind: SidebarIconKind::Settings,
         bg_color: 0x1E1B4B,
         border_color: 0x818CF8,
-        action: DesktopIconAction::OpenCalculator,
+        action: DesktopIconAction::OpenWindow(WindowId::Calculator),
     },
     DesktopGridIcon {
         col: 0,
@@ -170,7 +168,7 @@ pub const DESKTOP_GRID_ICONS: [DesktopGridIcon; 12] = [
         icon_kind: SidebarIconKind::Settings,
         bg_color: 0x2E1065,
         border_color: 0xE879F9,
-        action: DesktopIconAction::OpenBio,
+        action: DesktopIconAction::OpenWindow(WindowId::About),
     },
 ];
 
@@ -227,7 +225,7 @@ pub fn draw_desktop_grid_icons(theme: DesktopTheme) {
                 Canvas::put_pixel(icon_x + 20, icon_y + 18, 0x10B981);
                 Canvas::draw_line_h(icon_x + 22, icon_y + 22, 18, 0x10B981);
             }
-            DesktopIconAction::OpenCalculator => {
+            DesktopIconAction::OpenWindow(WindowId::Calculator) => {
                 Canvas::fill_rounded_rect(icon_x + 10, icon_y + 7, 28, 33, 4, 0x312E81);
                 Canvas::fill_rect(icon_x + 13, icon_y + 11, 22, 6, 0xC7D2FE);
                 Canvas::fill_rect(icon_x + 14, icon_y + 20, 4, 4, Color::WHITE);
@@ -243,7 +241,7 @@ pub fn draw_desktop_grid_icons(theme: DesktopTheme) {
                 Canvas::draw_line_h(icon_x + 18, icon_y + 35, 12, 0x22D3EE);
                 Canvas::draw_line_v(icon_x + 24, icon_y + 33, 3, 0x22D3EE);
             }
-            DesktopIconAction::OpenBio => {
+            DesktopIconAction::OpenWindow(WindowId::About) => {
                 draw_file_document(icon_x + 12, icon_y + 8, 24, 30, "CV", Color::BEAVER_PURPLE);
             }
             _ => {
@@ -283,6 +281,8 @@ pub fn render_window_dirty(win_id: WindowId) {
         WindowId::Sync => render_sync_window(),
         WindowId::Photos => render_photos_window(),
         WindowId::Calendar => render_calendar_window(),
+        WindowId::Calculator => render_calculator_window(),
+        WindowId::About => render_about_window(),
     }
     let (mx, my) = {
         let m = crate::drivers::mouse::MOUSE.lock();
@@ -415,6 +415,8 @@ pub fn render_desktop() {
             WindowId::Sync => draw_sync_window(),
             WindowId::Photos => draw_photos_window(),
             WindowId::Calendar => draw_calendar_window(),
+            WindowId::Calculator => draw_calculator_window(),
+            WindowId::About => draw_about_window(),
         }
     }
 
@@ -1174,6 +1176,14 @@ pub fn handle_mouse_event(state: crate::drivers::mouse::MouseState) {
                         if let Some((wx, wy)) = win_coords {
                             handle_calendar_click(mx, my, wx, wy);
                         }
+                    } else if win_id == WindowId::Calculator {
+                        if let Some((wx, wy)) = win_coords {
+                            handle_calculator_click(mx, my, wx, wy);
+                        }
+                    } else if win_id == WindowId::About {
+                        if let Some((wx, wy)) = win_coords {
+                            handle_about_click(mx, my, wx, wy);
+                        }
                     }
 
                     let spot_opened = SPOTLIGHT.try_lock().map(|s| s.is_open).unwrap_or(false);
@@ -1314,6 +1324,13 @@ fn handle_desktop_click(mx: usize, my: usize) {
         crate::drivers::audio::click_feedback();
         match action {
             DesktopIconAction::OpenWindow(win_id) => {
+                if win_id == WindowId::Terminal {
+                    if let Some(mut state) = GUI_TERMINAL.try_lock() {
+                        state.lines.retain(|l| !l.starts_with("[CALC]"));
+                    }
+                } else if win_id == WindowId::Files {
+                    *FILES_VIEW_TAB.lock() = FilesViewTab::Disk;
+                }
                 if let Some(mut mgr) = WINDOW_MGR.try_lock() {
                     mgr.unminimize_and_focus(win_id);
                     drop(mgr);
@@ -1334,27 +1351,10 @@ fn handle_desktop_click(mx: usize, my: usize) {
                 render_desktop();
             }
             DesktopIconAction::OpenTrash => {
+                *FILES_VIEW_TAB.lock() = FilesViewTab::Trash;
                 if let Some(mut mgr) = WINDOW_MGR.try_lock() {
                     mgr.unminimize_and_focus(WindowId::Files);
                     drop(mgr);
-                    render_desktop();
-                }
-            }
-            DesktopIconAction::OpenBio => {
-                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                    mgr.unminimize_and_focus(WindowId::Note);
-                    drop(mgr);
-                    render_desktop();
-                }
-            }
-            DesktopIconAction::OpenCalculator => {
-                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                    mgr.unminimize_and_focus(WindowId::Terminal);
-                    drop(mgr);
-                    if let Some(mut state) = GUI_TERMINAL.try_lock() {
-                        state.lines.push(String::from("[CALC] Beaver Calc en Terminal activa. Escribe expresiones matematicas."));
-                        drop(state);
-                    }
                     render_desktop();
                 }
             }
@@ -1374,6 +1374,9 @@ fn handle_desktop_click(mx: usize, my: usize) {
                 crate::drivers::audio::click_feedback();
                 match i {
                     0 => {
+                        if let Some(mut state) = GUI_TERMINAL.try_lock() {
+                            state.lines.retain(|l| !l.starts_with("[CALC]"));
+                        }
                         if let Some(mut mgr) = WINDOW_MGR.try_lock() {
                             mgr.unminimize_and_focus(WindowId::Terminal);
                             drop(mgr);
@@ -1390,6 +1393,7 @@ fn handle_desktop_click(mx: usize, my: usize) {
                         return;
                     }
                     2 => {
+                        *FILES_VIEW_TAB.lock() = FilesViewTab::Disk;
                         if let Some(mut mgr) = WINDOW_MGR.try_lock() {
                             mgr.unminimize_and_focus(WindowId::Files);
                             drop(mgr);

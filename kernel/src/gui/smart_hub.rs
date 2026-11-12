@@ -69,7 +69,7 @@ pub fn render_smart_hub() {
     Canvas::draw_string_prop(76, 16, "BEAVER SMART HUB", Color::WHITE, None);
     Canvas::fill_rounded_rect(240, 18, 230, 24, 12, 0x111E38);
     Canvas::draw_rounded_rect(240, 18, 230, 24, 12, Color::BEAVER_ACCENT_CYAN);
-    Canvas::draw_string_prop(252, 21, "[MODO TV & KIOSCO DOMÓTICO]", Color::BEAVER_ACCENT_CYAN, None);
+    Canvas::draw_string_prop(252, 21, "[MODO TV & KIOSCO DOMOTICO]", Color::BEAVER_ACCENT_CYAN, None);
 
     // Información en Vivo (Uptime, Red Mesh, Reloj)
     let uptime = get_uptime_seconds();
@@ -80,14 +80,14 @@ pub fn render_smart_hub() {
 
     Canvas::draw_string_prop(width - 320, 16, "Malla P2P: :4242 [3 Nodos]", Color::BEAVER_TEAL_BRIGHT, None);
     Canvas::draw_string_prop(width - 130, 16, &clock_str, Color::BEAVER_AMBER_LIGHT, None);
-    Canvas::draw_string_prop(width - 320, 38, "IP Local: 192.168.1.50 • Cero Nube", Color::SLATE_400, None);
+    Canvas::draw_string_prop(width - 320, 38, "IP Local: 192.168.1.50 | Cero Nube", Color::SLATE_400, None);
 
     // 3. Renderizado de la Cuadrícula de 6 Mosaicos Inteligentes (3 Cols x 2 Rows)
     let state = SMART_HUB.lock();
     let focused = state.focused_tile;
-    let fridge_temp_str = format!("{}.{} °C", state.fridge_temp_tenths / 10, (state.fridge_temp_tenths % 10).abs());
+    let fridge_temp_str = format!("{}.{} C", state.fridge_temp_tenths / 10, (state.fridge_temp_tenths % 10).abs());
     let fridge_door_str = if state.fridge_door_open { "ABIERTA (Alerta)" } else { "CERRADA (Segura)" };
-    let light_str = if state.ambient_light_on { "ENCENDIDA (Cálida)" } else { "APAGADA (Ahorro)" };
+    let light_str = if state.ambient_light_on { "ENCENDIDA (Calida)" } else { "APAGADA (Ahorro)" };
     let last_act = state.last_action.clone();
     drop(state);
 
@@ -123,13 +123,13 @@ pub fn render_smart_hub() {
 
     // Botones Táctiles de Gran Escala en la Parte Inferior
     draw_touch_button(42, 655, 215, 48, "[ ESC ] MODO ESCRITORIO", Color::BEAVER_ACCENT_CYAN, 0x131E33);
-    draw_touch_button(275, 655, 215, 48, "[ T ] AJUSTAR FRÍO (-1°C)", Color::BEAVER_GREEN, 0x10261E);
+    draw_touch_button(275, 655, 215, 48, "[ T ] AJUSTAR FRIO (-1 C)", Color::BEAVER_GREEN, 0x10261E);
     draw_touch_button(508, 655, 215, 48, "[ P ] PUERTA REFRIGERADOR", Color::BEAVER_AMBER, 0x2E2010);
     draw_touch_button(741, 655, 240, 48, "[ M ] SINCRONIZAR MESH :4242", Color::BEAVER_PURPLE, 0x221538);
 
     // Indicaciones de Navegación D-Pad
-    Canvas::draw_string_prop(42, 715, "Controles de Sala:  [FLECHAS / D-PAD / WASD] Mover Foco   •   [ENTER / ESPACIO] Abrir   •   [ESC] Escritorio", Color::SLATE_400, None);
-    Canvas::draw_string_prop(42, 735, "Beaver OS v0.9.0 • Arquitectura Determinista Anti-Bloqueos • Creado por José Alberto Puente Maldonado", 0x475569, None);
+    Canvas::draw_string_prop(42, 715, "Controles de Sala:  [FLECHAS / D-PAD / WASD] Mover Foco   |   [ENTER / ESPACIO] Abrir   |   [ESC] Escritorio", Color::SLATE_400, None);
+    Canvas::draw_string_prop(42, 735, "Beaver OS v0.9.0 | Arquitectura Determinista Anti-Bloqueos | Creado por Jose Alberto Puente Maldonado", 0x475569, None);
 
     // 5. Dibujar puntero de ratón o toque
     let (mx, my) = {
@@ -177,11 +177,11 @@ fn draw_smart_tile(
 
     match idx {
         0 => {
-            // [REFRIGERADOR Y DOMÓTICA]
+            // [REFRIGERADOR Y DOMOTICA]
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, Color::BEAVER_GREEN);
             Canvas::draw_string(x + 23, y + 20, "F", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 16, "REFRIGERADOR SMART", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 34, "Control de Electrodoméstico", Color::BEAVER_GREEN, None);
+            Canvas::draw_string_prop(x + 50, y + 34, "Control de Electrodomestico", Color::BEAVER_GREEN, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
             Canvas::draw_string_prop(x + 18, y + 68, "Temperatura Interior:", Color::SLATE_200, None);
@@ -191,7 +191,7 @@ fn draw_smart_tile(
             Canvas::draw_string_prop(x + 18, y + 145, "Estado Puerta:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 165, fridge_door, if fridge_door.starts_with("A") { Color::BEAVER_RED } else { Color::BEAVER_GREEN }, None);
 
-            Canvas::draw_string_prop(x + 18, y + 190, "Iluminación:", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 190, "Iluminacion:", Color::SLATE_400, None);
             Canvas::draw_string_prop(x + 18, y + 208, light_status, Color::BEAVER_AMBER_LIGHT, None);
 
             Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para ajustar", Color::SLATE_400, None);
@@ -204,14 +204,14 @@ fn draw_smart_tile(
             Canvas::draw_string_prop(x + 50, y + 34, "Audio & TV TrueColor", Color::BEAVER_PURPLE, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
-            Canvas::draw_string_prop(x + 18, y + 68, "Salida Gráfica:", Color::SLATE_200, None);
+            Canvas::draw_string_prop(x + 18, y + 68, "Salida Grafica:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 88, "VESA / GOP TrueColor 60 Hz", Color::WHITE, None);
 
             Canvas::draw_string_prop(x + 18, y + 118, "Subsistema de Audio:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 138, "AC97 / Intel HDA Nativo", Color::BEAVER_TEAL_BRIGHT, None);
 
             Canvas::draw_string_prop(x + 18, y + 168, "Fotos Familiares:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 188, "Galería Local BeaverPhotos", Color::BEAVER_AMBER_LIGHT, None);
+            Canvas::draw_string_prop(x + 18, y + 188, "Galeria Local BeaverPhotos", Color::BEAVER_AMBER_LIGHT, None);
 
             Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para reproducir", Color::SLATE_400, None);
         }
@@ -220,13 +220,13 @@ fn draw_smart_tile(
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, Color::BEAVER_ACCENT_CYAN);
             Canvas::draw_string(x + 23, y + 20, "N", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 16, "MALLA BEAVERMESH", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 34, "Interconexión P2P :4242", Color::BEAVER_ACCENT_CYAN, None);
+            Canvas::draw_string_prop(x + 50, y + 34, "Interconexion P2P :4242", Color::BEAVER_ACCENT_CYAN, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
             Canvas::draw_string_prop(x + 18, y + 68, "Nodos Activos en Casa:", Color::SLATE_200, None);
-            Canvas::draw_string_prop(x + 18, y + 90, "• Nodo 1: Smart TV (Sala)", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 112, "• Nodo 2: Smart Fridge (Cocina)", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 18, y + 134, "• Nodo 3: Laptop (Despacho)", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 18, y + 90, "- Nodo 1: Smart TV (Sala)", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 18, y + 112, "- Nodo 2: Smart Fridge (Cocina)", Color::WHITE, None);
+            Canvas::draw_string_prop(x + 18, y + 134, "- Nodo 3: Laptop (Despacho)", Color::WHITE, None);
 
             Canvas::draw_string_prop(x + 18, y + 165, "Privacidad del Hogar:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 185, "Cero datos enviados a internet", Color::BEAVER_GREEN, None);
@@ -252,7 +252,7 @@ fn draw_smart_tile(
             Canvas::draw_string_prop(x + 18, y + 145, "Resiliencia de Disco:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 165, "BeaverFS Doble Slot A/B Anti-Corte", Color::BEAVER_TEAL_BRIGHT, None);
 
-            Canvas::draw_string_prop(x + 18, y + 195, "CPU / Estado Térmico: Fresco (HLT)", Color::SLATE_400, None);
+            Canvas::draw_string_prop(x + 18, y + 195, "CPU / Estado Termico: Fresco (HLT)", Color::SLATE_400, None);
             Canvas::draw_string_prop(x + 18, y + 232, ">> Presiona ENTER o Toca para abrir Monitor", Color::SLATE_400, None);
         }
         4 => {
@@ -260,7 +260,7 @@ fn draw_smart_tile(
             Canvas::fill_rounded_rect(x + 14, y + 14, 28, 28, 6, 0xF43F5E);
             Canvas::draw_string(x + 23, y + 20, "R", Color::WHITE, None);
             Canvas::draw_string_prop(x + 50, y + 16, "RECETAS & NOTAS", Color::WHITE, None);
-            Canvas::draw_string_prop(x + 50, y + 34, "BeaverNote Domótico", 0xF43F5E, None);
+            Canvas::draw_string_prop(x + 50, y + 34, "BeaverNote Domotico", 0xF43F5E, None);
             Canvas::draw_line_h(x + 14, y + 52, w - 28, Color::SLATE_700);
 
             Canvas::draw_string_prop(x + 18, y + 68, "Notas Familiares en Disco:", Color::SLATE_200, None);
@@ -284,7 +284,7 @@ fn draw_smart_tile(
             Canvas::draw_string_prop(x + 18, y + 68, "Modo de Privilegio:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 90, "Espacio de Usuario CPL=3", Color::BEAVER_GREEN, None);
 
-            Canvas::draw_string_prop(x + 18, y + 120, "Pasarela Rápida:", Color::SLATE_200, None);
+            Canvas::draw_string_prop(x + 18, y + 120, "Pasarela Rapida:", Color::SLATE_200, None);
             Canvas::draw_string_prop(x + 18, y + 140, "IA32_LSTAR (0xC0000082) ~42 ciclos", Color::BEAVER_ACCENT_CYAN, None);
 
             Canvas::draw_string_prop(x + 18, y + 175, "Prompt Interactivo: root@beaver:/#", Color::WHITE, None);
@@ -375,7 +375,7 @@ pub fn handle_key(ch: char) -> bool {
             if state.fridge_temp_tenths < 10 {
                 state.fridge_temp_tenths = 50; // Cliclo de +1.0 a +5.0 °C
             }
-            let temp_str = format!("{}.{} °C", state.fridge_temp_tenths / 10, state.fridge_temp_tenths % 10);
+            let temp_str = format!("{}.{} C", state.fridge_temp_tenths / 10, state.fridge_temp_tenths % 10);
             state.last_action = format!("[REFRIGERADOR] Temperatura fijada a {}", temp_str);
             crate::drivers::audio::click_feedback();
             drop(state);
@@ -421,7 +421,7 @@ pub fn handle_click(mx: usize, my: usize) -> bool {
             exit_to_desktop();
             return true;
         } else if mx >= 275 && mx <= 490 {
-            // [ T ] AJUSTAR FRÍO
+            // [ T ] AJUSTAR FRIO
             handle_key('t');
             return true;
         } else if mx >= 508 && mx <= 723 {
@@ -471,8 +471,8 @@ fn execute_tile_action(state: &mut SmartHubState, tile_idx: usize) {
             if state.fridge_temp_tenths < 15 {
                 state.fridge_temp_tenths = 45;
             }
-            let temp_str = format!("{}.{} °C", state.fridge_temp_tenths / 10, state.fridge_temp_tenths % 10);
-            state.last_action = format!("[REFRIGERADOR] Frío ajustado a {}. Compresor operando normalmente en Ring 3.", temp_str);
+            let temp_str = format!("{}.{} C", state.fridge_temp_tenths / 10, state.fridge_temp_tenths % 10);
+            state.last_action = format!("[REFRIGERADOR] Frio ajustado a {}. Compresor operando normalmente en Ring 3.", temp_str);
             render_smart_hub();
         }
         1 => {

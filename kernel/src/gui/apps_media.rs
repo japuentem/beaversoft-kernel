@@ -17,11 +17,13 @@ use crate::gui::icons::*;
 pub struct PlayerState {
     pub is_playing: bool,
     pub track_idx: usize,
+    pub category: usize, // 0 = Canciones, 1 = Efectos, 2 = Sintesis
 }
 
 pub static PLAYER_STATE: SpinMutex<PlayerState> = SpinMutex::new(PlayerState {
     is_playing: false,
     track_idx: 0,
+    category: 0,
 });
 
 pub fn draw_player_window() {
@@ -34,9 +36,39 @@ pub fn draw_player_window() {
         }
     };
 
-    Canvas::draw_window(x, y, w, h, "01 Beaver Chime.wav - BeaverAudio", is_active);
-
     let state = *PLAYER_STATE.lock();
+
+    let (tracks, window_title) = match state.category {
+        1 => (
+            [
+                ("1", "Campana Notificacion",   "Beaver FX Studio",     "0:01"),
+                ("2", "Alerta Anti-Crash OK",   "Resilience Lab",       "0:02"),
+                ("3", "Handshake BeaverMesh",   "Net Engine :4242",     "0:01"),
+                ("4", "Pulsacion Teclado",      "Hardware Haptic",      "0:01"),
+            ],
+            "Efectos de Sonido - BeaverAudio",
+        ),
+        2 => (
+            [
+                ("1", "Tono Senoidal 440 Hz",   "DSP Synthesizer",      "0:05"),
+                ("2", "Barrido Audio 1k-4kHz",  "Frequency Generator",  "0:04"),
+                ("3", "Ruido Blanco Audio DAC", "Noise Generator",      "0:03"),
+                ("4", "Onda Cuadrada PIT 100Hz","Timer Synthesizer",    "0:05"),
+            ],
+            "Sintesis Acustica DSP - BeaverAudio",
+        ),
+        _ => (
+            [
+                ("1", "Beaver Chime (PCM Startup)", "Beaver Audio Lab",  "0:03"),
+                ("2", "Northern Lights (Ring3)",   "The Sample Band",   "3:45"),
+                ("3", "Silicon Dawn (Waves DSP)",  "MSR Audio Engine",  "4:12"),
+                ("4", "Kernel Harmony (HDA Dual)", "Beaver Core Driver","2:30"),
+            ],
+            "01 Beaver Chime.wav - BeaverAudio",
+        ),
+    };
+
+    Canvas::draw_window(x, y, w, h, window_title, is_active);
 
     // 1. Barra Lateral Izquierda (Biblioteca estilo Lord OS)
     let sb_w = 110;
@@ -45,15 +77,20 @@ pub fn draw_player_window() {
 
     Canvas::draw_string_prop(x + 10, y + 42, "BIBLIOTECA", Color::BEAVER_TEXT_MUTED, None);
 
-    Canvas::fill_rounded_rect(x + 5, y + 58, sb_w - 10, 22, 6, 0xDBEAFE);
-    draw_sidebar_icon(x + 10, y + 60, SidebarIconKind::Music, Color::BEAVER_AMBER);
-    Canvas::draw_string_prop(x + 30, y + 62, "Canciones", Color::BEAVER_TEXT_DARK, None);
-
-    draw_sidebar_icon(x + 10, y + 84, SidebarIconKind::Settings, Color::BEAVER_TEXT_MUTED);
-    Canvas::draw_string_prop(x + 30, y + 86, "Efectos", Color::BEAVER_TEXT_DARK, None);
-
-    draw_sidebar_icon(x + 10, y + 108, SidebarIconKind::Terminal, Color::BEAVER_TEXT_MUTED);
-    Canvas::draw_string_prop(x + 30, y + 110, "Sintesis", Color::BEAVER_TEXT_DARK, None);
+    let cat_y_offsets = [58, 84, 108];
+    let cat_items = [
+        ("Canciones", SidebarIconKind::Music),
+        ("Efectos", SidebarIconKind::Settings),
+        ("Sintesis", SidebarIconKind::Terminal),
+    ];
+    for (i, (lbl, icon)) in cat_items.iter().enumerate() {
+        let is_sel = state.category == i;
+        let bg = if is_sel { 0xDBEAFE } else { Color::BEAVER_TITANIUM_BAR };
+        let ico_col = if is_sel { Color::BEAVER_AMBER } else { Color::BEAVER_TEXT_MUTED };
+        Canvas::fill_rounded_rect(x + 5, y + cat_y_offsets[i], sb_w - 10, 22, 6, bg);
+        draw_sidebar_icon(x + 10, y + cat_y_offsets[i] + 2, *icon, ico_col);
+        Canvas::draw_string_prop(x + 30, y + cat_y_offsets[i] + 4, lbl, Color::BEAVER_TEXT_DARK, None);
+    }
 
     // 2. Lista de Pistas (Estilo Lord OS)
     let list_x = x + sb_w + 12;
@@ -61,13 +98,6 @@ pub fn draw_player_window() {
 
     Canvas::draw_string_prop(list_x, y + 40, "#   Titulo                      Artista               Tiempo", Color::BEAVER_TEXT_MUTED, None);
     Canvas::draw_line_h(list_x, y + 54, list_w, Color::BEAVER_BORDER_LIGHT);
-
-    let tracks = [
-        ("1", "Beaver Chime (PCM Startup)",  "Beaver Audio Lab",     "0:03"),
-        ("2", "Northern Lights (Ring3)",    "The Sample Band",      "3:45"),
-        ("3", "Silicon Dawn (Waves DSP)",   "MSR Audio Engine",     "4:12"),
-        ("4", "Kernel Harmony (HDA Dual)",  "Beaver Core Driver",   "2:30"),
-    ];
 
     for (i, (num, title, artist, duration)) in tracks.iter().enumerate() {
         let ty = y + 64 + i * 26;
@@ -96,10 +126,11 @@ pub fn draw_player_window() {
     Canvas::draw_rounded_rect(art_x, art_y, 42, 42, 8, Color::SLATE_600);
     Canvas::draw_string(art_x + 17, art_y + 13, "B", Color::BEAVER_AMBER, None);
 
+    let cur_track_name = tracks[state.track_idx.min(3)].1;
     let (cur_title, cur_status) = if state.is_playing {
-        ("Beaver Chime (PCM Startup)", "Reproduciendo - HDA Duplex 44.1kHz")
+        (cur_track_name, "Reproduciendo - HDA Duplex 44.1kHz")
     } else {
-        ("Beaver Chime (PCM Startup)", "En pausa - Presione Play")
+        (cur_track_name, "En pausa - Presione Play")
     };
     Canvas::draw_string_prop(x + 62, ctrl_y + 14, cur_title, Color::BEAVER_TEXT_DARK, None);
     Canvas::draw_string_prop(x + 62, ctrl_y + 30, cur_status, Color::BEAVER_TEXT_MUTED, None);
@@ -139,24 +170,125 @@ pub fn render_player_window() {
 pub fn handle_player_click(mx: usize, my: usize, wx: usize, wy: usize) {
     let win = WINDOW_MGR.lock().get_window(WindowId::Player).cloned();
     if let Some(w) = win {
+        let sb_w = 110;
+        // 1. Clic en la barra lateral de categorías
+        if mx >= wx && mx <= wx + sb_w {
+            let mut state = PLAYER_STATE.lock();
+            let mut changed = false;
+            if my >= wy + 56 && my <= wy + 80 {
+                state.category = 0;
+                state.track_idx = 0;
+                changed = true;
+            } else if my >= wy + 82 && my <= wy + 104 {
+                state.category = 1;
+                state.track_idx = 0;
+                changed = true;
+            } else if my >= wy + 106 && my <= wy + 130 {
+                state.category = 2;
+                state.track_idx = 0;
+                changed = true;
+            }
+            if changed {
+                state.is_playing = false;
+                drop(state);
+                crate::drivers::audio::click_feedback();
+                render_player_window();
+                return;
+            }
+        }
+
+        // 2. Clic en las pistas individuales
+        let list_x = wx + sb_w + 12;
+        let list_w = w.width.saturating_sub(sb_w + 22);
+        if mx >= list_x && mx <= list_x + list_w {
+            for i in 0..4 {
+                let ty = wy + 64 + i * 26;
+                if my >= ty - 3 && my <= ty + 22 {
+                    let mut state = PLAYER_STATE.lock();
+                    state.track_idx = i;
+                    state.is_playing = true;
+                    let cat = state.category;
+                    drop(state);
+                    play_track_audio(cat, i);
+                    render_player_window();
+                    return;
+                }
+            }
+        }
+
+        // 3. Controles inferiores
         let ctrl_y = wy + w.height.saturating_sub(68);
         let ctrl_cx = wx + w.width / 2 + 40;
-        if mx >= ctrl_cx.saturating_sub(18) && mx <= ctrl_cx + 18 && my >= ctrl_y + 10 && my <= ctrl_y + 40 {
+
+        // Previous
+        if mx >= ctrl_cx.saturating_sub(38) && mx <= ctrl_cx.saturating_sub(18) && my >= ctrl_y + 12 && my <= ctrl_y + 36 {
+            let mut state = PLAYER_STATE.lock();
+            state.track_idx = (state.track_idx + 3) % 4;
+            state.is_playing = true;
+            let (cat, idx) = (state.category, state.track_idx);
+            drop(state);
+            play_track_audio(cat, idx);
+            render_player_window();
+            return;
+        }
+
+        // Play / Pause
+        if mx >= ctrl_cx.saturating_sub(16) && mx <= ctrl_cx + 16 && my >= ctrl_y + 10 && my <= ctrl_y + 40 {
             let mut state = PLAYER_STATE.lock();
             state.is_playing = !state.is_playing;
-            let playing = state.is_playing;
+            let (playing, cat, idx) = (state.is_playing, state.category, state.track_idx);
             drop(state);
             if playing {
-                crate::drivers::audio::play_chime();
+                play_track_audio(cat, idx);
             }
             render_player_window();
+            return;
         }
+
+        // Next
+        if mx >= ctrl_cx + 18 && mx <= ctrl_cx + 38 && my >= ctrl_y + 12 && my <= ctrl_y + 36 {
+            let mut state = PLAYER_STATE.lock();
+            state.track_idx = (state.track_idx + 1) % 4;
+            state.is_playing = true;
+            let (cat, idx) = (state.category, state.track_idx);
+            drop(state);
+            play_track_audio(cat, idx);
+            render_player_window();
+            return;
+        }
+    }
+}
+
+fn play_track_audio(cat: usize, track: usize) {
+    match (cat, track) {
+        (0, 0) => crate::drivers::audio::play_chime(),
+        (0, 1) => crate::drivers::audio::play_tone(523, 150),
+        (0, 2) => crate::drivers::audio::play_tone(659, 150),
+        (0, 3) => crate::drivers::audio::play_tone(784, 180),
+        (1, 0) => crate::drivers::audio::play_tone(880, 90),
+        (1, 1) => crate::drivers::audio::play_tone(440, 120),
+        (1, 2) => crate::drivers::audio::play_tone(1046, 90),
+        (1, 3) => crate::drivers::audio::play_tone(220, 50),
+        (2, 0) => crate::drivers::audio::play_tone(440, 200),
+        (2, 1) => crate::drivers::audio::play_tone(1200, 150),
+        (2, 2) => crate::drivers::audio::play_tone(350, 150),
+        (2, 3) => crate::drivers::audio::play_tone(100, 200),
+        _ => crate::drivers::audio::click_feedback(),
     }
 }
 
 // ============================================================================
 // BeaverPhotos - Galería y Visor Gráfico de Imágenes (Lord OS Style)
 // ============================================================================
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PhotosTab {
+    Todas = 0,
+    Paisajes = 1,
+    Malla = 2,
+}
+
+pub static PHOTOS_TAB: SpinMutex<PhotosTab> = SpinMutex::new(PhotosTab::Todas);
 
 pub fn draw_photos_window() {
     let (x, y, w, h, is_active) = {
@@ -170,43 +302,68 @@ pub fn draw_photos_window() {
 
     Canvas::draw_window(x, y, w, h, "BeaverPhotos - Galeria y Visor de Imagenes", is_active);
 
+    let tab = *PHOTOS_TAB.lock();
+    let is_todas = tab == PhotosTab::Todas;
+    let is_paisajes = tab == PhotosTab::Paisajes;
+    let is_malla = tab == PhotosTab::Malla;
+
     let sb_w = 125;
     Canvas::fill_rect(x + 1, y + 32, sb_w, h.saturating_sub(33), Color::BEAVER_TITANIUM_BAR);
     Canvas::draw_line_v(x + 1 + sb_w, y + 32, h.saturating_sub(33), Color::BEAVER_BORDER_LIGHT);
 
     Canvas::draw_string_prop(x + 10, y + 42, "BIBLIOTECA", Color::BEAVER_TEXT_MUTED, None);
-    Canvas::fill_rounded_rect(x + 6, y + 58, sb_w - 12, 22, 6, 0xDBEAFE);
-    draw_sidebar_icon(x + 10, y + 60, SidebarIconKind::Photos, Color::BEAVER_TEAL);
+
+    Canvas::fill_rounded_rect(x + 6, y + 58, sb_w - 12, 22, 6, if is_todas { 0xDBEAFE } else { Color::BEAVER_TITANIUM_BAR });
+    draw_sidebar_icon(x + 10, y + 60, SidebarIconKind::Photos, if is_todas { Color::BEAVER_AMBER } else { Color::BEAVER_TEXT_MUTED });
     Canvas::draw_string_prop(x + 32, y + 62, "Todas (6)", Color::BEAVER_TEXT_DARK, None);
 
-    draw_sidebar_icon(x + 10, y + 86, SidebarIconKind::Home, Color::BEAVER_TEXT_MUTED);
+    Canvas::fill_rounded_rect(x + 6, y + 84, sb_w - 12, 22, 6, if is_paisajes { 0xDBEAFE } else { Color::BEAVER_TITANIUM_BAR });
+    draw_sidebar_icon(x + 10, y + 86, SidebarIconKind::Home, if is_paisajes { Color::BEAVER_AMBER } else { Color::BEAVER_TEXT_MUTED });
     Canvas::draw_string_prop(x + 32, y + 88, "Paisajes", Color::BEAVER_TEXT_DARK, None);
 
-    draw_sidebar_icon(x + 10, y + 112, SidebarIconKind::Mesh, Color::BEAVER_TEXT_MUTED);
+    Canvas::fill_rounded_rect(x + 6, y + 110, sb_w - 12, 22, 6, if is_malla { 0xDBEAFE } else { Color::BEAVER_TITANIUM_BAR });
+    draw_sidebar_icon(x + 10, y + 112, SidebarIconKind::Mesh, if is_malla { Color::BEAVER_AMBER } else { Color::BEAVER_TEXT_MUTED });
     Canvas::draw_string_prop(x + 32, y + 114, "Malla P2P", Color::BEAVER_TEXT_DARK, None);
 
     let main_x = x + sb_w + 12;
     let main_w = w.saturating_sub(sb_w + 20);
 
-    Canvas::draw_string_prop(main_x, y + 42, "Galeria de ejemplo (miniaturas generadas por codigo)", Color::BEAVER_TEXT_DARK, None);
+    let header_desc = match tab {
+        PhotosTab::Todas => "Galeria completa (6 miniaturas generadas por codigo)",
+        PhotosTab::Paisajes => "Directorio: Paisajes Naturales y Horizontes (3 fotos)",
+        PhotosTab::Malla => "Directorio: Malla P2P y Cosmos Interconectado (3 fotos)",
+    };
+    Canvas::draw_string_prop(main_x, y + 42, header_desc, Color::BEAVER_TEXT_DARK, None);
     Canvas::draw_line_h(main_x, y + 62, main_w, Color::BEAVER_BORDER_LIGHT);
 
     let thumb_w = 135;
     let thumb_h = 115;
-    let thumbs_meta = [
-        ("Event Horizon", 0x1E1B4B, 0x7C3AED, 0xF59E0B),
-        ("Northern Lights", 0x064E3B, 0x0D9488, 0x6EE7B7),
-        ("Silicon Dawn", 0x1E293B, 0xB45309, 0xFCD34D),
-        ("Beaver River", 0x0C4A6E, 0x0284C7, 0xBAE6FD),
-        ("Supernova 2026", 0x450A0A, 0xDC2626, 0xFDE047),
-        ("Starfield Cluster", 0x020617, 0x38BDF8, 0xFFFFFF),
+    let all_thumbs = [
+        ("Event Horizon", 0x1E1B4B, 0x7C3AED, 0xF59E0B, 2),
+        ("Northern Lights", 0x064E3B, 0x0D9488, 0x6EE7B7, 1),
+        ("Silicon Dawn", 0x1E293B, 0xB45309, 0xFCD34D, 1),
+        ("Beaver River", 0x0C4A6E, 0x0284C7, 0xBAE6FD, 1),
+        ("Supernova 2026", 0x450A0A, 0xDC2626, 0xFDE047, 2),
+        ("Starfield Cluster", 0x020617, 0x38BDF8, 0xFFFFFF, 2),
     ];
 
-    for (i, (name, bg, mid, glow)) in thumbs_meta.iter().enumerate() {
-        let col = i % 3;
-        let row = i / 3;
+    let mut filtered_idx = 0;
+    for (i, (name, bg, mid, glow, category)) in all_thumbs.iter().enumerate() {
+        let should_show = match tab {
+            PhotosTab::Todas => true,
+            PhotosTab::Paisajes => *category == 1,
+            PhotosTab::Malla => *category == 2,
+        };
+
+        if !should_show {
+            continue;
+        }
+
+        let col = filtered_idx % 3;
+        let row = filtered_idx / 3;
         let tx = main_x + 6 + col * (thumb_w + 14);
         let ty = y + 72 + row * (thumb_h + 30);
+        filtered_idx += 1;
 
         if ty + thumb_h <= y + h {
             Canvas::fill_rounded_rect(tx, ty, thumb_w, thumb_h, 8, *bg);
@@ -272,21 +429,59 @@ pub fn handle_photos_click(mx: usize, my: usize, wx: usize, wy: usize) {
     let win = WINDOW_MGR.lock().get_window(WindowId::Photos).cloned();
     if let Some(_w) = win {
         let sb_w = 125;
+        // Clic en la barra lateral de álbumes
+        if mx >= wx && mx <= wx + sb_w {
+            let mut changed = false;
+            if my >= wy + 56 && my <= wy + 80 {
+                *PHOTOS_TAB.lock() = PhotosTab::Todas;
+                changed = true;
+            } else if my >= wy + 82 && my <= wy + 104 {
+                *PHOTOS_TAB.lock() = PhotosTab::Paisajes;
+                changed = true;
+            } else if my >= wy + 106 && my <= wy + 130 {
+                *PHOTOS_TAB.lock() = PhotosTab::Malla;
+                changed = true;
+            }
+            if changed {
+                crate::drivers::audio::click_feedback();
+                render_photos_window();
+                return;
+            }
+        }
+
         let main_x = wx + sb_w + 12;
         let thumb_w = 135;
         let thumb_h = 115;
+        let tab = *PHOTOS_TAB.lock();
 
-        for i in 0..6 {
-            let col = i % 3;
-            let row = i / 3;
+        let all_thumbs = [
+            ("Event Horizon", 2),
+            ("Northern Lights", 1),
+            ("Silicon Dawn", 1),
+            ("Beaver River", 1),
+            ("Supernova 2026", 2),
+            ("Starfield Cluster", 2),
+        ];
+
+        let mut filtered_idx = 0;
+        for (_name, category) in all_thumbs.iter() {
+            let should_show = match tab {
+                PhotosTab::Todas => true,
+                PhotosTab::Paisajes => *category == 1,
+                PhotosTab::Malla => *category == 2,
+            };
+            if !should_show {
+                continue;
+            }
+
+            let col = filtered_idx % 3;
+            let row = filtered_idx / 3;
             let tx = main_x + 6 + col * (thumb_w + 14);
             let ty = wy + 72 + row * (thumb_h + 30);
+            filtered_idx += 1;
+
             if mx >= tx && mx <= tx + thumb_w && my >= ty && my <= ty + thumb_h {
                 crate::drivers::audio::click_feedback();
-                if let Some(mut state) = crate::gui::desktop::GUI_TERMINAL.try_lock() {
-                    let photo_names = ["Event Horizon", "Northern Lights", "Silicon Dawn", "Beaver River", "Supernova 2026", "Starfield Cluster"];
-                    state.lines.push(format!("[FOTOS][DEMO] '{}' es una miniatura generada por codigo; no existe archivo en disco.", photo_names[i]));
-                }
                 render_photos_window();
                 return;
             }

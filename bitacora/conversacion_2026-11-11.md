@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-11
-// Total de interacciones del día: 6
+// Total de interacciones del día: 7
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-11
@@ -133,6 +133,45 @@ Se implementó la cuadrícula de iconos de escritorio interactiva en **Beaver De
 3. **Verificación de No Regresión (Regla 7):**
    - Compilación limpia sin errores ni warnings en `x86_64-unknown-none` y `aarch64-unknown-none`.
    - Suite automatizada de pruebas `run.ps1 -Test` aprobada al **100% (16/16)** con código de salida 33 (`0x10`).
+
+================================================================================
+
+## Interacción #7 [18:59:15]
+
+### 👤 Pregunta / Petición del Usuario:
+-terminal si abre la terminal pero dice CALC
+-calculadora abre una terminal
+-papelera abre explorador vfs
+-audio permite sonar Beaver chime pero no termina y no deja seleccionar otro, tampoco deja navegar a Efectos o algun otro sonido
+-fotos no deja cambiar al directorio Paisajes o algun otro
+-Beaverinfo abre bloc de notas
+-TV / Hub no se que muestra
+[Se adjuntaron 7 capturas de pantalla de la interfaz de Beaver Desktop y Smart Hub evidenciando cada uno de los comportamientos]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se auditaron y corrigieron exhaustivamente los 7 puntos reportados en Beaver Desktop y Beaver Smart Hub:
+
+1. **Terminal sin textos `[CALC]` residuales:**
+   - Se purgó la inyección de cadenas `[CALC]` en `GUI_TERMINAL.lines` que ocurría al abrir la terminal o calculadora. Al abrir la terminal se limpian las líneas huérfanas con `retain(|l| !l.starts_with("[CALC]"))`, manteniendo el prompt limpio `root@beaver:/# `.
+2. **Ventana de Calculadora Gráfica Interactiva ([`WindowId::Calculator`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/window.rs)):**
+   - Se creó una aplicación gráfica dedicada (270x360 px) en [`kernel/src/gui/apps_system.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_system.rs) con pantalla digital LCD TrueColor, cuadrícula de botones táctiles (`0-9`, `+`, `-`, `*`, `/`, `=`, `C`, `DEL`, `00`), aritmética entera segura de 64 bits (`saturating_add`, `saturating_mul`, división protegida contra cero) y clic feedback acústico.
+3. **Papelera de Reciclaje Visual (`FilesViewTab::Trash`):**
+   - Se añadió la pestaña `Trash` en `BeaverFiles` y enrutamiento exclusivo para el icono de Papelera en el escritorio. Muestra una vista dedicada con icono de papelera vacía ("Papelera de Reciclaje (Vacia) | 0 elementos eliminados"), distinguiéndola del disco raíz `/disk`.
+4. **BeaverAudio ([`kernel/src/gui/apps_media.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_media.rs)):**
+   - Se habilitó la selección interactiva de categorías en la barra lateral (`Canciones`, `Efectos`, `Sintesis`), el cambio de fila de pistas activas y la reproducción inmediata de 12 efectos acústicos y chimes distintos vía `play_tone` / `play_chime` en hardware real y PC Speaker / Intel HDA DMA.
+5. **BeaverPhotos ([`kernel/src/gui/apps_media.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_media.rs)):**
+   - Se implementó la selección interactiva de pestañas de álbumes (`Todas`, `Paisajes`, `Malla P2P`), filtrando dinámicamente las miniaturas visuales generadas por código TrueColor y respondiendo a los clics del usuario.
+6. **BeaverInfo — Ventana "Acerca de Beaver OS" ([`WindowId::About`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/window.rs)):**
+   - Se reemplazó la apertura de BeaverNote por una ventana modal institucional estilizada (480x320 px) en [`apps_system.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_system.rs) que detalla especificaciones del kernel bare-metal (`x86_64` / `ARM64`), memoria, arquitectura de protección Ring 3, autoría oficial de José Alberto Puente Maldonado (japuentem) y marca comercial Beaversoft.
+7. **Beaver Smart Hub (TV / Hub) y Depuración Visual UTF-8:**
+   - Se explicó en detalle el propósito de Beaver Smart Hub (interfaz 10-Foot UI de sala para Smart TVs con control remoto HDMI-CEC y kioscos táctiles domóticos como refrigeradores inteligentes, saliendo con `[ESC]` a Beaver Desktop).
+   - Se eliminaron todos los caracteres multi-byte UTF-8 no soportados por el renderizador tipográfico ASCII (`DOMÓTICO`, `•`, `°C`, `Gráfica`, `Iluminación`, `Cálida`, `FRÍO`, `Electrodoméstico`), eliminando por completo los símbolos corruptos `?` observados en las capturas.
+
+**Verificación:**
+- Compilación cruzada exitosa en `x86_64-unknown-none` y `aarch64-unknown-none`.
+- 16/16 pruebas de `run.ps1 -Test` aprobadas (100% de éxito, código 33).
 
 ================================================================================
 
