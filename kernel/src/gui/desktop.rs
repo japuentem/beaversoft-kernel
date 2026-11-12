@@ -32,6 +32,69 @@ pub enum DesktopTheme {
 pub static CURRENT_THEME: SpinMutex<DesktopTheme> = SpinMutex::new(DesktopTheme::DarkCosmic);
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Beaver Modular Deskbar (Opción B: BeOS / SGI IRIX Modernizada)
+// ──────────────────────────────────────────────────────────────────────────────
+pub struct BeaverDrawerState {
+    pub is_open: bool,
+}
+
+pub static BEAVER_DRAWER: SpinMutex<BeaverDrawerState> = SpinMutex::new(BeaverDrawerState {
+    is_open: false,
+});
+
+/// Dibuja el Cajón de Aplicaciones Flotante (Beaver App Drawer) desplegado desde la Deskbar
+pub fn draw_beaver_drawer(theme: DesktopTheme) {
+    let (dx, dy, dw, dh) = (6, 30, 230, 362);
+    let bg_color = match theme {
+        DesktopTheme::DarkCosmic => 0x0B1222,
+        DesktopTheme::LightNordic => 0xF8FAFC,
+    };
+    let border_color = match theme {
+        DesktopTheme::DarkCosmic => Color::BEAVER_AMBER,
+        DesktopTheme::LightNordic => Color::BEAVER_BORDER_LIGHT,
+    };
+    let text_color = match theme {
+        DesktopTheme::DarkCosmic => Color::WHITE,
+        DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
+    };
+
+    // Sombra difusa
+    Canvas::fill_rounded_rect(dx + 3, dy + 3, dw, dh, 10, 0x05070D);
+    // Caja del Drawer
+    Canvas::fill_rounded_rect(dx, dy, dw, dh, 10, bg_color);
+    Canvas::draw_rounded_rect(dx, dy, dw, dh, 10, border_color);
+
+    // Cabecera del Drawer
+    Canvas::fill_rounded_rect(dx + 2, dy + 2, dw - 4, 26, 8, if theme == DesktopTheme::DarkCosmic { 0x1E293B } else { 0xE2E8F0 });
+    Canvas::draw_string_prop(dx + 12, dy + 8, "LANZADOR BEAVER OS", Color::BEAVER_AMBER, None);
+
+    let items: [(&str, &str, u32); 12] = [
+        (">_", "Terminal Shell", 0x22C55E),
+        ("F",  "BeaverFiles VFS", 0xF59E0B),
+        ("=",  "Calculadora", 0x6366F1),
+        ("N",  "BeaverNote", 0xD97706),
+        ("M",  "Monitor CPU/RAM", 0x10B981),
+        ("A",  "BeaverAudio PCM", 0x8B5CF6),
+        ("P",  "BeaverPhotos", 0x0284C7),
+        ("S",  "BeaverSync Malla", 0x3B82F6),
+        ("C",  "Calendario RTC", 0xEF4444),
+        ("H",  "TV / Smart Hub", Color::BEAVER_ACCENT_CYAN),
+        ("i",  "Acerca de Beaver", Color::BEAVER_PURPLE),
+        ("X",  "Salir a TTY1", Color::BEAVER_RUBY),
+    ];
+
+    for (i, (badge, label, badge_col)) in items.iter().enumerate() {
+        let iy = dy + 32 + i * 27;
+        if i > 0 {
+            Canvas::draw_line_h(dx + 8, iy, dw - 16, if theme == DesktopTheme::DarkCosmic { 0x1E293B } else { 0xE2E8F0 });
+        }
+        Canvas::fill_rounded_rect(dx + 8, iy + 3, 20, 20, 4, *badge_col);
+        Canvas::draw_string(dx + 13, iy + 6, badge, Color::WHITE, None);
+        Canvas::draw_string_prop(dx + 36, iy + 6, label, text_color, None);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Cuadrícula de Iconos de Escritorio (Desktop Grid Icons estilo Retro-Moderno)
 // ──────────────────────────────────────────────────────────────────────────────
 pub const GRID_START_X: usize = 28;
@@ -312,10 +375,7 @@ pub fn render_desktop() {
         DesktopTheme::LightNordic => Canvas::draw_nordic_wallpaper(width, height),
     }
 
-    // 1.1 Cuadrícula de Iconos de Escritorio (Desktop Grid Icons estilo Retro-Moderno)
-    draw_desktop_grid_icons(theme);
-
-    // 2. Barra Superior Modular de Menú y Estado (Top Bar con Marcos y Divisores de Sección)
+    // 2. Barra Superior Modular Deskbar (Todo-en-Uno estilo BeOS / SGI IRIX)
     let topbar_bg = match theme {
         DesktopTheme::DarkCosmic => Color::BEAVER_OBSIDIAN,
         DesktopTheme::LightNordic => 0xE2E8F0,
@@ -334,43 +394,110 @@ pub fn render_desktop() {
     Canvas::fill_rect(0, 0, width, 28, topbar_bg);
     Canvas::draw_line_h(0, 27, width, topbar_border);
 
-    // Módulo 1: Marco de Identidad Beaver y Menús Principales
-    let mut menu_x = 110;
-    menu_x += Canvas::draw_string_prop(menu_x, 6, "Archivo", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
-    menu_x += Canvas::draw_string_prop(menu_x, 6, "Red Mesh", Color::BEAVER_TEAL_BRIGHT, None) + 16;
-    menu_x += Canvas::draw_string_prop(menu_x, 6, "Sincronizacion", Color::BEAVER_AMBER, None) + 16;
-    menu_x += Canvas::draw_string_prop(menu_x, 6, "Audio", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
-    let menu_end_x = menu_x + Canvas::draw_string_prop(menu_x, 6, "Ayuda", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None);
+    // Módulo 1: Botón Lanzador de Aplicaciones Beaver OS (con flecha desplegable)
+    let drawer_open = BEAVER_DRAWER.lock().is_open;
+    let launcher_w = 126;
+    let launcher_bg = if drawer_open { 0x1E293B } else { if theme == DesktopTheme::DarkCosmic { 0x111827 } else { 0xF1F5F9 } };
+    let launcher_border = if drawer_open { Color::BEAVER_AMBER } else { pill_border };
+    Canvas::fill_rounded_rect(6, 3, launcher_w, 22, 6, launcher_bg);
+    Canvas::draw_rounded_rect(6, 3, launcher_w, 22, 6, launcher_border);
 
-    // Marco exterior para Módulo 1
-    let mod1_w = menu_end_x + 10;
-    Canvas::fill_rounded_rect(4, 3, mod1_w, 22, 6, if theme == DesktopTheme::DarkCosmic { 0x111827 } else { 0xF1F5F9 });
-    Canvas::draw_rounded_rect(4, 3, mod1_w, 22, 6, pill_border);
+    Canvas::fill_rounded_rect(10, 4, 20, 20, 5, Color::BEAVER_AMBER);
+    Canvas::draw_string(16, 6, "B", Color::WHITE, None);
+    Canvas::draw_string_prop(36, 6, "Beaver OS", topbar_text, None);
+    Canvas::draw_string_prop(112, 6, if drawer_open { "^" } else { "v" }, Color::BEAVER_AMBER, None);
 
-    // Redibujar contenido de Módulo 1 dentro de su marco
-    Canvas::fill_rounded_rect(8, 4, 20, 20, 5, Color::BEAVER_AMBER);
-    Canvas::draw_string(14, 6, "B", Color::WHITE, None);
-    Canvas::draw_string_prop(34, 6, "Beaver OS", topbar_text, None);
-    let mut mx_draw = 110;
-    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Archivo", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
-    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Red Mesh", Color::BEAVER_TEAL_BRIGHT, None) + 16;
-    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Sincronizacion", Color::BEAVER_AMBER, None) + 16;
-    mx_draw += Canvas::draw_string_prop(mx_draw, 6, "Audio", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None) + 16;
-    Canvas::draw_string_prop(mx_draw, 6, "Ayuda", if theme == DesktopTheme::DarkCosmic { Color::SLATE_200 } else { Color::BEAVER_TEXT_DARK }, None);
-
-    // Separador vertical (Pipe |) entre Módulo 1 y Módulo 2
-    let sep1_x = mod1_w + 12;
+    // Separador vertical (Pipe |) entre Lanzador y Pestañas de Ventanas
+    let sep1_x = 6 + launcher_w + 8;
     Canvas::draw_line_v(sep1_x, 5, 18, Color::SLATE_600);
 
-    // Módulo 2: Buscador / Spotlight Enmarcado
-    let spot_x = sep1_x + 12;
-    let spot_w = 82;
-    Canvas::fill_rounded_rect(spot_x, 4, spot_w, 20, 10, pill_bg);
-    Canvas::draw_rounded_rect(spot_x, 4, spot_w, 20, 10, pill_border);
-    draw_sidebar_icon(spot_x + 6, 6, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
-    Canvas::draw_string_prop(spot_x + 24, 6, "Buscar", topbar_text, None);
+    // Módulo 2: Pestañas de Ventanas Abiertas (Task Tabs en la Top Bar)
+    let mut tab_x = sep1_x + 8;
+    let (open_windows, active_win) = {
+        let mgr = WINDOW_MGR.lock();
+        let open_wins: Vec<(WindowId, &'static str)> = mgr.windows.iter().filter_map(|w| {
+            if !w.minimized {
+                let short_name = match w.id {
+                    WindowId::Terminal => "Terminal",
+                    WindowId::Files => "Archivos",
+                    WindowId::Calculator => "Calc",
+                    WindowId::Note => "Notas",
+                    WindowId::Monitor => "Monitor",
+                    WindowId::Player => "Audio",
+                    WindowId::Photos => "Fotos",
+                    WindowId::Sync => "Mesh",
+                    WindowId::Calendar => "Agenda",
+                    WindowId::About => "Info",
+                };
+                Some((w.id, short_name))
+            } else {
+                None
+            }
+        }).collect();
+        let active = mgr.z_order[9];
+        (open_wins, active)
+    };
 
-    // Módulo 2.5: Píldora de estado de la malla BeaverMesh enmarcada
+    if open_windows.is_empty() {
+        Canvas::draw_string_prop(tab_x + 4, 6, "Escritorio Libre", Color::SLATE_500, None);
+        tab_x += 115;
+    } else {
+        for (win_id, label) in &open_windows {
+            let is_active = *win_id == active_win;
+            let tw = Canvas::string_width_prop(label);
+            let tab_w = tw + 20;
+            if tab_x + tab_w > width.saturating_sub(420) {
+                break;
+            }
+            let tab_bg = if is_active {
+                if theme == DesktopTheme::DarkCosmic { 0x1E3A8A } else { 0xDBEAFE }
+            } else {
+                pill_bg
+            };
+            let tab_border = if is_active {
+                Color::BEAVER_ACCENT_CYAN
+            } else {
+                pill_border
+            };
+            let tab_txt = if is_active {
+                Color::BEAVER_ACCENT_CYAN
+            } else {
+                topbar_text
+            };
+
+            Canvas::fill_rounded_rect(tab_x, 4, tab_w, 20, 6, tab_bg);
+            Canvas::draw_rounded_rect(tab_x, 4, tab_w, 20, 6, tab_border);
+            if is_active {
+                Canvas::fill_circle(tab_x + 7, 14, 2, Color::BEAVER_ACCENT_CYAN);
+            }
+            Canvas::draw_string_prop(tab_x + 13, 6, label, tab_txt, None);
+            tab_x += tab_w + 6;
+        }
+    }
+
+    // Separador vertical (Pipe |) después de las pestañas
+    Canvas::draw_line_v(tab_x + 4, 5, 18, Color::SLATE_600);
+
+    // Módulo 5: Telemetría de Hardware (RTC + Usuario + Uptime)
+    let rtc = crate::drivers::timer::local_datetime();
+    let (_, _, curr_user) = SCHEDULER.lock().current_credentials();
+    let uptime = get_uptime_seconds();
+    let status_right = format!("{:02}/{:02} {:02}:{:02} | {} ({}s)", rtc.day, rtc.month, rtc.hour, rtc.minute, curr_user, uptime);
+    let right_w = Canvas::string_width_prop(&status_right);
+    let right_pill_w = right_w + 18;
+    let right_pill_x = width.saturating_sub(right_pill_w + 8);
+
+    // Módulo 4: Modos (TV/Hub y Tema Día/Noche)
+    let tv_w = 76;
+    let tv_x = right_pill_x.saturating_sub(tv_w + 8);
+    let theme_w = 78;
+    let theme_x = tv_x.saturating_sub(theme_w + 8);
+
+    // Separador vertical (Pipe |) antes de los conmutadores
+    let sep_mod4 = theme_x.saturating_sub(10);
+    Canvas::draw_line_v(sep_mod4, 5, 18, Color::SLATE_600);
+
+    // Módulo 3: Herramientas (Mesh + Buscar)
     let online_nodes = {
         let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
         mgr.online_count()
@@ -381,40 +508,28 @@ pub fn render_desktop() {
         alloc::string::String::from("Mesh: sin nodos")
     };
     let mesh_w = Canvas::string_width_prop(&mesh_pill_text);
-    let mesh_pill_w = (mesh_w + 22).min(180);
-    let mesh_x = spot_x + spot_w + 8;
+    let mesh_pill_w = (mesh_w + 22).min(170);
+    let mesh_x = sep_mod4.saturating_sub(mesh_pill_w + 8);
+
+    let spot_w = 78;
+    let spot_x = mesh_x.saturating_sub(spot_w + 8);
+    let sep_tools = spot_x.saturating_sub(10);
+    Canvas::draw_line_v(sep_tools, 5, 18, Color::SLATE_600);
+
+    // Dibujar Buscar
+    Canvas::fill_rounded_rect(spot_x, 4, spot_w, 20, 10, pill_bg);
+    Canvas::draw_rounded_rect(spot_x, 4, spot_w, 20, 10, pill_border);
+    draw_sidebar_icon(spot_x + 6, 6, SidebarIconKind::Search, Color::BEAVER_TEAL_BRIGHT);
+    Canvas::draw_string_prop(spot_x + 24, 6, "Buscar", topbar_text, None);
+
+    // Dibujar Mesh
     Canvas::fill_rounded_rect(mesh_x, 4, mesh_pill_w, 20, 10, pill_bg);
     Canvas::draw_rounded_rect(mesh_x, 4, mesh_pill_w, 20, 10, pill_border);
     let dot_color = if online_nodes > 0 { Color::BEAVER_TEAL_BRIGHT } else { Color::SLATE_400 };
     Canvas::fill_circle(mesh_x + 10, 14, 3, dot_color);
     Canvas::draw_string_prop(mesh_x + 18, 6, &mesh_pill_text, topbar_text, None);
 
-    // Separador vertical (Pipe |) después del bloque central
-    let sep2_x = mesh_x + mesh_pill_w + 12;
-    if sep2_x < width.saturating_sub(320) {
-        Canvas::draw_line_v(sep2_x, 5, 18, Color::SLATE_600);
-    }
-
-    // Módulo 4: Fecha y hora LOCAL (RTC), usuario y tiempo de actividad en Cápsula Enmarcada
-    let rtc = crate::drivers::timer::local_datetime();
-    let (_, _, curr_user) = SCHEDULER.lock().current_credentials();
-    let uptime = get_uptime_seconds();
-    let status_right = format!("{:02}/{:02} {:02}:{:02} | {} ({}s)", rtc.day, rtc.month, rtc.hour, rtc.minute, curr_user, uptime);
-    let right_w = Canvas::string_width_prop(&status_right);
-    let right_pill_w = right_w + 18;
-    let right_pill_x = width.saturating_sub(right_pill_w + 8);
-
-    // Módulo 3: Botones Conmutadores a la derecha (calculados respecto a right_pill_x para evitar solapamientos)
-    let tv_w = 76;
-    let tv_x = right_pill_x.saturating_sub(tv_w + 8);
-    let theme_w = 78;
-    let theme_x = tv_x.saturating_sub(theme_w + 8);
-
-    // Separador vertical (Pipe |) antes de los conmutadores de control
-    let sep3_x = theme_x.saturating_sub(10);
-    Canvas::draw_line_v(sep3_x, 5, 18, Color::SLATE_600);
-
-    // Botón Conmutador de Tema (Día / Noche) Enmarcado
+    // Dibujar Tema (Día / Noche)
     Canvas::fill_rounded_rect(theme_x, 4, theme_w, 20, 10, pill_bg);
     Canvas::draw_rounded_rect(theme_x, 4, theme_w, 20, 10, pill_border);
     match theme {
@@ -433,13 +548,13 @@ pub fn render_desktop() {
         }
     }
 
-    // Botón Conmutador a Smart Hub (TV & Kiosco Domótico) Enmarcado
+    // Dibujar TV/Hub
     Canvas::fill_rounded_rect(tv_x, 4, tv_w, 20, 10, pill_bg);
     Canvas::draw_rounded_rect(tv_x, 4, tv_w, 20, 10, Color::BEAVER_ACCENT_CYAN);
     Canvas::fill_rounded_rect(tv_x + 6, 8, 12, 12, 3, Color::BEAVER_ACCENT_CYAN);
     Canvas::draw_string_prop(tv_x + 22, 6, "TV/Hub", Color::BEAVER_ACCENT_CYAN, None);
 
-    // Cápsula de Telemetría Hardware Enmarcada
+    // Dibujar Telemetría
     Canvas::fill_rounded_rect(right_pill_x, 4, right_pill_w, 20, 10, pill_bg);
     Canvas::draw_rounded_rect(right_pill_x, 4, right_pill_w, 20, 10, pill_border);
     Canvas::draw_string_prop(right_pill_x + 9, 6, &status_right, topbar_text, None);
@@ -464,99 +579,19 @@ pub fn render_desktop() {
         }
     }
 
-    // 4. Dock Inferior Flotante de Cristal (Glassmorphism Capsule)
-    let dock_w = 880;
-    let dock_h = 50;
-    let dock_x = (width.saturating_sub(dock_w)) / 2;
-    let dock_y = height.saturating_sub(62);
-
-    let dock_bg = match theme {
-        DesktopTheme::DarkCosmic => 0x0B1222,
-        DesktopTheme::LightNordic => 0xF8FAFC,
-    };
-    let dock_border = match theme {
-        DesktopTheme::DarkCosmic => 0x334155,
-        DesktopTheme::LightNordic => Color::BEAVER_BORDER_LIGHT,
-    };
-    let dock_label_col = match theme {
-        DesktopTheme::DarkCosmic => Color::WHITE,
-        DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
-    };
-
-    Canvas::fill_rounded_rect(dock_x + 4, dock_y + 4, dock_w, dock_h, 18, if theme == DesktopTheme::DarkCosmic { 0x05070D } else { 0x94A3B8 });
-    Canvas::fill_rounded_rect(dock_x, dock_y, dock_w, dock_h, 18, dock_bg);
-    Canvas::draw_rounded_rect(dock_x, dock_y, dock_w, dock_h, 18, dock_border);
-
-    let app_meta: [(WindowId, &str, u32, SidebarIconKind); 8] = [
-        (WindowId::Terminal, "Consola",    0x0F172A, SidebarIconKind::Terminal),
-        (WindowId::Monitor,  "Monitor",    0x0D9488, SidebarIconKind::Settings),
-        (WindowId::Files,    "Archivos",   0xF59E0B, SidebarIconKind::Home),
-        (WindowId::Sync,     "BeaverSync", 0x1E3A8A, SidebarIconKind::Mesh),
-        (WindowId::Player,   "Audio",      0x8B5CF6, SidebarIconKind::Music),
-        (WindowId::Photos,   "Fotos",      0x0284C7, SidebarIconKind::Photos),
-        (WindowId::Calendar, "Calendario", 0xEF4444, SidebarIconKind::Calendar),
-        (WindowId::Note,     "Notas",      0xD97706, SidebarIconKind::Settings),
-    ];
-
-    for (i, (win_id, label, icon_bg, icon_kind)) in app_meta.iter().enumerate() {
-        let btn_x = dock_x + 8 + i * 86;
-        let btn_y = dock_y + 6;
-
-        let icon_x = btn_x + 2;
-        Canvas::fill_rounded_rect(icon_x, btn_y, 34, 34, 8, *icon_bg);
-        Canvas::draw_rounded_rect(icon_x, btn_y, 34, 34, 8, Color::SLATE_600);
-        Canvas::draw_line_h(icon_x + 3, btn_y + 1, 28, 0x94A3B8);
-
-        if *win_id == WindowId::Files {
-            draw_beaver_folder(icon_x + 5, btn_y + 8, 24, 18, false);
-        } else {
-            draw_sidebar_icon(icon_x + 9, btn_y + 9, *icon_kind, Color::WHITE);
-        }
-
-        Canvas::draw_string_prop(btn_x + 39, btn_y + 12, label, dock_label_col, None);
-
-        let is_open = !WINDOW_MGR.lock().is_minimized(*win_id);
-        if is_open {
-            Canvas::fill_circle(icon_x + 17, dock_y + 44, 3, 0x0E7490);
-            Canvas::fill_circle(icon_x + 17, dock_y + 44, 1, Color::WHITE);
-        }
-    }
-
-    // App 8: Instalador USB
-    {
-        let btn_x = dock_x + 8 + 8 * 86;
-        let btn_y = dock_y + 6;
-        let icon_x = btn_x + 2;
-        Canvas::fill_rounded_rect(icon_x, btn_y, 34, 34, 8, 0x0284C7);
-        Canvas::draw_rounded_rect(icon_x, btn_y, 34, 34, 8, Color::SLATE_600);
-        Canvas::draw_line_h(icon_x + 3, btn_y + 1, 28, 0x94A3B8);
-        draw_sidebar_icon(icon_x + 9, btn_y + 9, SidebarIconKind::Disk, Color::WHITE);
-        Canvas::draw_string_prop(btn_x + 39, btn_y + 12, "Instalar", dock_label_col, None);
-    }
-
-    // App 9: Salir / TTY1
-    {
-        let btn_x = dock_x + 8 + 9 * 86;
-        let btn_y = dock_y + 6;
-        let icon_x = btn_x + 2;
-        Canvas::fill_rounded_rect(icon_x, btn_y, 34, 34, 8, Color::BEAVER_RUBY);
-        Canvas::draw_rounded_rect(icon_x, btn_y, 34, 34, 8, 0xDC2626);
-        Canvas::draw_line_h(icon_x + 3, btn_y + 1, 28, 0xFCA5A5);
-        draw_sidebar_icon(icon_x + 9, btn_y + 9, SidebarIconKind::Trash, Color::WHITE);
-        Canvas::draw_string_prop(btn_x + 39, btn_y + 12, "Salir", dock_label_col, None);
-    }
-
-    // 5. Spotlight Modal Overlay (si está abierto)
-    draw_spotlight_overlay(width, height);
-
-    // 6. Pie de Página / Instrucción para el usuario
+    // 4. Pie de Página / Ticker de Estado del Kernel (Minimalista)
     Canvas::draw_string_prop(
         20,
-        height.saturating_sub(12),
-        "VESA VBE TrueColor | BeaverNote Persistente (/disk) | Dirty Rects Activos | ESC = TTY1",
+        height.saturating_sub(14),
+        "Beaver OS Bare-Metal | BeaverFS Transaccional A/B | MSR Syscalls Ring 3 | Clic [B] para Lanzador | ESC = TTY1",
         Color::SLATE_500,
         None,
     );
+
+    // 5. Drawer de Aplicaciones Beaver (si está abierto, dibujado sobre el canvas)
+    if BEAVER_DRAWER.lock().is_open {
+        draw_beaver_drawer(theme);
+    }
 
     // 7. Cursor de ratón moderno interactivo
     Canvas::invalidate_cursor();
@@ -1284,7 +1319,7 @@ pub fn handle_mouse_event(state: crate::drivers::mouse::MouseState) {
 }
 
 fn handle_desktop_click(mx: usize, my: usize) {
-    let (scr_w, scr_h) = Canvas::screen_dimensions();
+    let (scr_w, _scr_h) = Canvas::screen_dimensions();
 
     // 0. Si Spotlight está abierto, evaluar clics en el buscador usando la resolución activa
     {
@@ -1319,7 +1354,6 @@ fn handle_desktop_click(mx: usize, my: usize) {
                     render_desktop();
                     return;
                 }
-                // Si hizo clic dentro de la caja de texto, mantener Spotlight abierto
                 if my >= modal_y + 14 && my <= modal_y + 50 {
                     return;
                 }
@@ -1332,17 +1366,144 @@ fn handle_desktop_click(mx: usize, my: usize) {
         }
     }
 
-    // 1. Clic en la barra superior (Top Bar Modular Enmarcada)
+    // 0.5 Si el Beaver Drawer está abierto, evaluar clics dentro del menú
+    {
+        let drawer_open = BEAVER_DRAWER.lock().is_open;
+        if drawer_open {
+            let (dx, dy, dw, dh) = (6, 30, 230, 362);
+            if mx >= dx && mx <= dx + dw && my >= dy && my <= dy + dh {
+                if my >= dy + 32 {
+                    let item_idx = ((my - (dy + 32)) / 27).min(11);
+                    crate::drivers::audio::click_feedback();
+                    BEAVER_DRAWER.lock().is_open = false;
+                    match item_idx {
+                        0 => {
+                            if let Some(mut state) = GUI_TERMINAL.try_lock() {
+                                state.lines.retain(|l| !l.starts_with("[CALC]"));
+                            }
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Terminal);
+                            }
+                        }
+                        1 => {
+                            *FILES_VIEW_TAB.lock() = FilesViewTab::Disk;
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Files);
+                            }
+                        }
+                        2 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Calculator);
+                            }
+                        }
+                        3 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Note);
+                            }
+                        }
+                        4 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Monitor);
+                            }
+                        }
+                        5 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Player);
+                            }
+                        }
+                        6 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Photos);
+                            }
+                        }
+                        7 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Sync);
+                            }
+                        }
+                        8 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::Calendar);
+                            }
+                        }
+                        9 => {
+                            crate::gui::smart_hub::enter_smart_hub();
+                            return;
+                        }
+                        10 => {
+                            if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                                mgr.unminimize_and_focus(WindowId::About);
+                            }
+                        }
+                        11 => {
+                            if let Some(mut state) = GUI_TERMINAL.try_lock() {
+                                state.mode = GuiViewMode::FullScreenCli;
+                                state.lines.push(String::from("[SISTEMA] Has salido a la Consola TTY1. Escribe 'desktop' o ESC para volver a GUI."));
+                                drop(state);
+                                render_fullscreen_cli();
+                                return;
+                            }
+                        }
+                        _ => {}
+                    }
+                    render_desktop();
+                    return;
+                }
+                return;
+            } else {
+                BEAVER_DRAWER.lock().is_open = false;
+            }
+        }
+    }
+
+    // 1. Clic en la barra superior (Top Bar Modular Deskbar)
     if my <= 28 {
-        // Módulo 2: Buscador Spotlight (sep1_x + 12 .. + 82)
-        // mod1_w está alrededor de ~380 px
-        if mx >= 380 && mx <= 480 {
+        // Clic en botón [B] Beaver OS (Lanzador / Drawer)
+        if mx >= 6 && mx <= 132 {
             crate::drivers::audio::click_feedback();
-            let mut spot = SPOTLIGHT.lock();
-            spot.is_open = !spot.is_open;
-            drop(spot);
+            let mut drw = BEAVER_DRAWER.lock();
+            drw.is_open = !drw.is_open;
+            drop(drw);
             render_desktop();
             return;
+        }
+
+        // Clic en Pestañas de Tareas de Ventanas (Task Tabs en Top Bar)
+        let sep1_x = 6 + 126 + 8;
+        if mx >= sep1_x + 8 {
+            let open_wins: Vec<WindowId> = {
+                let mgr = WINDOW_MGR.lock();
+                mgr.windows.iter().filter_map(|w| if !w.minimized { Some(w.id) } else { None }).collect()
+            };
+            let mut curr_x = sep1_x + 8;
+            for win_id in open_wins {
+                let short_name = match win_id {
+                    WindowId::Terminal => "Terminal",
+                    WindowId::Files => "Archivos",
+                    WindowId::Calculator => "Calc",
+                    WindowId::Note => "Notas",
+                    WindowId::Monitor => "Monitor",
+                    WindowId::Player => "Audio",
+                    WindowId::Photos => "Fotos",
+                    WindowId::Sync => "Mesh",
+                    WindowId::Calendar => "Agenda",
+                    WindowId::About => "Info",
+                };
+                let tab_w = Canvas::string_width_prop(short_name) + 20;
+                if mx >= curr_x && mx <= curr_x + tab_w {
+                    crate::drivers::audio::click_feedback();
+                    if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                        if mgr.is_active(win_id) {
+                            mgr.minimize(win_id);
+                        } else {
+                            mgr.unminimize_and_focus(win_id);
+                        }
+                    }
+                    render_desktop();
+                    return;
+                }
+                curr_x += tab_w + 6;
+            }
         }
 
         // Módulos de la derecha calculados dinámicamente según la resolución
@@ -1357,7 +1518,35 @@ fn handle_desktop_click(mx: usize, my: usize) {
         let tv_x = right_pill_x.saturating_sub(tv_w + 8);
         let theme_w = 78;
         let theme_x = tv_x.saturating_sub(theme_w + 8);
+        let sep_mod4 = theme_x.saturating_sub(10);
 
+        let online_nodes = {
+            let mgr = crate::drivers::mesh::MESH_MANAGER.lock();
+            mgr.online_count()
+        };
+        let mesh_pill_text = if online_nodes > 0 {
+            alloc::format!("Mesh: {} nodo(s)", online_nodes)
+        } else {
+            alloc::string::String::from("Mesh: sin nodos")
+        };
+        let mesh_w = Canvas::string_width_prop(&mesh_pill_text);
+        let mesh_pill_w = (mesh_w + 22).min(170);
+        let mesh_x = sep_mod4.saturating_sub(mesh_pill_w + 8);
+
+        let spot_w = 78;
+        let spot_x = mesh_x.saturating_sub(spot_w + 8);
+
+        // Clic en Buscar
+        if mx >= spot_x && mx <= spot_x + spot_w {
+            crate::drivers::audio::click_feedback();
+            let mut spot = SPOTLIGHT.lock();
+            spot.is_open = !spot.is_open;
+            drop(spot);
+            render_desktop();
+            return;
+        }
+
+        // Clic en Tema
         if mx >= theme_x && mx <= theme_x + theme_w {
             crate::drivers::audio::click_feedback();
             {
@@ -1371,6 +1560,7 @@ fn handle_desktop_click(mx: usize, my: usize) {
             return;
         }
 
+        // Clic en TV/Hub
         if mx >= tv_x && mx <= tv_x + tv_w {
             crate::drivers::audio::click_feedback();
             crate::gui::smart_hub::enter_smart_hub();
@@ -1378,167 +1568,8 @@ fn handle_desktop_click(mx: usize, my: usize) {
         }
     }
 
-    // 1.5 Clic en la cuadrícula de iconos del escritorio (Desktop Grid Icons)
-    if let Some(action) = hit_test_desktop_grid(mx, my) {
-        crate::drivers::audio::click_feedback();
-        match action {
-            DesktopIconAction::OpenWindow(win_id) => {
-                if win_id == WindowId::Terminal {
-                    if let Some(mut state) = GUI_TERMINAL.try_lock() {
-                        state.lines.retain(|l| !l.starts_with("[CALC]"));
-                    }
-                } else if win_id == WindowId::Files {
-                    *FILES_VIEW_TAB.lock() = FilesViewTab::Disk;
-                }
-                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                    mgr.unminimize_and_focus(win_id);
-                    drop(mgr);
-                    render_desktop();
-                }
-            }
-            DesktopIconAction::OpenSmartHub => {
-                crate::gui::smart_hub::enter_smart_hub();
-            }
-            DesktopIconAction::ToggleTheme => {
-                {
-                    let mut th = CURRENT_THEME.lock();
-                    *th = match *th {
-                        DesktopTheme::DarkCosmic => DesktopTheme::LightNordic,
-                        DesktopTheme::LightNordic => DesktopTheme::DarkCosmic,
-                    };
-                }
-                render_desktop();
-            }
-            DesktopIconAction::OpenTrash => {
-                *FILES_VIEW_TAB.lock() = FilesViewTab::Trash;
-                if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                    mgr.unminimize_and_focus(WindowId::Files);
-                    drop(mgr);
-                    render_desktop();
-                }
-            }
-        }
-        return;
-    }
-
-    // 2. Clic en la barra Dock (Launcher inferior de 10 aplicaciones) independiente de la resolución
-    let dock_w = 880;
-    let dock_x = (scr_w.saturating_sub(dock_w)) / 2;
-    let dock_y = scr_h.saturating_sub(62);
-
-    if my >= dock_y + 6 && my <= dock_y + 44 {
-        for i in 0..10 {
-            let btn_x = dock_x + 8 + i * 86;
-            if mx >= btn_x && mx <= btn_x + 82 {
-                crate::drivers::audio::click_feedback();
-                match i {
-                    0 => {
-                        if let Some(mut state) = GUI_TERMINAL.try_lock() {
-                            state.lines.retain(|l| !l.starts_with("[CALC]"));
-                        }
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Terminal);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    1 => {
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Monitor);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    2 => {
-                        *FILES_VIEW_TAB.lock() = FilesViewTab::Disk;
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Files);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    3 => {
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Sync);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    4 => {
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Player);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    5 => {
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Photos);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    6 => {
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Calendar);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    7 => {
-                        if let Some(mut mgr) = WINDOW_MGR.try_lock() {
-                            mgr.unminimize_and_focus(WindowId::Note);
-                            drop(mgr);
-                            render_desktop();
-                        }
-                        return;
-                    }
-                    8 => {
-                        if let Some(mut state) = GUI_TERMINAL.try_lock() {
-                            state.lines.push(String::from("[DOCK] Lanzando Instalador Universal de Beaver OS..."));
-                            drop(state);
-                            crate::shell::SHELL.lock().execute_command("install -y");
-                            GUI_TERMINAL.lock().flush_current_line();
-                            render_terminal_window();
-                        }
-                        return;
-                    }
-                    9 => {
-                        if let Some(mut state) = GUI_TERMINAL.try_lock() {
-                            state.mode = GuiViewMode::FullScreenCli;
-                            state.lines.push(String::from("[SISTEMA] Has salido del entorno multi-ventana a la Consola TTY1."));
-                            state.lines.push(String::from("[SISTEMA] Escribe 'desktop' o presiona ESC para volver a la interfaz grafica."));
-                            drop(state);
-                            render_fullscreen_cli();
-                        }
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
     // Clic en el área de fondo del escritorio
-    let terminal_active = {
-        if let Some(mgr) = WINDOW_MGR.try_lock() {
-            mgr.is_active(WindowId::Terminal)
-        } else {
-            false
-        }
-    };
-    if terminal_active {
-        render_terminal_window();
-    } else {
-        render_desktop();
-    }
+    render_desktop();
 }
 
 fn handle_fullscreen_click(mx: usize, my: usize) {
