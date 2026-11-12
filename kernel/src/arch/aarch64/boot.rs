@@ -117,6 +117,34 @@ pub extern "C" fn kernel_main_aarch64(dtb_ptr: u64) -> ! {
     // 8. Habilitar Interrupciones en el Núcleo (DAIFCLR #2)
     Pl011Uart::write_str("[ARM64] Habilitando interrupciones de hardware en CPU...\n");
     cpu::enable_interrupts();
+
+    // 8.1 Verificación real de aislamiento EL0 + pasarela SVC #0
+    const EL0_ARENA_BASE: u64 = 0x4200_0000;
+    const EL0_STACK_TOP: u64 = 0x421F_F000;
+    super::mmu::Aarch64Mmu::allow_el0_2mb_block(EL0_ARENA_BASE);
+    let el0_prog: [u32; 6] = [
+        0xD280_04E8, // mov x8, #39 (SYS_GETPID)
+        0xD400_0001, // svc #0
+        0x9100_A800, // add x0, x0, #42
+        0xD280_0788, // mov x8, #60 (SYS_EXIT)
+        0xD400_0001, // svc #0
+        0x1400_0000, // b .
+    ];
+    // SAFETY: `EL0_ARENA_BASE` (0x4200_0000) está mapeado en RAM con PTE_USER, fuera de kernel y heap.
+    unsafe {
+        let dst = EL0_ARENA_BASE as *mut u32;
+        for (i, &insn) in el0_prog.iter().enumerate() {
+            core::ptr::write_volatile(dst.add(i), insn);
+        }
+        core::arch::asm!("dsb ish", "ic iallu", "dsb ish", "isb", options(nomem, nostack));
+        let exit_code = crate::syscall::enter_ring3_with_return(EL0_ARENA_BASE, EL0_STACK_TOP);
+        if exit_code == 42 {
+            Pl011Uart::write_str("[ARM64] Prueba EL0 + SVC #0 (SYS_GETPID + SYS_EXIT=42) [OK]\n");
+        } else {
+            Pl011Uart::write_str("[ARM64] Prueba EL0 retorno codigo inesperado.\n");
+        }
+    }
+
     Pl011Uart::write_str("[ARM64] Beaver OS ARM64 completamente operativo. Iniciando Beaver Shell...\n\n");
 
     crate::shell::SHELL.lock().prompt();

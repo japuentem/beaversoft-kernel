@@ -1,4 +1,4 @@
-<#
+﻿<#
  ============================================================================
  Project: Beaversoft Meta-Kernel
  Author: José Alberto Puente Maldonado (japuentem)
@@ -14,6 +14,7 @@ param(
     [switch]$Uefi,
     [switch]$Iso,
     [switch]$Test,
+    [switch]$TestArm64,
     # -Node A: escucha :5555  MAC ..:BE:A0:01  IP 10.0.0.1
     # -Node B: conecta :5555  MAC ..:BE:A0:02  IP 10.0.0.2
     [string]$Node = ''
@@ -47,6 +48,43 @@ if ($Clean) {
     cargo clean
     Write-Host "[OK] Directorio target limpiado." -ForegroundColor Green
     exit 0
+}
+
+if ($TestArm64) {
+    Write-Host "[TASK] Compilando kernel para arquitectura aarch64-unknown-none en modo release..." -ForegroundColor Yellow
+    cargo build --release --target aarch64-unknown-none
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[ERROR] Falló la compilación ARM64."
+        exit $LASTEXITCODE
+    }
+    $ArmBin = "target\aarch64-unknown-none\release\beaver-kernel"
+    $ArmLog = "target\autotest_arm64.log"
+    $ArmErr = "target\autotest_arm64.err"
+    if (Test-Path $ArmLog) { Remove-Item $ArmLog -Force }
+    if (Test-Path $ArmErr) { Remove-Item $ArmErr -Force }
+
+    Write-Host "[TEST-ARM64] Iniciando QEMU virt (cortex-a72) para verificar MMU, Heap, VFS, EL0+SVC y Shell..." -ForegroundColor Cyan
+    $p = Start-Process -FilePath "C:\Program Files\qemu\qemu-system-aarch64.exe" -ArgumentList "-M","virt","-cpu","cortex-a72","-m","256M","-nographic","-kernel",$ArmBin -RedirectStandardOutput $ArmLog -RedirectStandardError $ArmErr -PassThru
+    $ok = $false
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 500
+        if (Test-Path $ArmLog) {
+            $txt = Get-Content $ArmLog -Raw -ErrorAction SilentlyContinue
+            if ($txt -match "Prueba EL0 \+ SVC #0.*\[OK\]" -and $txt -match "root@beaver:/#") {
+                $ok = $true
+                break
+            }
+        }
+    }
+    if (-not $p.HasExited) { $p.Kill() }
+    Get-Content $ArmLog -ErrorAction SilentlyContinue | Select-Object -Last 20
+    if ($ok) {
+        Write-Host "[PASS-ARM64] Arranque ARM64 completo: GICv2, Timer, MMU, Heap, VFS, EL0+SVC y Beaver Shell [OK]." -ForegroundColor Green
+        exit 0
+    } else {
+        Write-Error "[FAIL-ARM64] No se detectó inicialización completa ARM64 (MMU / EL0+SVC / Shell)."
+        exit 1
+    }
 }
 
 $Target = "x86_64-unknown-none"

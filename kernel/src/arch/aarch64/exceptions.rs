@@ -97,6 +97,11 @@ pub extern "C" fn aarch64_handle_sync(frame: &mut TrapFrame) {
     } else {
         // Error de memoria o aborto de instrucción: Supervisor Anti-BSOD destruye el proceso de usuario
         super::uart::Pl011Uart::write_str("[ARM64 SUPERVISOR] Excepción sincrónica capturada en EL0/EL1.\n");
+        if unsafe { crate::syscall::SUPERVISOR_RSP != 0 } {
+            unsafe {
+                crate::syscall::return_to_supervisor(139);
+            }
+        }
     }
 }
 

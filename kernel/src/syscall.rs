@@ -287,16 +287,52 @@ extern "C" {
 }
 
 #[cfg(target_arch = "aarch64")]
-pub unsafe fn enter_ring3_with_return(_entry: u64, _user_stack_top: u64) -> u64 {
-    0
-}
+core::arch::global_asm!(r#"
+.global enter_ring3_with_return
+enter_ring3_with_return:
+    /* x0 = entry, x1 = user_stack_top */
+    sub sp, sp, #96
+    stp x19, x20, [sp, #0]
+    stp x21, x22, [sp, #16]
+    stp x23, x24, [sp, #32]
+    stp x25, x26, [sp, #48]
+    stp x27, x28, [sp, #64]
+    stp x29, x30, [sp, #80]
+
+    adrp x2, SUPERVISOR_RSP
+    add x2, x2, :lo12:SUPERVISOR_RSP
+    mov x3, sp
+    str x3, [x2]
+
+    msr sp_el0, x1
+    msr elr_el1, x0
+    msr spsr_el1, xzr   /* EL0t, DAIF=0 */
+    isb
+    eret
+
+.global return_to_supervisor
+return_to_supervisor:
+    /* x0 = exit_code */
+    adrp x2, SUPERVISOR_RSP
+    add x2, x2, :lo12:SUPERVISOR_RSP
+    ldr x3, [x2]
+    str xzr, [x2]
+    mov sp, x3
+
+    ldp x19, x20, [sp, #0]
+    ldp x21, x22, [sp, #16]
+    ldp x23, x24, [sp, #32]
+    ldp x25, x26, [sp, #48]
+    ldp x27, x28, [sp, #64]
+    ldp x29, x30, [sp, #80]
+    add sp, sp, #96
+    ret
+"#);
 
 #[cfg(target_arch = "aarch64")]
-pub unsafe fn return_to_supervisor(_code: u64) -> ! {
-    crate::task::scheduler::mark_finished_and_yield();
-    loop {
-        crate::arch::aarch64::cpu::wfi();
-    }
+extern "C" {
+    pub fn enter_ring3_with_return(entry: u64, user_stack_top: u64) -> u64;
+    pub fn return_to_supervisor(code: u64) -> !;
 }
 
 // Mutexes y Semáforos para primitivas de sincronización de usuario en Ring 3

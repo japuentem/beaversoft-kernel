@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 5
+// Total de interacciones del día: 6
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -116,4 +116,24 @@ Se activó la arquitectura completa de memoria, VFS y consola interactiva en ARM
 - Verificación: `cargo check --target x86_64-unknown-none` OK, `cargo build --release --target aarch64-unknown-none` OK, `run.ps1 -Test` (`18/18` pruebas aprobadas), y arranque real en `qemu-system-aarch64 -M virt -cpu cortex-a72` alcanzando `root@beaver:/#` con MMU, Heap, FrameAllocator y VFS operativos.
 
 ================================================================================
+
+## Interacción #6 [16:17:00]
+
+### 👤 Pregunta / Petición del Usuario:
+continua con el paso que consideres necesario y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+Se implementó el aislamiento real en espacio de usuario **EL0** y la pasarela de syscalls **SVC #0** en ARM64 (`aarch64`), además de automatizar su verificación en `run.ps1 -TestArm64`:
+- `kernel/src/arch/aarch64/mmu.rs`: tablas `L0 -> L1 -> L2` con bloques de 2 MiB `EL1`-only por defecto y `allow_el0_2mb_block(phys_addr)` para conceder `PTE_USER` únicamente al bloque de arena de usuario (`0x4200_0000`).
+- `kernel/src/syscall.rs`: implementación real en ensamblador AArch64 de `enter_ring3_with_return` (`sp_el0`, `elr_el1`, `spsr_el1=0`, `eret`) y `return_to_supervisor`.
+- `kernel/src/arch/aarch64/exceptions.rs`: recuperación Anti-BSOD desde abortos en `EL0` invocando `return_to_supervisor(139)` cuando `SUPERVISOR_RSP != 0`.
+- `kernel/src/arch/aarch64/boot.rs`: prueba real en hardware QEMU ejecutando instrucciones en `EL0` (`SYS_GETPID` + `SYS_EXIT=42` vía `SVC #0`) y retornando limpiamente a `EL1`.
+- `run.ps1`: nuevo parámetro `-TestArm64` que compila `aarch64-unknown-none`, ejecuta `qemu-system-aarch64` y valida MMU, Heap, VFS, `EL0+SVC` y `root@beaver:/#`.
+
+Verificación: `run.ps1 -TestArm64` (`[PASS-ARM64]`) y `run.ps1 -Test` (`18/18` pruebas en `x86_64`).
+
+================================================================================
+
 

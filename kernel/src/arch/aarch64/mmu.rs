@@ -29,11 +29,13 @@ struct PageTable512([u64; 512]);
 
 static mut KERNEL_L0_TABLE: PageTable512 = PageTable512([0; 512]);
 static mut KERNEL_L1_TABLE: PageTable512 = PageTable512([0; 512]);
+static mut KERNEL_L2_RAM: PageTable512 = PageTable512([0; 512]);
 
 impl Aarch64Mmu {
-    /// Construye tablas L0->L1 con mapeo de identidad (Device MMIO 0..1GiB + RAM Normal 1..2GiB) y activa el MMU.
+    /// Construye tablas L0->L1->L2 con mapeo de identidad (MMIO Device + RAM 2MiB blocks) y activa el MMU.
     pub fn init_and_enable_identity_mmu(fb_phys: u64) {
         unsafe {
+            let l2_addr = core::ptr::addr_of!(KERNEL_L2_RAM) as u64;
             let l1_addr = core::ptr::addr_of!(KERNEL_L1_TABLE) as u64;
             let l0_addr = core::ptr::addr_of!(KERNEL_L0_TABLE) as u64;
 
@@ -43,8 +45,12 @@ impl Aarch64Mmu {
             // L1[0]: 0x0000_0000 .. 0x3FFF_FFFF (1 GiB Device-nGnRnE: GICv2, PL011 UART, VirtIO, PCIe MMIO)
             KERNEL_L1_TABLE.0[0] = 0x0000_0000 | PTE_VALID | PTE_AF | PTE_ATTR_DEV;
 
-            // L1[1]: 0x4000_0000 .. 0x7FFF_FFFF (1 GiB Normal Write-Back Inner-Shareable: RAM, Kernel, Heap, DTB)
-            KERNEL_L1_TABLE.0[1] = 0x4000_0000 | PTE_VALID | PTE_AF | PTE_SH_INNER | PTE_ATTR_NORM;
+            // L1[1]: 0x4000_0000 .. 0x7FFF_FFFF -> Tabla L2 de bloques de 2 MiB (EL1-only por defecto)
+            for i in 0..512 {
+                let block_phys = 0x4000_0000u64 + (i as u64) * 0x20_0000;
+                KERNEL_L2_RAM.0[i] = block_phys | PTE_VALID | PTE_AF | PTE_SH_INNER | PTE_ATTR_NORM;
+            }
+            KERNEL_L1_TABLE.0[1] = (l2_addr & 0x0000_FFFF_FFFF_F000) | PTE_VALID | PTE_TABLE;
 
             // Si el bootloader móvil entrega un SimpleFB >= 2 GiB, mapear su bloque de 1 GiB como Device/FB
             if fb_phys >= 0x8000_0000 {
@@ -60,6 +66,18 @@ impl Aarch64Mmu {
             Self::set_ttbr1(l0_addr);
             Self::flush_tlb();
             Self::enable_mmu();
+        }
+    }
+
+    /// Habilita acceso EL0 (PTE_USER) únicamente en el bloque de 2 MiB que contiene `phys_addr` (dentro de 0x4000_0000..0x7FFF_FFFF).
+    pub fn allow_el0_2mb_block(phys_addr: u64) {
+        if phys_addr < 0x4000_0000 || phys_addr >= 0x8000_0000 {
+            return;
+        }
+        let idx = ((phys_addr - 0x4000_0000) >> 21) as usize;
+        unsafe {
+            KERNEL_L2_RAM.0[idx] |= PTE_USER;
+            Self::flush_tlb();
         }
     }
 
