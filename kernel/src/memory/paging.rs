@@ -26,12 +26,12 @@ pub const PAGE_ADDR_MASK: u64     = 0x000F_FFFF_FFFF_F000;
 pub const KERNEL_FINE_PT_TABLES: usize = 32;
 pub const KERNEL_FINE_PAGES_COUNT: usize = KERNEL_FINE_PT_TABLES * 512;
 
-/// Región virtual dedicada para procesos aislados de Ring 3 (fuera de los primeros 64 MiB del kernel):
-/// - Código/Datos ELF y tareas de usuario: `0x0800_0000` (128 MiB) en adelante
-/// - Pila de usuario (16 KiB = 4 páginas de 4 KiB): `0x0840_0000 .. 0x0840_4000` (132 MiB)
-pub const USER_CODE_VADDR: u64  = 0x0000_0000_0800_0000;
-pub const USER_ELF_VADDR: u64   = 0x0000_0000_0800_1000;
-pub const USER_STACK_VADDR: u64 = 0x0000_0000_0840_0000;
+/// Región virtual dedicada para procesos aislados de Ring 3 (por encima de los 512 MiB de RAM física):
+/// - Código/Datos ELF y tareas de usuario: `0x4000_0000` (1 GiB) en adelante
+/// - Pila de usuario (16 KiB = 4 páginas de 4 KiB): `0x7000_0000 .. 0x7000_4000` (1.75 GiB)
+pub const USER_CODE_VADDR: u64  = 0x0000_0000_4000_0000;
+pub const USER_ELF_VADDR: u64   = 0x0000_0000_4000_1000;
+pub const USER_STACK_VADDR: u64 = 0x0000_0000_7000_0000;
 pub const USER_STACK_PAGES: usize = 4; // 16 KiB
 
 /// CR3 maestro del kernel (tabla PML4 supervisora con PAGE_USER = 0 en todo el espacio)
@@ -219,32 +219,41 @@ pub fn create_process_address_space() -> Option<u64> {
     let proc_pml4_phys = FRAME_ALLOCATOR.allocate_frame()? as u64;
     let proc_pdpt_phys = FRAME_ALLOCATOR.allocate_frame()? as u64;
     let proc_pd0_phys  = FRAME_ALLOCATOR.allocate_frame()? as u64;
+    let proc_pd1_phys  = FRAME_ALLOCATOR.allocate_frame()? as u64;
 
-    // SAFETY: `k_cr3` y los tres marcos recién asignados (`proc_pml4_phys`, `proc_pdpt_phys`, `proc_pd0_phys`) son válidos en RAM física.
+    // SAFETY: `k_cr3` y los marcos recién asignados (`proc_pml4_phys`, `proc_pdpt_phys`, `proc_pd0_phys`, `proc_pd1_phys`) son válidos en RAM física.
     unsafe {
         let k_pml4 = &*(k_cr3 as *const PageTable);
         let k_pdpt_phys = k_pml4.entries[0] & PAGE_ADDR_MASK;
         let k_pdpt = &*(k_pdpt_phys as *const PageTable);
         let k_pd0_phys = k_pdpt.entries[0] & PAGE_ADDR_MASK;
         let k_pd0 = &*(k_pd0_phys as *const PageTable);
+        let k_pd1_phys = k_pdpt.entries[1] & PAGE_ADDR_MASK;
+        let k_pd1 = &*(k_pd1_phys as *const PageTable);
 
         let proc_pml4 = &mut *(proc_pml4_phys as *mut PageTable);
         let proc_pdpt = &mut *(proc_pdpt_phys as *mut PageTable);
         let proc_pd0  = &mut *(proc_pd0_phys as *mut PageTable);
+        let proc_pd1  = &mut *(proc_pd1_phys as *mut PageTable);
 
         // En x86_64, el bit PAGE_USER en PML4E y PDPTE habilita la evaluación del bit PAGE_USER en niveles inferiores (PDE/PTE).
         // Cualquier PDE o PTE que tenga PAGE_USER = 0 sigue siendo estrictamente Supervisor (Ring 0).
         proc_pml4.entries[0] = proc_pdpt_phys | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
         proc_pdpt.entries[0] = proc_pd0_phys  | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+        proc_pdpt.entries[1] = proc_pd1_phys  | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
 
-        // Las tablas PD[1..3] (1 GiB .. 4 GiB, incluyendo MMIO) se enlazan sin PAGE_USER (solo Ring 0)
-        for i in 1..4 {
+        // Las tablas PD[2..3] (2 GiB .. 4 GiB, incluyendo MMIO) se enlazan sin PAGE_USER (solo Ring 0)
+        for i in 2..4 {
             proc_pdpt.entries[i] = k_pdpt.entries[i] & !PAGE_USER;
         }
 
         // Copiar las 512 entradas de PD[0] asegurando que TODAS tengan PAGE_USER = 0 inicialmente
         for i in 0..512 {
             proc_pd0.entries[i] = k_pd0.entries[i] & !PAGE_USER;
+        }
+        // Copiar las 512 entradas de PD[1] (1 GiB .. 2 GiB) asegurando que TODAS tengan PAGE_USER = 0 inicialmente
+        for i in 0..512 {
+            proc_pd1.entries[i] = k_pd1.entries[i] & !PAGE_USER;
         }
     }
 

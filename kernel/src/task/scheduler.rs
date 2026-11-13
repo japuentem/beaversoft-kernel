@@ -74,6 +74,11 @@ impl Scheduler {
         self.tasks.iter().find(|t| t.id == id).map(|t| t.state)
     }
 
+    /// Devuelve información auténtica de todas las tareas registradas en el scheduler
+    pub fn get_tasks_info(&self) -> Vec<(TaskId, &'static str, TaskState, u64, Option<u32>, crate::task::Uid)> {
+        self.tasks.iter().map(|t| (t.id, t.name, t.state, t.ticks_executed, t.running_on_core, t.uid)).collect()
+    }
+
     /// Espera o verifica si una tarea ha finalizado
     pub fn wait_pid(&mut self, target_id: TaskId) -> Option<u64> {
         if let Some(pos) = self.tasks.iter().position(|t| t.id == target_id) {

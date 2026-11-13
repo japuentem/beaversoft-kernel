@@ -76,7 +76,7 @@ pub const SYS_SEM_POST:     u64 = 117;
 
 // Límites y estado del Heap para procesos de usuario Ring 3 / EL0
 #[cfg(target_arch = "x86_64")]
-pub const USER_HEAP_START: u64 = 0x0000_0000_2000_0000;
+pub const USER_HEAP_START: u64 = 0x0000_0000_5000_0000;
 #[cfg(target_arch = "aarch64")]
 pub const USER_HEAP_START: u64 = 0x0000_0000_6800_0000;
 

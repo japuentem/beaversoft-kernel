@@ -534,11 +534,15 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     let bad_read = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, 10);
     assert_eq!(bad_read as i64, -9, "SYS_READ en fd cerrado debe retornar -EBADF (-9)");
 
-    // 4. Verificación de ELF de /disk/bin/sh.elf
+    // 4. Verificación de binarios ELF Rust auténticos en Ring 3 (/disk/bin/hello.elf y bench.elf)
     crate::task::pkg::init_disk_bin();
-    let sh_exec = crate::task::pkg::execute_elf("/disk/bin/sh.elf")
-        .expect("El paquete sh.elf debe existir e iniciar correctamente");
-    assert!(sh_exec.contains("BEAVER-SH") || sh_exec.contains("sh"), "La ejecucion de sh.elf debe ser autentica");
+    let hello_exec = crate::task::pkg::execute_elf("/disk/bin/hello.elf")
+        .expect("El binario user/hello compilado en Rust debe ejecutarse en Ring 3");
+    assert!(hello_exec.contains("hello.elf"), "La ejecucion de hello.elf en Ring 3 debe ser exitosa");
+
+    let bench_exec = crate::task::pkg::execute_elf("/disk/bin/bench.elf")
+        .expect("El binario user/bench compilado en Rust debe ejecutarse en Ring 3");
+    assert!(bench_exec.contains("bench.elf"), "La ejecucion de bench.elf en Ring 3 debe ser exitosa");
 
     // 5. Verificación de BeaverScript (.bs) aislado en Ring 3 con syscalls POSIX
     let test_bs = "let x = 12\nlet y = 8\nlet sum = x + y\nprintln \"Ring 3 BS OK: \" + sum\n";

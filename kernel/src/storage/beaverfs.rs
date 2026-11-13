@@ -391,6 +391,7 @@ impl BeaverFs {
     /// Ejemplo: "docs/work" -> resuelve "docs" en inodo 0, luego "work" en inodo de docs
     pub fn resolve_dir_inode(&self, path: &str) -> Result<u32, &'static str> {
         let clean = path.trim().trim_start_matches('/').trim_end_matches('/');
+        let clean = clean.strip_prefix("disk/").unwrap_or(clean);
         if clean.is_empty() {
             return Ok(0);
         }
@@ -415,6 +416,7 @@ impl BeaverFs {
     /// Ejemplo: "report.txt" -> Ok((0, "report.txt"))
     pub fn resolve_parent_dir<'a>(&self, path: &'a str) -> Result<(u32, &'a str), &'static str> {
         let clean = path.trim().trim_start_matches('/').trim_end_matches('/');
+        let clean = clean.strip_prefix("disk/").unwrap_or(clean);
         if clean.is_empty() {
             return Err("Ruta vacía");
         }
@@ -426,6 +428,27 @@ impl BeaverFs {
         } else {
             Ok((0, clean))
         }
+    }
+
+    /// Crea recursivamente los directorios intermedios necesarios si no existen
+    pub fn ensure_parent_dirs(&mut self, path: &str, uid: u32, gid: u32) -> Result<(), &'static str> {
+        let clean = path.trim().trim_start_matches('/').trim_end_matches('/');
+        let clean = clean.strip_prefix("disk/").unwrap_or(clean);
+        if let Some(pos) = clean.rfind('/') {
+            let dir_part = &clean[..pos];
+            let mut current = String::new();
+            for seg in dir_part.split('/') {
+                if seg.is_empty() { continue; }
+                if !current.is_empty() {
+                    current.push('/');
+                }
+                current.push_str(seg);
+                if !self.is_dir(&current) {
+                    self.create_dir(&current, uid, gid)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Añade una entrada (archivo o subdirectorio) a un directorio dado por su inodo
@@ -714,6 +737,7 @@ impl BeaverFs {
         if !self.is_mounted {
             return Err("BeaverFS no montado. Ejecuta 'format-disk' o 'mount-disk' primero.");
         }
+        self.ensure_parent_dirs(path, uid, gid)?;
         let (parent_inode_idx, name) = self.resolve_parent_dir(path)?;
         if name.is_empty() || name.len() > 55 {
             return Err("Nombre de archivo inválido (máximo 55 caracteres)");

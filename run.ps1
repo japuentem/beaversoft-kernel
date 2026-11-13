@@ -1,4 +1,4 @@
-<#
+﻿<#
  ============================================================================
  Project: Beaversoft Meta-Kernel
  Author: José Alberto Puente Maldonado (japuentem)
@@ -58,6 +58,12 @@ if ($TestArm64) {
         @{ Pkg = "beaver-bench"; Out = "assets\user_arm64\bench.elf" },
         @{ Pkg = "beaver-sh";    Out = "assets\user_arm64\sh.elf" }
     )) {
+        $binArm = "target\aarch64-unknown-none\release\$($u.Pkg)"
+        if ((Test-Path "user\user_aarch64.ld") -and (Test-Path $binArm)) {
+            if ((Get-Item $binArm).LastWriteTime -lt (Get-Item "user\user_aarch64.ld").LastWriteTime) {
+                cargo clean -p $u.Pkg --target aarch64-unknown-none 2>$null
+            }
+        }
         cargo rustc --release --target aarch64-unknown-none -p $u.Pkg -- -C link-arg=-Tuser/user_aarch64.ld -C link-arg=-z -C link-arg=max-page-size=4096
         if ($LASTEXITCODE -ne 0) {
             Write-Error "[ERROR] Falló la compilación ARM64 de $($u.Pkg)."
@@ -111,6 +117,27 @@ if ($TestArm64) {
 
 $Target = "x86_64-unknown-none"
 $Mode = if ($DebugBuild) { "debug" } else { "release" }
+
+Write-Host "[TASK] Compilando binarios de usuario (user/) para $Target..." -ForegroundColor Yellow
+New-Item -ItemType Directory -Path "assets\user_x86_64" -Force | Out-Null
+foreach ($u in @(
+    @{ Pkg = "beaver-hello"; Out = "assets\user_x86_64\hello.elf" },
+    @{ Pkg = "beaver-bench"; Out = "assets\user_x86_64\bench.elf" },
+    @{ Pkg = "beaver-sh";    Out = "assets\user_x86_64\sh.elf" }
+)) {
+    $binX86 = "target\$Target\release\$($u.Pkg)"
+    if ((Test-Path "user\user_x86_64.ld") -and (Test-Path $binX86)) {
+        if ((Get-Item $binX86).LastWriteTime -lt (Get-Item "user\user_x86_64.ld").LastWriteTime) {
+            cargo clean -p $u.Pkg --target $Target 2>$null
+        }
+    }
+    cargo rustc --release --target $Target -p $u.Pkg -- -C link-arg=-Tuser/user_x86_64.ld -C link-arg=-z -C link-arg=max-page-size=4096
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[ERROR] Falló la compilación x86_64 de $($u.Pkg)."
+        exit $LASTEXITCODE
+    }
+    Copy-Item "target\$Target\release\$($u.Pkg)" -Destination $u.Out -Force
+}
 
 Write-Host "[TASK] Compilando kernel para arquitectura $Target en modo $Mode..." -ForegroundColor Yellow
 

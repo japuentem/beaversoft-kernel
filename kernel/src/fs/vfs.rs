@@ -822,27 +822,30 @@ pub fn generate_human_tasks() -> String {
     out.push_str("----+----------------------+-------------------------+---------------------\n");
 
     // Consultar scheduler sin mantener el cerrojo mas de lo necesario
-    let sched_guard = SCHEDULER.lock();
-    let total_ticks = get_ticks().max(1);
+    let tasks_info = SCHEDULER.lock().get_tasks_info();
 
-    // Iteramos tareas activas
-    // Tarea 0: main_shell, 1: telemetry_daemon, 2: storage_guard, etc.
-    let tasks_str = {
-        let mut t_out = String::new();
-        // El scheduler tiene metodo de inspeccion
-        // Como tasks es privado, llamamos a un helper de formato
-        t_out.push_str(&format!(" 00 | {:<20} | {:<23} | {} ticks\n",
-            "main_shell", "Activo (Interactuando)", total_ticks / 3));
-        t_out.push_str(&format!(" 01 | {:<20} | {:<23} | {} ticks\n",
-            "telemetry_daemon", "Durmiendo (Heartbeat)", total_ticks / 6));
-        t_out.push_str(&format!(" 02 | {:<20} | {:<23} | {} ticks\n",
-            "storage_guard", "Vigilando Disco (Espejo)", total_ticks / 6));
-        t_out
-    };
-    drop(sched_guard);
+    // Iteramos tareas activas auténticas del scheduler
+    let mut tasks_str = String::new();
+    for (id, name, state, ticks, core_opt, _uid) in tasks_info {
+        let state_desc = match state {
+            crate::task::TaskState::Running => {
+                if let Some(c) = core_opt {
+                    alloc::format!("Ejecutando (Core {})", c)
+                } else {
+                    String::from("Ejecutando [RUN]")
+                }
+            }
+            crate::task::TaskState::Ready => String::from("Listo para CPU [RDY]"),
+            crate::task::TaskState::Sleeping(_) => String::from("Durmiendo [SLP]"),
+            crate::task::TaskState::Finished => String::from("Finalizado [END]"),
+        };
+        tasks_str.push_str(&format!(" {:02} | {:<20} | {:<23} | {} ticks\n",
+            id, name, state_desc, ticks));
+    }
 
     out.push_str(&tasks_str);
     out.push_str("------------------------------------------------------------------------\n");
+    let total_ticks = get_ticks().max(1);
     out.push_str(&format!("  Total Ticks de CPU Acumulados: {} ticks (Tiempo real: {} segundos)\n",
         total_ticks, get_uptime_seconds()));
     out.push_str("  Pila Asignada por Tarea      : 16 KiB privada por hilo (Aislada)\n");

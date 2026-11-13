@@ -60,15 +60,41 @@ pub const AVAILABLE_PACKAGES: [PackageMeta; 5] = [
     },
 ];
 
-/// Genera un binario ELF64 auténtico y válido en memoria para cada paquete
+#[cfg(target_arch = "x86_64")]
+pub static X86_64_HELLO_ELF: &[u8] = include_bytes!("../../../assets/user_x86_64/hello.elf");
+#[cfg(target_arch = "x86_64")]
+pub static X86_64_BENCH_ELF: &[u8] = include_bytes!("../../../assets/user_x86_64/bench.elf");
+#[cfg(target_arch = "x86_64")]
+pub static X86_64_SH_ELF: &[u8] = include_bytes!("../../../assets/user_x86_64/sh.elf");
+
+#[cfg(target_arch = "aarch64")]
+pub static ARM64_HELLO_ELF: &[u8] = include_bytes!("../../../assets/user_arm64/hello.elf");
+#[cfg(target_arch = "aarch64")]
+pub static ARM64_BENCH_ELF: &[u8] = include_bytes!("../../../assets/user_arm64/bench.elf");
+#[cfg(target_arch = "aarch64")]
+pub static ARM64_SH_ELF: &[u8] = include_bytes!("../../../assets/user_arm64/sh.elf");
+
+/// Genera o provee un binario ELF64 auténtico y válido para cada paquete
 pub fn generate_package_elf(name: &str) -> Option<Vec<u8>> {
-    match name {
-        "hello" => Some(create_elf64_binary(b"Hola Mundo desde el Espacio de Usuario (Ring 3) en Beaver OS!\n")),
-        "sysinfo" => Some(create_elf64_binary(b"[SYSINFO-ELF64] Arquitectura: x86_64 | Ring: 3 (Sandbox Aislado) | Syscalls: MSR\n")),
-        "bench" => Some(create_elf64_binary(b"[BENCHMARK-ELF64] 10,000 operaciones en Ring 3 completadas con exito (0 fallos).\n")),
-        "sound" => Some(create_elf64_binary(b"[AUDIO-TOOL] Controlador de audio de Beaver OS activo y calibrado.\n")),
-        "sh" => Some(create_elf64_binary(b"[BEAVER-SH] Shell nativo Ring 3 con syscalls POSIX estandar.\n")),
-        _ => None,
+    #[cfg(target_arch = "x86_64")]
+    {
+        match name {
+            "hello" => Some(X86_64_HELLO_ELF.to_vec()),
+            "bench" => Some(X86_64_BENCH_ELF.to_vec()),
+            "sh" => Some(X86_64_SH_ELF.to_vec()),
+            "sysinfo" => Some(create_elf64_binary(b"[SYSINFO-ELF64] Arquitectura: x86_64 | Ring: 3 (Sandbox Aislado) | Syscalls: MSR\n")),
+            "sound" => Some(create_elf64_binary(b"[AUDIO-TOOL] Controlador de audio de Beaver OS activo y calibrado.\n")),
+            _ => None,
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        match name {
+            "hello" => Some(ARM64_HELLO_ELF.to_vec()),
+            "bench" => Some(ARM64_BENCH_ELF.to_vec()),
+            "sh" => Some(ARM64_SH_ELF.to_vec()),
+            _ => None,
+        }
     }
 }
 
@@ -86,7 +112,7 @@ fn create_elf64_binary(message: &[u8]) -> Vec<u8> {
     elf.extend_from_slice(&2_u16.to_le_bytes()); // e_type: ET_EXEC (2)
     elf.extend_from_slice(&0x3E_u16.to_le_bytes()); // e_machine: x86-64 (0x3E)
     elf.extend_from_slice(&1_u32.to_le_bytes()); // e_version: 1
-    elf.extend_from_slice(&0x08000080_u64.to_le_bytes()); // e_entry: punto de entrada virtual en espacio de usuario aislado
+    elf.extend_from_slice(&0x40000080_u64.to_le_bytes()); // e_entry: punto de entrada virtual en espacio de usuario aislado
     elf.extend_from_slice(&64_u64.to_le_bytes()); // e_phoff: cabecera de programas en offset 64
     elf.extend_from_slice(&0_u64.to_le_bytes()); // e_shoff: sin section header
     elf.extend_from_slice(&0_u32.to_le_bytes()); // e_flags
@@ -104,8 +130,8 @@ fn create_elf64_binary(message: &[u8]) -> Vec<u8> {
     elf.extend_from_slice(&1_u32.to_le_bytes()); // p_type: PT_LOAD (1)
     elf.extend_from_slice(&(1 | 4_u32).to_le_bytes()); // p_flags: PF_X | PF_R (5)
     elf.extend_from_slice(&code_offset.to_le_bytes()); // p_offset
-    elf.extend_from_slice(&0x08000080_u64.to_le_bytes()); // p_vaddr
-    elf.extend_from_slice(&0x08000080_u64.to_le_bytes()); // p_paddr
+    elf.extend_from_slice(&0x40000080_u64.to_le_bytes()); // p_vaddr
+    elf.extend_from_slice(&0x40000080_u64.to_le_bytes()); // p_paddr
     elf.extend_from_slice(&code_size.to_le_bytes()); // p_filesz
     elf.extend_from_slice(&code_size.to_le_bytes()); // p_memsz
     elf.extend_from_slice(&4096_u64.to_le_bytes()); // p_align: 4 KiB
@@ -229,7 +255,7 @@ pub fn remove_package(name: &str) -> Result<String, String> {
     }
 }
 
-/// Ejecuta de forma segura un binario ELF64 ubicado en disco o memoria
+/// Ejecuta de forma segura un binario ELF64 cargándolo y ejecutándolo en espacio aislado Ring 3 / EL0
 pub fn execute_elf(path: &str) -> Result<String, String> {
     let (data, filename) = {
         let vfs = VFS.lock();
@@ -241,33 +267,8 @@ pub fn execute_elf(path: &str) -> Result<String, String> {
     // Parsear el binario ELF64
     let parsed = ElfBinary::parse(&data).map_err(|e| format!("Error parseando ELF64: {}", e))?;
 
-    let segments = parsed.program_headers();
-    if segments.is_empty() {
-        return Err("El binario ELF64 no contiene segmentos cargables (PT_LOAD)".into());
-    }
+    // Cargar y ejecutar auténticamente en espacio de usuario aislado
+    parsed.load_and_execute().map_err(|e| format!("Error en ejecucion Ring 3: {}", e))?;
 
-    // Extraer carga de datos del segmento de código
-    let code_offset = segments[0].offset as usize;
-    let _file_sz = segments[0].file_size as usize;
-    let mut output_msg = String::new();
-
-    if data.len() >= code_offset + 3 {
-        let raw_code = &data[code_offset..];
-        let msg_start = if raw_code.len() >= 33 && &raw_code[0..5] == &[0xB8, 0x01, 0x00, 0x00, 0x00] {
-            33
-        } else {
-            3
-        };
-        if raw_code.len() > msg_start {
-            if let Ok(s) = core::str::from_utf8(&raw_code[msg_start..]) {
-                output_msg = s.trim().to_string();
-            }
-        }
-    }
-
-    if output_msg.is_empty() {
-        output_msg = format!("Proceso '{}' ejecutado correctamente (PID 10{} en Ring 3)", filename, data.len() % 90 + 10);
-    }
-
-    Ok(output_msg)
+    Ok(format!("Proceso '{}' ejecutado exitosamente en Ring 3", filename))
 }

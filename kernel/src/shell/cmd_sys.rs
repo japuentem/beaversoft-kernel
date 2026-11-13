@@ -53,11 +53,22 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             );
 
             kprint_color!(VgaColor::LightGreen, VgaColor::Black, "\n [PROCESOS ACTIVOS (Sin jergas incomprensibles)]\n");
-            kprintln!("  ID | Tarea                 | Estado Humano            | Pila    | Ticks");
-            kprintln!("  ---+-----------------------+--------------------------+---------+------");
-            kprintln!("  00 | main_shell            | Ejecutando en Terminal   | 16 KiB  | {} ticks", ticks / 3);
-            kprintln!("  01 | telemetry_daemon      | Esperando Heartbeat PIT  | 16 KiB  | {} ticks", ticks / 6);
-            kprintln!("  02 | storage_guard         | Vigilando Disco Espejo   | 16 KiB  | {} ticks", ticks / 6);
+            kprintln!("  ID | Tarea                 | Estado Humano            | Nucleo | Ticks");
+            kprintln!("  ---+-----------------------+--------------------------+--------+------");
+            let tasks_info = crate::task::scheduler::SCHEDULER.lock().get_tasks_info();
+            for (id, name, state, task_ticks, core_opt, _uid) in tasks_info {
+                let state_str = match state {
+                    crate::task::TaskState::Running => "Ejecutando en CPU       ",
+                    crate::task::TaskState::Ready => "Listo para ejecutar       ",
+                    crate::task::TaskState::Sleeping(_) => "Durmiendo (Timer PIT)   ",
+                    crate::task::TaskState::Finished => "Finalizado              ",
+                };
+                let core_str = match core_opt {
+                    Some(c) => alloc::format!("Core {}", c),
+                    None => alloc::format!("Cualq."),
+                };
+                kprintln!("  {:02} | {:<21} | {} | {:<6} | {} ticks", id, name, state_str, core_str, task_ticks);
+            }
             kprintln!("===================================================================");
         }
 

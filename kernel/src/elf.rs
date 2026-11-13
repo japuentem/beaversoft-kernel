@@ -325,6 +325,8 @@ impl<'a> ElfBinary<'a> {
         // Salto a Ring 3 con retorno seguro al supervisor
         crate::syscall::CURRENT_USER_BRK.store(crate::syscall::USER_HEAP_START, core::sync::atomic::Ordering::Release);
         let exit_code = unsafe { crate::syscall::enter_ring3_with_return(entry_rip, user_stack_top) };
+        paging::switch_to_kernel_cr3();
+        SCHEDULER.lock().set_current_cr3(paging::kernel_cr3());
         kprint_color!(
             VgaColor::LightGreen, VgaColor::Black,
             "[ELF] Binario finalizado exitosamente (exit code: {}).\n",
