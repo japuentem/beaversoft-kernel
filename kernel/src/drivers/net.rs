@@ -1096,6 +1096,8 @@ pub struct BsdSocket {
     pub ack_num: u32,
     pub window_size: u16,
     pub rx_buffer: Vec<u8>,
+    pub pending_connections: Vec<usize>,
+    pub backlog: usize,
 }
 
 pub static SOCKET_TABLE: SpinLock<[Option<BsdSocket>; 16]> = SpinLock::new([
@@ -1120,8 +1122,20 @@ pub fn deliver_loopback_ipv4(src_ip: Ipv4Addr, dst_ip: Ipv4Addr, proto: u8, payl
         };
 
         if dst_port == 80 {
-            handle_local_http_server(src_ip, src_port, seq_num, ack_num, flags, seg_payload);
-            return;
+            let has_custom_listener = {
+                let table = SOCKET_TABLE.lock();
+                table.iter().any(|slot| {
+                    if let Some(ref sock) = slot {
+                        sock.local_port == 80 && sock.state == SocketState::Listen
+                    } else {
+                        false
+                    }
+                })
+            };
+            if !has_custom_listener {
+                handle_local_http_server(src_ip, src_port, seq_num, ack_num, flags, seg_payload);
+                return;
+            }
         }
 
         handle_loopback_client_segment(src_ip, dst_ip, src_port, dst_port, seq_num, ack_num, flags, window, seg_payload);
@@ -1210,11 +1224,11 @@ pub fn handle_local_http_server(
     }
 }
 
-/// Actualiza el estado del socket cliente local al recibir segmentos por loopback
+/// Actualiza el estado del socket cliente o servidor local al recibir segmentos por loopback
 pub fn handle_loopback_client_segment(
-    _src_ip: Ipv4Addr,
-    _dst_ip: Ipv4Addr,
-    _src_port: u16,
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    src_port: u16,
     dst_port: u16,
     seq: u32,
     ack: u32,
@@ -1223,33 +1237,121 @@ pub fn handle_loopback_client_segment(
     payload: &[u8],
 ) {
     let mut table = SOCKET_TABLE.lock();
-    for slot in table.iter_mut() {
-        if let Some(ref mut sock) = slot {
-            if sock.local_port == dst_port {
-                match sock.state {
-                    SocketState::SynSent => {
-                        if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
-                            sock.ack_num = seq.wrapping_add(1);
-                            sock.seq_num = ack;
-                            sock.state = SocketState::Established;
-                            return;
-                        } else if (flags & TCP_FLAG_RST) != 0 {
-                            sock.state = SocketState::Closed;
-                            return;
-                        }
-                    }
-                    SocketState::Established => {
-                        if !payload.is_empty() {
-                            sock.rx_buffer.extend_from_slice(payload);
-                            sock.ack_num = seq.wrapping_add(payload.len() as u32);
-                        }
-                        if (flags & TCP_FLAG_FIN) != 0 {
-                            sock.state = SocketState::CloseWait;
-                        }
-                        return;
-                    }
-                    _ => {}
+
+    // 1. Buscar coincidencia con una conexión ya establecida o en curso (SynSent, Established, CloseWait, FinWait)
+    let mut matched_idx = None;
+    for (i, slot) in table.iter().enumerate() {
+        if let Some(ref sock) = slot {
+            if sock.state != SocketState::Listen && sock.local_port == dst_port {
+                if sock.remote_port == 0 || sock.remote_port == src_port {
+                    matched_idx = Some(i);
+                    break;
                 }
+            }
+        }
+    }
+
+    if let Some(i) = matched_idx {
+        let sock = table[i].as_mut().unwrap();
+        match sock.state {
+            SocketState::SynSent => {
+                if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
+                    sock.ack_num = seq.wrapping_add(1);
+                    sock.seq_num = ack;
+                    sock.state = SocketState::Established;
+                    let local_seq = sock.seq_num;
+                    let local_ack = sock.ack_num;
+                    drop(table);
+                    // Responder con ACK al servidor
+                    send_tcp_segment(dst_ip, src_ip, dst_port, src_port, local_seq, local_ack, TCP_FLAG_ACK, 64240, &[]);
+                    return;
+                } else if (flags & TCP_FLAG_RST) != 0 {
+                    sock.state = SocketState::Closed;
+                    return;
+                }
+            }
+            SocketState::Established => {
+                if (flags & TCP_FLAG_RST) != 0 {
+                    sock.state = SocketState::Closed;
+                    return;
+                }
+
+                let mut need_ack = false;
+                if !payload.is_empty() {
+                    sock.rx_buffer.extend_from_slice(payload);
+                    sock.ack_num = seq.wrapping_add(payload.len() as u32);
+                    need_ack = true;
+                }
+
+                if (flags & TCP_FLAG_FIN) != 0 {
+                    sock.ack_num = seq.wrapping_add(if payload.is_empty() { 1 } else { payload.len() as u32 + 1 });
+                    sock.state = SocketState::CloseWait;
+                    need_ack = true;
+                }
+
+                if need_ack {
+                    let local_seq = sock.seq_num;
+                    let local_ack = sock.ack_num;
+                    drop(table);
+                    send_tcp_segment(dst_ip, src_ip, dst_port, src_port, local_seq, local_ack, TCP_FLAG_ACK, 64240, &[]);
+                    return;
+                }
+                return;
+            }
+            SocketState::CloseWait => {
+                if (flags & TCP_FLAG_ACK) != 0 {
+                    return;
+                }
+            }
+            SocketState::FinWait => {
+                if (flags & TCP_FLAG_ACK) != 0 {
+                    sock.state = SocketState::Closed;
+                    return;
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // 2. Si no coincide con conexión existente, verificar si es una petición de conexión entrante (SYN) hacia un socket en LISTEN
+    if (flags & TCP_FLAG_SYN) != 0 && (flags & TCP_FLAG_ACK) == 0 {
+        let listening_idx = table.iter().position(|slot| {
+            if let Some(ref sock) = slot {
+                sock.local_port == dst_port && sock.state == SocketState::Listen
+            } else {
+                false
+            }
+        });
+
+        if let Some(listen_id) = listening_idx {
+            // Buscar un slot libre para el nuevo socket cliente aceptado
+            let free_slot = table.iter().position(|slot| slot.is_none());
+            if let Some(child_id) = free_slot {
+                let server_seq = 60_000 + (child_id as u32 * 500);
+                let server_ack = seq.wrapping_add(1);
+                table[child_id] = Some(BsdSocket {
+                    id: child_id,
+                    state: SocketState::Established,
+                    local_port: dst_port,
+                    remote_ip: src_ip,
+                    remote_port: src_port,
+                    seq_num: server_seq.wrapping_add(1),
+                    ack_num: server_ack,
+                    window_size: 64240,
+                    rx_buffer: Vec::new(),
+                    pending_connections: Vec::new(),
+                    backlog: 0,
+                });
+                if let Some(Some(ref mut listener)) = table.get_mut(listen_id) {
+                    if listener.pending_connections.len() < listener.backlog {
+                        listener.pending_connections.push(child_id);
+                    }
+                }
+                drop(table);
+                // Enviar segmento SYN | ACK al cliente
+                send_tcp_segment(dst_ip, src_ip, dst_port, src_port, server_seq, server_ack, TCP_FLAG_SYN | TCP_FLAG_ACK, 64240, &[]);
+                return;
             }
         }
     }
@@ -1270,8 +1372,20 @@ pub fn handle_incoming_tcp_segment(
     payload: &[u8],
 ) {
     if dst_port == 80 {
-        handle_local_http_server(src_ip, src_port, seq, ack, flags, payload);
-        return;
+        let has_custom_listener = {
+            let table = SOCKET_TABLE.lock();
+            table.iter().any(|slot| {
+                if let Some(ref sock) = slot {
+                    sock.local_port == 80 && sock.state == SocketState::Listen
+                } else {
+                    false
+                }
+            })
+        };
+        if !has_custom_listener {
+            handle_local_http_server(src_ip, src_port, seq, ack, flags, payload);
+            return;
+        }
     }
 
     let mut table = SOCKET_TABLE.lock();
@@ -1279,7 +1393,8 @@ pub fn handle_incoming_tcp_segment(
         if let Some(ref mut sock) = slot {
             let match_conn = sock.local_port == dst_port
                 && (sock.remote_ip.0 == [0, 0, 0, 0] || sock.remote_ip.0 == src_ip.0)
-                && (sock.remote_port == 0 || sock.remote_port == src_port);
+                && (sock.remote_port == 0 || sock.remote_port == src_port)
+                && sock.state != SocketState::Listen;
 
             if match_conn {
                 match sock.state {
@@ -1344,6 +1459,51 @@ pub fn handle_incoming_tcp_segment(
             }
         }
     }
+
+    // Si no coincide con conexión existente y es un SYN entrante, verificar si hay un socket en modo Listen
+    if (flags & TCP_FLAG_SYN) != 0 && (flags & TCP_FLAG_ACK) == 0 {
+        let listening_idx = table.iter().position(|slot| {
+            if let Some(ref sock) = slot {
+                sock.local_port == dst_port && sock.state == SocketState::Listen
+            } else {
+                false
+            }
+        });
+
+        if let Some(listen_id) = listening_idx {
+            let free_slot = table.iter().position(|slot| slot.is_none());
+            if let Some(child_id) = free_slot {
+                let server_seq = 60_000 + (child_id as u32 * 500);
+                let server_ack = seq.wrapping_add(1);
+                table[child_id] = Some(BsdSocket {
+                    id: child_id,
+                    state: SocketState::Established,
+                    local_port: dst_port,
+                    remote_ip: src_ip,
+                    remote_port: src_port,
+                    seq_num: server_seq.wrapping_add(1),
+                    ack_num: server_ack,
+                    window_size: 64240,
+                    rx_buffer: Vec::new(),
+                    pending_connections: Vec::new(),
+                    backlog: 0,
+                });
+                if let Some(Some(ref mut listener)) = table.get_mut(listen_id) {
+                    if listener.pending_connections.len() < listener.backlog {
+                        listener.pending_connections.push(child_id);
+                    }
+                }
+                let my_ip = net.ip_address;
+                let my_mac = net.mac_address;
+                send_tcp_segment_direct(
+                    net, my_mac, src_eth, my_ip, src_ip,
+                    dst_port, src_port, server_seq, server_ack,
+                    TCP_FLAG_SYN | TCP_FLAG_ACK, 64240, &[]
+                );
+                return;
+            }
+        }
+    }
 }
 
 pub fn bsd_socket(domain: i32, sock_type: i32, _protocol: i32) -> Result<usize, &'static str> {
@@ -1363,11 +1523,76 @@ pub fn bsd_socket(domain: i32, sock_type: i32, _protocol: i32) -> Result<usize, 
                 ack_num: 0,
                 window_size: 64240,
                 rx_buffer: Vec::new(),
+                pending_connections: Vec::new(),
+                backlog: 0,
             });
             return Ok(i);
         }
     }
     Err("Tabla de sockets llena (máximo 16 sockets simultáneos)")
+}
+
+/// Asigna un puerto local a un socket descriptor (POSIX bind)
+pub fn bsd_bind(sock_id: usize, port: u16) -> Result<(), &'static str> {
+    if port == 0 {
+        return Err("Puerto de enlace inválido (puerto 0 no permitido)");
+    }
+    let mut table = SOCKET_TABLE.lock();
+    for (i, slot) in table.iter().enumerate() {
+        if i != sock_id {
+            if let Some(ref other) = slot {
+                if other.local_port == port && other.state != SocketState::Closed && other.state != SocketState::Unused {
+                    return Err("Puerto ya en uso por otro socket (EADDRINUSE)");
+                }
+            }
+        }
+    }
+
+    let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
+    if sock.state != SocketState::Closed && sock.state != SocketState::Unused {
+        return Err("El socket no se encuentra en estado inicial para bsd_bind");
+    }
+    sock.local_port = port;
+    Ok(())
+}
+
+/// Configura el socket en modo de escucha pasiva para conexiones entrantes (POSIX listen)
+pub fn bsd_listen(sock_id: usize, backlog: usize) -> Result<(), &'static str> {
+    let mut table = SOCKET_TABLE.lock();
+    let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
+    if sock.state != SocketState::Closed && sock.state != SocketState::Unused {
+        return Err("Socket no apto para listen");
+    }
+    sock.state = SocketState::Listen;
+    sock.backlog = backlog.max(1);
+    sock.pending_connections.clear();
+    Ok(())
+}
+
+/// Espera y acepta una conexión entrante en un socket en modo Listen (POSIX accept)
+pub fn bsd_accept(sock_id: usize) -> Result<usize, &'static str> {
+    bsd_accept_timeout(sock_id, 15_000)
+}
+
+/// Espera con sondeo activo una conexión entrante en un socket en modo Listen
+pub fn bsd_accept_timeout(sock_id: usize, timeout_spins: usize) -> Result<usize, &'static str> {
+    for _ in 0..timeout_spins {
+        net_poll_rx();
+        {
+            let mut table = SOCKET_TABLE.lock();
+            let sock = table.get_mut(sock_id).and_then(|s| s.as_mut()).ok_or("Socket descriptor inválido")?;
+            if sock.state != SocketState::Listen {
+                return Err("El socket no se encuentra en modo Listen");
+            }
+            if let Some(client_id) = sock.pending_connections.pop() {
+                return Ok(client_id);
+            }
+        }
+        for _ in 0..200 {
+            core::hint::spin_loop();
+        }
+    }
+    Err("Timeout esperando conexión entrante en bsd_accept")
 }
 
 /// Establece una conexión TCP mediante el 3-way handshake estándar (SYN -> SYN-ACK -> ACK)

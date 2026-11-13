@@ -347,7 +347,6 @@ impl<'a> ElfBinary<'a> {
 
         let guard_top = core::ptr::addr_of!(crate::usermode::KERNEL_GUARD_STACK) as u64 + crate::usermode::KERNEL_GUARD_STACK_SIZE as u64;
         crate::gdt::set_tss_rsp0(guard_top);
-        crate::syscall::set_syscall_kernel_stack(guard_top);
 
         // Salto a Ring 3 con retorno seguro al supervisor
         crate::syscall::CURRENT_USER_BRK.store(crate::syscall::USER_HEAP_START, core::sync::atomic::Ordering::Release);

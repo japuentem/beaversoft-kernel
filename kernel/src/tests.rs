@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 22] = [
+    let tests: [(&str, fn()); 23] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -87,6 +87,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("userland_heap_and_sys_brk",               test_userland_heap_and_sys_brk),
         ("beaverfs_hierarchical_subdirectories",    test_beaverfs_hierarchical_subdirectories),
         ("preemptive_userland_task_scheduling",     test_preemptive_userland_task_scheduling),
+        ("tcp_concurrent_listen_accept",            test_tcp_concurrent_listen_accept),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -728,6 +729,64 @@ pub fn test_preemptive_userland_task_scheduling() {
     // 5. Verificar que el kernel recuperó el control con su espacio de direcciones supervisor
     #[cfg(target_arch = "x86_64")]
     assert_eq!(crate::memory::paging::read_cr3(), crate::memory::paging::kernel_cr3(), "El CR3 activo debe ser el del kernel tras retornar al supervisor");
+}
+
+/// Test 23: Conexiones TCP Entrantes Concurrentes (`bind`, `listen`, `accept`, `send`, `recv`)
+pub fn test_tcp_concurrent_listen_accept() {
+    use crate::drivers::net::{
+        bsd_socket, bsd_bind, bsd_listen, bsd_accept, bsd_connect, bsd_send, bsd_recv, bsd_close,
+        AF_INET, SOCK_STREAM, Ipv4Addr,
+    };
+
+    // 1. Crear socket servidor y asignarlo al puerto 8088
+    let srv_sock = bsd_socket(AF_INET, SOCK_STREAM, 0)
+        .expect("Creacion de socket servidor BSD");
+    bsd_bind(srv_sock, 8088)
+        .expect("Bind en puerto 8088 debe ser exitoso");
+
+    // 2. Pasar el socket a modo escucha con cola de espera (backlog = 4)
+    bsd_listen(srv_sock, 4)
+        .expect("Transicion a estado Listen debe ser exitosa");
+
+    // 3. Crear socket cliente y conectar al servidor local en 127.0.0.1:8088
+    let cli_sock = bsd_socket(AF_INET, SOCK_STREAM, 0)
+        .expect("Creacion de socket cliente BSD");
+    bsd_connect(cli_sock, Ipv4Addr::new(127, 0, 0, 1), 8088)
+        .expect("Conexion TCP loopback hacia 127.0.0.1:8088 debe tener exito");
+
+    // 4. El servidor acepta la conexion entrante (3-way handshake)
+    let accepted_sock = bsd_accept(srv_sock)
+        .expect("Accept de conexion cliente entrante debe tener exito");
+    assert!(accepted_sock != srv_sock && accepted_sock != cli_sock, "El descriptor aceptado debe ser unico e independiente");
+
+    // 5. El cliente envia una peticion de datos hacia el servidor
+    let ping_msg = b"PING-BEAVER-TCP-STREAM";
+    let sent_bytes = bsd_send(cli_sock, ping_msg)
+        .expect("Envio de datos TCP desde el cliente debe tener exito");
+    assert_eq!(sent_bytes, ping_msg.len(), "Se deben enviar todos los bytes de la peticion");
+
+    // 6. El servidor lee los datos recibidos a traves del socket aceptado
+    let mut srv_rx_buf = [0_u8; 64];
+    let recvd_srv = bsd_recv(accepted_sock, &mut srv_rx_buf)
+        .expect("Servidor debe recibir los datos del socket aceptado");
+    assert_eq!(&srv_rx_buf[..recvd_srv], ping_msg, "Los datos recibidos en el servidor deben coincidir exactamente");
+
+    // 7. El servidor responde al cliente con confirmacion
+    let pong_msg = b"PONG-BEAVER-TCP-ACK";
+    let sent_reply = bsd_send(accepted_sock, pong_msg)
+        .expect("Servidor debe enviar respuesta de vuelta por el canal TCP");
+    assert_eq!(sent_reply, pong_msg.len(), "Se deben enviar todos los bytes de respuesta");
+
+    // 8. El cliente lee la respuesta del servidor
+    let mut cli_rx_buf = [0_u8; 64];
+    let recvd_cli = bsd_recv(cli_sock, &mut cli_rx_buf)
+        .expect("Cliente debe recibir la respuesta del servidor");
+    assert_eq!(&cli_rx_buf[..recvd_cli], pong_msg, "La respuesta recibida en el cliente debe coincidir");
+
+    // 9. Cierre ordenado de los tres sockets (FIN-ACK)
+    bsd_close(cli_sock);
+    bsd_close(accepted_sock);
+    bsd_close(srv_sock);
 }
 
 #[cfg(test)]

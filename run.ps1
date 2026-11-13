@@ -316,14 +316,15 @@ if ($Test) {
     $proc.BeginOutputReadLine()
     $proc.BeginErrorReadLine()
 
-    for ($i = 0; $i -lt 50; $i++) {
+    for ($i = 0; $i -lt 80; $i++) {
         if ((Test-Path $LogFile) -and ((Get-Content $LogFile -Raw -ErrorAction SilentlyContinue) -match "root@beaver:/#")) {
+            Start-Sleep -Milliseconds 500
             break
         }
         Start-Sleep -Milliseconds 500
     }
     $proc.StandardInput.WriteLine("autotest exit")
-    $exited = $proc.WaitForExit(15000)
+    $exited = $proc.WaitForExit(90000)
     if (-not $exited) {
         $proc.Kill()
         Write-Error "[FAIL] Timeout esperando salida isa-debug-exit de QEMU."

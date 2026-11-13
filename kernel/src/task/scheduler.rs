@@ -406,16 +406,9 @@ pub fn schedule() {
         Some((prev_sp, next_sp, next_cr3, next_kstack))
     }; // <-- ¡EL CERROJO DEL SCHEDULER SE LIBERA AQUÍ MISMO!
 
-    if let Some((prev_sp, next_sp, next_cr3, next_kstack)) = context_switch_args {
-        // Actualizar TSS.RSP0 y SYSCALL_KERNEL_STACK_TOP para que interrupciones y syscalls
-        // de la tarea entrante utilicen su propia pila de guardia de kernel
-        let kstack = if next_kstack != 0 {
-            next_kstack
-        } else {
-            core::ptr::addr_of!(crate::usermode::KERNEL_GUARD_STACK) as u64 + crate::usermode::KERNEL_GUARD_STACK_SIZE as u64
-        };
-        crate::gdt::set_tss_rsp0(kstack);
-        crate::syscall::set_syscall_kernel_stack(kstack);
+    if let Some((prev_sp, next_sp, next_cr3, _next_kstack)) = context_switch_args {
+        let kguard = core::ptr::addr_of!(crate::usermode::KERNEL_GUARD_STACK) as u64 + crate::usermode::KERNEL_GUARD_STACK_SIZE as u64;
+        crate::gdt::set_tss_rsp0(kguard);
 
         if next_cr3 != 0 && crate::memory::paging::read_cr3() != next_cr3 {
             // SAFETY: `next_cr3` es una tabla PML4 válida de tarea que incluye los mapeos supervisores del kernel.

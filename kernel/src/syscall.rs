@@ -57,6 +57,13 @@ pub const SYS_LSEEK:    u64 = 8;
 pub const SYS_BRK:      u64 = 12;
 pub const SYS_YIELD:    u64 = 24;
 pub const SYS_GETPID:   u64 = 39;
+pub const SYS_SOCKET:   u64 = 41;
+pub const SYS_CONNECT:  u64 = 42;
+pub const SYS_ACCEPT:   u64 = 43;
+pub const SYS_SEND:     u64 = 44;
+pub const SYS_RECV:     u64 = 45;
+pub const SYS_BIND:     u64 = 49;
+pub const SYS_LISTEN:   u64 = 50;
 pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
 pub const SYS_WAITPID:  u64 = 61;
@@ -509,6 +516,16 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 }
             }
 
+            // Lectura en socket de red BSD (fd >= 100 && fd < 116)
+            if fd >= 100 && fd < 116 {
+                let sock_id = (fd - 100) as usize;
+                let slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count) };
+                match crate::drivers::net::bsd_recv(sock_id, slice) {
+                    Ok(recvd) => return recvd as u64,
+                    Err(_) => return (-1_isize) as u64,
+                }
+            }
+
             (-9_isize) as u64 // -EBADF
         }
 
@@ -570,6 +587,16 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 }
             }
 
+            // Escritura en socket de red BSD (fd >= 100 && fd < 116)
+            if fd >= 100 && fd < 116 {
+                let sock_id = (fd - 100) as usize;
+                let slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, count) };
+                match crate::drivers::net::bsd_send(sock_id, slice) {
+                    Ok(sent) => return sent as u64,
+                    Err(_) => return (-1_isize) as u64,
+                }
+            }
+
             (-9_isize) as u64 // -EBADF
         }
 
@@ -610,6 +637,12 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
                 let slot = fd as usize - 3;
                 let mut table = OPEN_FILES.lock();
                 table[slot] = None;
+                return 0;
+            }
+            // Cierre de socket de red BSD (fd >= 100 && fd < 116)
+            if fd >= 100 && fd < 116 {
+                let sock_id = (fd - 100) as usize;
+                crate::drivers::net::bsd_close(sock_id);
                 return 0;
             }
             (-9_isize) as u64 // -EBADF
@@ -718,6 +751,82 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
         SYS_GETPID => {
             let tid = crate::task::scheduler::SCHEDULER.lock().current_task_id();
             tid
+        }
+
+        // SYS_SOCKET (41): domain=arg0, type=arg1, protocol=arg2
+        SYS_SOCKET => {
+            match crate::drivers::net::bsd_socket(arg0 as i32, arg1 as i32, arg2 as i32) {
+                Ok(sock_id) => (sock_id as u64) + 100,
+                Err(_) => (-1_isize) as u64,
+            }
+        }
+
+        // SYS_CONNECT (42): fd=arg0, remote_ip=arg1 (u32 big-endian), remote_port=arg2
+        SYS_CONNECT => {
+            let sock_id = if arg0 >= 100 { (arg0 - 100) as usize } else { arg0 as usize };
+            let ip_bytes = (arg1 as u32).to_be_bytes();
+            let remote_ip = crate::drivers::net::Ipv4Addr::new(ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
+            match crate::drivers::net::bsd_connect(sock_id, remote_ip, arg2 as u16) {
+                Ok(()) => 0,
+                Err(_) => (-1_isize) as u64,
+            }
+        }
+
+        // SYS_ACCEPT (43): fd=arg0
+        SYS_ACCEPT => {
+            let sock_id = if arg0 >= 100 { (arg0 - 100) as usize } else { arg0 as usize };
+            match crate::drivers::net::bsd_accept(sock_id) {
+                Ok(client_id) => (client_id as u64) + 100,
+                Err(_) => (-1_isize) as u64,
+            }
+        }
+
+        // SYS_SEND (44): fd=arg0, buf=arg1, len=arg2, flags=arg3
+        SYS_SEND => {
+            let sock_id = if arg0 >= 100 { (arg0 - 100) as usize } else { arg0 as usize };
+            let buf_ptr = arg1;
+            let count = arg2 as usize;
+            if !is_valid_user_ptr(buf_ptr, count) {
+                return (-14_isize) as u64;
+            }
+            let slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, count) };
+            match crate::drivers::net::bsd_send(sock_id, slice) {
+                Ok(sent) => sent as u64,
+                Err(_) => (-1_isize) as u64,
+            }
+        }
+
+        // SYS_RECV (45): fd=arg0, buf=arg1, len=arg2, flags=arg3
+        SYS_RECV => {
+            let sock_id = if arg0 >= 100 { (arg0 - 100) as usize } else { arg0 as usize };
+            let buf_ptr = arg1;
+            let count = arg2 as usize;
+            if !is_valid_user_ptr(buf_ptr, count) {
+                return (-14_isize) as u64;
+            }
+            let slice = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, count) };
+            match crate::drivers::net::bsd_recv(sock_id, slice) {
+                Ok(recvd) => recvd as u64,
+                Err(_) => (-1_isize) as u64,
+            }
+        }
+
+        // SYS_BIND (49): fd=arg0, port=arg1
+        SYS_BIND => {
+            let sock_id = if arg0 >= 100 { (arg0 - 100) as usize } else { arg0 as usize };
+            match crate::drivers::net::bsd_bind(sock_id, arg1 as u16) {
+                Ok(()) => 0,
+                Err(_) => (-1_isize) as u64,
+            }
+        }
+
+        // SYS_LISTEN (50): fd=arg0, backlog=arg1
+        SYS_LISTEN => {
+            let sock_id = if arg0 >= 100 { (arg0 - 100) as usize } else { arg0 as usize };
+            match crate::drivers::net::bsd_listen(sock_id, arg1 as usize) {
+                Ok(()) => 0,
+                Err(_) => (-1_isize) as u64,
+            }
         }
 
         // SYS_EXECVE: path=arg0
