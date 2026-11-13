@@ -42,6 +42,15 @@
 #define SYS_audio_status 131
 #define SYS_audio_stop   132
 
+// Señales asíncronas POSIX
+#define SYS_kill          62
+#define SYS_sigaction     13
+#define SYS_sigprocmask   14
+#define SYS_sigreturn     15
+
+// Criptografía y entropía
+#define SYS_getrandom    318
+
 // Macros de invocación de syscall x86_64 usando instrucción `syscall`
 static inline int64_t beaver_syscall0(int64_t n) {
     int64_t ret;

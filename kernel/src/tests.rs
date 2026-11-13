@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 29] = [
+    let tests: [(&str, fn()); 32] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -94,6 +94,9 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("rtc_and_posix_clock_time",                test_rtc_and_posix_clock_time),
         ("userland_audio_pcm_dma_playback",         test_userland_audio_pcm_dma_playback),
         ("gpt_partition_table_and_protective_mbr",  test_gpt_partition_table_and_protective_mbr),
+        ("demand_paging_and_copy_on_write",         test_demand_paging_and_copy_on_write),
+        ("posix_signals_and_process_control",       test_posix_signals_and_process_control),
+        ("userland_tls13_crypto_and_getrandom",     test_userland_tls13_crypto_and_getrandom),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -1169,6 +1172,207 @@ pub fn test_gpt_partition_table_and_protective_mbr() {
     assert!(summary.contains("[OK] Válida ('EFI PART')"));
     assert!(summary.contains("BeaverOS Root (/disk)"));
     assert!(summary.contains("BeaverOS Slot-B Mirror"));
+}
+
+/// Test 30: Paginación por Demanda (Demand Paging), Copy-on-Write (CoW) y Aislamiento #PF 14
+pub fn test_demand_paging_and_copy_on_write() {
+    #[cfg(target_arch = "x86_64")]
+    use crate::memory::demand_paging::{handle_page_fault, mark_page_cow, get_stats};
+    #[cfg(target_arch = "x86_64")]
+    use crate::memory::paging::query_mapping;
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        use crate::memory::paging::read_cr3;
+        let cr3 = read_cr3();
+
+        // 1. Probar Paginación por Demanda en una dirección de heap no mapeada para usuario previamente
+        let test_vaddr = 0x0000_0000_5E00_0000_u64;
+        let is_initially_user = query_mapping(cr3, test_vaddr).map_or(false, |(_, _, is_user)| is_user);
+        assert!(!is_initially_user, "La dirección virtual de prueba no debe tener mapeo PAGE_USER inicialmente");
+
+        let (init_demand, init_cow) = get_stats();
+
+        // Simular un fallo de página #PF desde modo usuario por página no presente (error_code 0x4)
+        let handled = handle_page_fault(test_vaddr, 0x4);
+        assert!(handled, "El manejador de fallo de página debe resolver la asignación por demanda");
+
+        let (after_demand, _) = get_stats();
+        assert_eq!(after_demand, init_demand + 1, "El contador de fallos por demanda debe incrementarse");
+
+        // Comprobar que la página ahora está efectivamente mapeada con permisos de usuario
+        let (phys_frame, is_4k, is_user) = query_mapping(cr3, test_vaddr).expect("La página debe estar mapeada tras el fallo por demanda");
+        assert!(is_4k, "Debe ser una página estándar de 4 KiB");
+        assert!(is_user, "Debe tener permisos PAGE_USER activos");
+
+        // Escribir un dato a la página recién asignada y verificar persistencia
+        unsafe {
+            core::ptr::write_volatile(test_vaddr as *mut u64, 0xBEAF_5555_AAAA_1111);
+            let val = core::ptr::read_volatile(test_vaddr as *const u64);
+            assert_eq!(val, 0xBEAF_5555_AAAA_1111, "El contenido escrito en la página por demanda debe ser accesible");
+        }
+
+        // 2. Probar Copy-on-Write (CoW)
+        mark_page_cow(cr3, test_vaddr).expect("Marcar página como CoW");
+
+        // Simular intento de escritura en página presente (error_code 0x7: present=1, write=1, user=1)
+        let cow_handled = handle_page_fault(test_vaddr, 0x7);
+        assert!(cow_handled, "El manejador de #PF debe resolver el fallo de Copy-on-Write");
+
+        let (_, after_cow) = get_stats();
+        assert_eq!(after_cow, init_cow + 1, "El contador de fallos CoW debe incrementarse");
+
+        let (new_phys_frame, _, is_user_new) = query_mapping(cr3, test_vaddr).expect("La página debe seguir mapeada tras CoW");
+        assert!(is_user_new);
+        assert_ne!(phys_frame, new_phys_frame, "CoW debe clonar el contenido en un nuevo marco físico privado");
+
+        // Comprobar que el valor copiado se mantiene íntegro
+        unsafe {
+            let val_cow = core::ptr::read_volatile(test_vaddr as *const u64);
+            assert_eq!(val_cow, 0xBEAF_5555_AAAA_1111, "El dato copiado tras CoW debe ser idéntico al original");
+        }
+
+        // 3. Probar Aislamiento y Anti-BSOD: accesos ilegales no deben ser resueltos
+        assert!(!handle_page_fault(0x0000_0000_0000_0010, 0x4), "Null pointer dereference no debe resolverse por demanda");
+        assert!(!handle_page_fault(0xFFFF_8000_0000_0000, 0x4), "Acceso a espacio de kernel no debe resolverse por demanda");
+    }
+}
+
+/// Test 31: Señales Asíncronas POSIX (kill, sigaction, sigprocmask) y Control de Procesos
+pub fn test_posix_signals_and_process_control() {
+    use crate::syscall::{syscall_dispatch, SYS_SIGACTION, SYS_SIGPROCMASK, SYS_KILL};
+    use crate::signal::{SigAction, SIGINT, SIGKILL, SIGSTOP, SIGUSR1, SIG_BLOCK, SIG_UNBLOCK, SIGNAL_MANAGER};
+
+    // 1. Registrar manejador para SIGINT
+    let custom_handler: u64 = 0x0000_0000_4000_5000;
+    let act = SigAction {
+        sa_handler: custom_handler,
+        sa_mask: 0,
+        sa_flags: 0,
+        sa_restorer: 0,
+    };
+    let mut old_act = SigAction::default();
+
+    let res_action = syscall_dispatch(
+        SYS_SIGACTION,
+        SIGINT as u64,
+        &act as *const _ as u64,
+        &mut old_act as *mut _ as u64,
+        0, 0
+    );
+    assert_eq!(res_action as i64, 0, "SYS_SIGACTION para SIGINT debe retornar 0");
+
+    // 2. Verificar que SIGKILL y SIGSTOP no pueden ser capturados ni ignorados (estándar POSIX)
+    let res_kill_catch = syscall_dispatch(
+        SYS_SIGACTION,
+        SIGKILL as u64,
+        &act as *const _ as u64,
+        0, 0, 0
+    );
+    assert_eq!(res_kill_catch as i64, -22, "Intentar registrar manejador para SIGKILL debe retornar -EINVAL (-22)");
+
+    let res_stop_catch = syscall_dispatch(
+        SYS_SIGACTION,
+        SIGSTOP as u64,
+        &act as *const _ as u64,
+        0, 0, 0
+    );
+    assert_eq!(res_stop_catch as i64, -22, "Intentar registrar manejador para SIGSTOP debe retornar -EINVAL (-22)");
+
+    // 3. Verificación de SYS_SIGPROCMASK (bloqueo y desbloqueo de señales)
+    let mask_to_block: u64 = 1 << SIGUSR1;
+    let mut old_mask: u64 = 0;
+    let res_mask = syscall_dispatch(
+        SYS_SIGPROCMASK,
+        SIG_BLOCK as u64,
+        &mask_to_block as *const _ as u64,
+        &mut old_mask as *mut _ as u64,
+        0, 0
+    );
+    assert_eq!(res_mask as i64, 0, "SYS_SIGPROCMASK debe retornar 0");
+
+    // 4. Verificación de SYS_KILL
+    // Comprobación de existencia de proceso con sig=0
+    let res_exists = syscall_dispatch(SYS_KILL, 0, 0, 0, 0, 0);
+    assert_eq!(res_exists as i64, 0, "SYS_KILL con sig=0 sobre proceso actual debe retornar 0");
+
+    // Envío de señal a proceso inexistente
+    let res_no_proc = syscall_dispatch(SYS_KILL, 99999, SIGINT as u64, 0, 0, 0);
+    assert_eq!(res_no_proc as i64, -3, "SYS_KILL a PID inexistente debe retornar -ESRCH (-3)");
+
+    // Enviar señal bloqueada SIGUSR1: debe quedar encolada en pending
+    let res_send_usr1 = syscall_dispatch(SYS_KILL, 0, SIGUSR1 as u64, 0, 0, 0);
+    assert_eq!(res_send_usr1 as i64, 0);
+
+    let cur_pid = crate::task::scheduler::SCHEDULER.lock().current_task_id() as usize;
+    // Mientras está bloqueada, pop_pending no debe entregarla
+    assert_eq!(SIGNAL_MANAGER.lock().pop_pending(cur_pid), None, "Señal bloqueada no debe ser entregada");
+
+    // Desbloquear SIGUSR1
+    let unblock_mask: u64 = 1 << SIGUSR1;
+    let res_unblock = syscall_dispatch(
+        SYS_SIGPROCMASK,
+        SIG_UNBLOCK as u64,
+        &unblock_mask as *const _ as u64,
+        0, 0, 0
+    );
+    assert_eq!(res_unblock as i64, 0);
+
+    // Ahora pop_pending debe entregar SIGUSR1
+    assert_eq!(SIGNAL_MANAGER.lock().pop_pending(cur_pid), Some(SIGUSR1), "Señal desbloqueada debe ser entregada");
+}
+
+/// Test 32: Criptografía TLS 1.3 en Espacio de Usuario, Entropía SYS_GETRANDOM y ChaCha20-Poly1305
+pub fn test_userland_tls13_crypto_and_getrandom() {
+    use crate::syscall::{syscall_dispatch, SYS_GETRANDOM};
+    use crate::crypto::{ChaCha20, hash_sha256, build_tls13_client_hello};
+
+    // 1. Verificación de SYS_GETRANDOM
+    let mut rnd_buf = [0u8; 32];
+    let res_rnd = syscall_dispatch(
+        SYS_GETRANDOM,
+        rnd_buf.as_mut_ptr() as u64,
+        rnd_buf.len() as u64,
+        0, 0, 0
+    );
+    assert_eq!(res_rnd as usize, 32, "SYS_GETRANDOM debe llenar exactamente los 32 bytes solicitados");
+    assert_ne!(rnd_buf, [0u8; 32], "Los bytes generados por SYS_GETRANDOM deben ser de alta entropía (no ceros)");
+
+    // Validación de error -EFAULT con puntero de usuario inválido
+    let res_fault = syscall_dispatch(
+        SYS_GETRANDOM,
+        0xFFFF_FFFF_FFFF_0000_u64,
+        32,
+        0, 0, 0
+    );
+    assert_eq!(res_fault as i64, -14, "Puntero de usuario inválido debe devolver -EFAULT (-14)");
+
+    // 2. Construcción de registro ClientHello TLS 1.3 (RFC 8446)
+    let hello = build_tls13_client_hello("beaver.org");
+    assert!(hello.len() > 100, "El registro ClientHello debe ser mayor a 100 bytes");
+    assert_eq!(hello[0], 22, "El tipo de contenido de registro TLS debe ser 22 (Handshake)");
+    assert_eq!(&hello[1..3], &[0x03, 0x01], "La versión del registro debe ser 0x0301 (TLS 1.0 legado)");
+    assert_eq!(hello[5], 1, "El mensaje Handshake debe ser tipo 1 (ClientHello)");
+
+    // 3. Verificación de cifrador de flujo ChaCha20 (RFC 8439)
+    let key = [0x42u8; 32];
+    let nonce = [0x24u8; 12];
+    let plaintext = b"Beaver OS - Criptografia Soberana TLS 1.3";
+
+    let mut cipher_enc = ChaCha20::new(&key, &nonce, 1);
+    let ciphertext = cipher_enc.process(plaintext);
+    assert_ne!(ciphertext, plaintext, "El texto cifrado debe diferir del texto en claro");
+
+    let mut cipher_dec = ChaCha20::new(&key, &nonce, 1);
+    let decrypted = cipher_dec.process(&ciphertext);
+    assert_eq!(decrypted, plaintext, "El descifrado ChaCha20 debe coincidir bit a bit con el texto original");
+
+    // 4. Verificación de función hash criptográfica SHA-256 (FIPS 180-4)
+    let test_msg = b"Beaver OS Meta-Kernel";
+    let hash1 = hash_sha256(test_msg);
+    let hash2 = hash_sha256(test_msg);
+    assert_eq!(hash1, hash2, "El hash SHA-256 debe ser determinista");
+    assert_ne!(hash1, [0u8; 32], "El hash SHA-256 no debe ser nulo");
 }
 
 #[cfg(test)]

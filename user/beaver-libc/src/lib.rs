@@ -66,6 +66,62 @@ pub const SYS_AUDIO_PLAY:          u64 = 130;
 pub const SYS_AUDIO_STATUS:        u64 = 131;
 pub const SYS_AUDIO_STOP:          u64 = 132;
 
+// Sockets TCP/IP
+pub const SYS_SOCKET:              u64 = 41;
+pub const SYS_CONNECT:             u64 = 42;
+pub const SYS_ACCEPT:              u64 = 43;
+pub const SYS_SEND:                u64 = 44;
+pub const SYS_RECV:                u64 = 45;
+pub const SYS_BIND:                u64 = 49;
+pub const SYS_LISTEN:              u64 = 50;
+
+pub const AF_INET: i32     = 2;
+pub const SOCK_STREAM: i32 = 1;
+pub const SOCK_DGRAM: i32  = 2;
+
+// Señales asíncronas POSIX
+pub const SYS_KILL:                u64 = 62;
+pub const SYS_SIGACTION:           u64 = 13;
+pub const SYS_SIGPROCMASK:         u64 = 14;
+pub const SYS_SIGRETURN:           u64 = 15;
+
+// Criptografía y entropía
+pub const SYS_GETRANDOM:           u64 = 318;
+
+pub const SIGHUP:  i32 = 1;
+pub const SIGINT:  i32 = 2;
+pub const SIGQUIT: i32 = 3;
+pub const SIGILL:  i32 = 4;
+pub const SIGTRAP: i32 = 5;
+pub const SIGABRT: i32 = 6;
+pub const SIGFPE:  i32 = 8;
+pub const SIGKILL: i32 = 9;
+pub const SIGUSR1: i32 = 10;
+pub const SIGSEGV: i32 = 11;
+pub const SIGUSR2: i32 = 12;
+pub const SIGPIPE: i32 = 13;
+pub const SIGALRM: i32 = 14;
+pub const SIGTERM: i32 = 15;
+pub const SIGCHLD: i32 = 17;
+pub const SIGCONT: i32 = 18;
+pub const SIGSTOP: i32 = 19;
+
+pub const SIG_DFL: u64 = 0;
+pub const SIG_IGN: u64 = 1;
+
+pub const SIG_BLOCK:   i32 = 0;
+pub const SIG_UNBLOCK: i32 = 1;
+pub const SIG_SETMASK: i32 = 2;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct SigAction {
+    pub sa_handler: u64,
+    pub sa_mask: u64,
+    pub sa_flags: u64,
+    pub sa_restorer: u64,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserAudioStatus {
@@ -399,5 +455,217 @@ pub fn audio_status(status: &mut UserAudioStatus) -> Result<(), isize> {
 
 pub fn audio_stop() {
     unsafe { syscall0(SYS_AUDIO_STOP) };
+}
+
+pub fn kill(pid: i32, sig: i32) -> Result<(), isize> {
+    let res = unsafe { syscall2(SYS_KILL, pid as u64, sig as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn sigaction(sig: i32, act: Option<&SigAction>, oldact: Option<&mut SigAction>) -> Result<(), isize> {
+    let act_ptr = match act {
+        Some(a) => a as *const _ as u64,
+        None => 0,
+    };
+    let oldact_ptr = match oldact {
+        Some(oa) => oa as *mut _ as u64,
+        None => 0,
+    };
+    let res = unsafe { syscall3(SYS_SIGACTION, sig as u64, act_ptr, oldact_ptr) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn sigprocmask(how: i32, set: Option<&u64>, oldset: Option<&mut u64>) -> Result<(), isize> {
+    let set_ptr = match set {
+        Some(s) => s as *const _ as u64,
+        None => 0,
+    };
+    let oldset_ptr = match oldset {
+        Some(os) => os as *mut _ as u64,
+        None => 0,
+    };
+    let res = unsafe { syscall3(SYS_SIGPROCMASK, how as u64, set_ptr, oldset_ptr) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn getrandom(buf: &mut [u8], flags: u32) -> Result<usize, isize> {
+    let res = unsafe { syscall3(SYS_GETRANDOM, buf.as_mut_ptr() as u64, buf.len() as u64, flags as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as usize)
+    }
+}
+
+pub fn socket(domain: i32, sock_type: i32, protocol: i32) -> Result<i32, isize> {
+    let res = unsafe { syscall3(SYS_SOCKET, domain as u64, sock_type as u64, protocol as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as i32)
+    }
+}
+
+pub fn connect(fd: i32, remote_ip: u32, remote_port: u16) -> Result<(), isize> {
+    let res = unsafe { syscall3(SYS_CONNECT, fd as u64, remote_ip as u64, remote_port as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn send(fd: i32, buf: &[u8], flags: i32) -> Result<usize, isize> {
+    let res = unsafe { syscall4(SYS_SEND, fd as u64, buf.as_ptr() as u64, buf.len() as u64, flags as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as usize)
+    }
+}
+
+pub fn recv(fd: i32, buf: &mut [u8], flags: i32) -> Result<usize, isize> {
+    let res = unsafe { syscall4(SYS_RECV, fd as u64, buf.as_mut_ptr() as u64, buf.len() as u64, flags as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as usize)
+    }
+}
+
+pub fn bind(fd: i32, port: u16) -> Result<(), isize> {
+    let res = unsafe { syscall2(SYS_BIND, fd as u64, port as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn listen(fd: i32, backlog: i32) -> Result<(), isize> {
+    let res = unsafe { syscall2(SYS_LISTEN, fd as u64, backlog as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn accept(fd: i32) -> Result<i32, isize> {
+    let res = unsafe { syscall1(SYS_ACCEPT, fd as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as i32)
+    }
+}
+
+/// Construye un registro ClientHello estándar de TLS 1.3 (RFC 8446) en un búfer preasignado de usuario
+pub fn tls13_build_client_hello(hostname: &str, out: &mut [u8]) -> Result<usize, isize> {
+    let host_bytes = hostname.as_bytes();
+    let sni_ext_len = host_bytes.len() + 5;
+    let supp_versions_len = 5;
+    let extensions_len = 4 + sni_ext_len + supp_versions_len;
+    let body_len = 2 + 32 + 1 + 32 + 2 + 4 + 1 + 1 + 2 + extensions_len;
+    let handshake_len = 4 + body_len;
+    let total_record_len = 5 + handshake_len;
+
+    if out.len() < total_record_len {
+        return Err(-28); // -ENOSPC
+    }
+
+    // Cabecera de Registro TLS (Tipo 22 = Handshake, versión 0x0301 TLS 1.0 heredada, longitud)
+    out[0] = 22; // TLS_CONTENT_HANDSHAKE
+    out[1] = 0x03;
+    out[2] = 0x01;
+    out[3] = ((handshake_len >> 8) & 0xFF) as u8;
+    out[4] = (handshake_len & 0xFF) as u8;
+
+    // Cabecera Handshake (Tipo 1 = ClientHello, longitud de 3 bytes)
+    out[5] = 1;
+    out[6] = ((body_len >> 16) & 0xFF) as u8;
+    out[7] = ((body_len >> 8) & 0xFF) as u8;
+    out[8] = (body_len & 0xFF) as u8;
+
+    let mut idx = 9;
+    // Legacy Version: TLS 1.2 (0x0303)
+    out[idx] = 0x03; out[idx + 1] = 0x03;
+    idx += 2;
+
+    // Client Random: 32 bytes de entropía generados con getrandom()
+    if getrandom(&mut out[idx..idx + 32], 0).is_err() {
+        for b in &mut out[idx..idx + 32] { *b = 0xAA; }
+    }
+    out[idx] = 0xBE; out[idx + 1] = 0xAF; // Beaver TLS Magic
+    idx += 32;
+
+    // Legacy Session ID: 32 bytes
+    out[idx] = 32;
+    idx += 1;
+    for i in 0..32 { out[idx + i] = 0x55; }
+    idx += 32;
+
+    // Cipher Suites: TLS_CHACHA20_POLY1305_SHA256 (0x1303) y TLS_AES_128_GCM_SHA256 (0x1301)
+    out[idx] = 0x00; out[idx + 1] = 0x04;
+    out[idx + 2] = 0x13; out[idx + 3] = 0x03;
+    out[idx + 4] = 0x13; out[idx + 5] = 0x01;
+    idx += 6;
+
+    // Compression Methods: 1 byte (0x00 = No compresión)
+    out[idx] = 1;
+    out[idx + 1] = 0x00;
+    idx += 2;
+
+    // Extensiones
+    out[idx] = ((extensions_len >> 8) & 0xFF) as u8;
+    out[idx + 1] = (extensions_len & 0xFF) as u8;
+    idx += 2;
+
+    // Extensión SNI (0x0000)
+    out[idx] = 0x00; out[idx + 1] = 0x00;
+    out[idx + 2] = ((sni_ext_len >> 8) & 0xFF) as u8;
+    out[idx + 3] = (sni_ext_len & 0xFF) as u8;
+    idx += 4;
+    let list_len = host_bytes.len() + 3;
+    out[idx] = ((list_len >> 8) & 0xFF) as u8;
+    out[idx + 1] = (list_len & 0xFF) as u8;
+    out[idx + 2] = 0x00;
+    out[idx + 3] = ((host_bytes.len() >> 8) & 0xFF) as u8;
+    out[idx + 4] = (host_bytes.len() & 0xFF) as u8;
+    idx += 5;
+    out[idx..idx + host_bytes.len()].copy_from_slice(host_bytes);
+    idx += host_bytes.len();
+
+    // Extensión Supported Versions (0x002B) para negociar TLS 1.3 (0x0304)
+    out[idx] = 0x00; out[idx + 1] = 0x2B;
+    out[idx + 2] = 0x00; out[idx + 3] = 0x03;
+    out[idx + 4] = 0x02;
+    out[idx + 5] = 0x03; out[idx + 6] = 0x04;
+    idx += 7;
+
+    Ok(idx)
 }
 

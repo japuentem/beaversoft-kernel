@@ -219,6 +219,11 @@ extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error_c
 
     let from_user = (error_code & 0x4) != 0;
 
+    // Intentar resolver transparentemente mediante Paginación por Demanda o Copy-on-Write (CoW)
+    if crate::memory::demand_paging::handle_page_fault(fault_addr, error_code) {
+        return;
+    }
+
     if from_user {
         kprint_color!(
             VgaColor::LightRed, VgaColor::Black,

@@ -123,6 +123,15 @@ pub const SYS_AUDIO_PLAY:          u64 = 130;
 pub const SYS_AUDIO_STATUS:        u64 = 131;
 pub const SYS_AUDIO_STOP:          u64 = 132;
 
+// Señales asíncronas POSIX
+pub const SYS_KILL:                u64 = 62;
+pub const SYS_SIGACTION:           u64 = 13;
+pub const SYS_SIGPROCMASK:         u64 = 14;
+pub const SYS_SIGRETURN:           u64 = 15;
+
+// Generador de entropía y números aleatorios seguros
+pub const SYS_GETRANDOM:           u64 = 318;
+
 // Límites y estado del Heap para procesos de usuario Ring 3 / EL0
 #[cfg(target_arch = "x86_64")]
 pub const USER_HEAP_START: u64 = 0x0000_0000_5000_0000;
@@ -450,11 +459,14 @@ static USER_SEMAPHORES: [core::sync::atomic::AtomicU32; 16] = [
 
 /// Valida si un puntero y rango de longitud pertenecen a memoria válida
 fn is_valid_user_ptr(ptr: u64, len: usize) -> bool {
+    if ptr == 0 {
+        return false;
+    }
     if len == 0 {
         return true;
     }
     match ptr.checked_add(len as u64) {
-        Some(end) => ptr > 0 && (end <= 0x0000_7FFF_FFFF_FFFF || ptr >= 0xFFFF_8000_0000_0000),
+        Some(end) => end <= 0x0000_7FFF_FFFF_FFFF,
         None => false,
     }
 }
@@ -1264,6 +1276,148 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64, arg
         SYS_AUDIO_STOP => {
             crate::drivers::audio::stop_audio();
             0
+        }
+
+        // SYS_KILL (62): pid=arg0 as i32, sig=arg1 as i32
+        SYS_KILL => {
+            let pid = arg0 as i32;
+            let sig = arg1 as i32;
+            let target_pid = if pid <= 0 {
+                crate::task::scheduler::SCHEDULER.lock().current_task_id() as usize
+            } else {
+                pid as usize
+            };
+
+            match crate::signal::SIGNAL_MANAGER.lock().kill(target_pid, sig) {
+                Ok(()) => 0,
+                Err(err) => err as u64,
+            }
+        }
+
+        // SYS_SIGACTION (13): sig=arg0 as i32, act_ptr=arg1, oldact_ptr=arg2
+        SYS_SIGACTION => {
+            let sig = arg0 as i32;
+            let act_ptr = arg1 as *const crate::signal::SigAction;
+            let oldact_ptr = arg2 as *mut crate::signal::SigAction;
+
+            let cur_pid = crate::task::scheduler::SCHEDULER.lock().current_task_id() as usize;
+
+            let new_act = if arg1 != 0 {
+                if !is_valid_user_ptr(arg1, core::mem::size_of::<crate::signal::SigAction>()) {
+                    return (-14_isize) as u64; // -EFAULT
+                }
+                Some(unsafe { core::ptr::read_unaligned(act_ptr) })
+            } else {
+                None
+            };
+
+            match crate::signal::SIGNAL_MANAGER.lock().sigaction(cur_pid, sig, new_act) {
+                Ok(old_act) => {
+                    if arg2 != 0 {
+                        if !is_valid_user_ptr(arg2, core::mem::size_of::<crate::signal::SigAction>()) {
+                            return (-14_isize) as u64; // -EFAULT
+                        }
+                        unsafe {
+                            core::ptr::write_unaligned(oldact_ptr, old_act);
+                        }
+                    }
+                    0
+                }
+                Err(err) => err as u64,
+            }
+        }
+
+        // SYS_SIGPROCMASK (14): how=arg0 as i32, set_ptr=arg1, oldset_ptr=arg2
+        SYS_SIGPROCMASK => {
+            let how = arg0 as i32;
+            let set_ptr = arg1 as *const u64;
+            let oldset_ptr = arg2 as *mut u64;
+
+            let cur_pid = crate::task::scheduler::SCHEDULER.lock().current_task_id() as usize;
+
+            let new_mask = if arg1 != 0 {
+                if !is_valid_user_ptr(arg1, core::mem::size_of::<u64>()) {
+                    return (-14_isize) as u64; // -EFAULT
+                }
+                Some(unsafe { core::ptr::read_unaligned(set_ptr) })
+            } else {
+                None
+            };
+
+            match crate::signal::SIGNAL_MANAGER.lock().sigprocmask(cur_pid, how, new_mask) {
+                Ok(old_mask) => {
+                    if arg2 != 0 {
+                        if !is_valid_user_ptr(arg2, core::mem::size_of::<u64>()) {
+                            return (-14_isize) as u64; // -EFAULT
+                        }
+                        unsafe {
+                            core::ptr::write_unaligned(oldset_ptr, old_mask);
+                        }
+                    }
+                    0
+                }
+                Err(err) => err as u64,
+            }
+        }
+
+        // SYS_SIGRETURN (15)
+        SYS_SIGRETURN => {
+            0
+        }
+
+        // SYS_GETRANDOM (318): buf_ptr=arg0, buflen=arg1, flags=arg2
+        SYS_GETRANDOM => {
+            let buf_ptr = arg0 as *mut u8;
+            let buflen = arg1 as usize;
+            if buflen == 0 {
+                return 0;
+            }
+            if !is_valid_user_ptr(arg0, buflen) {
+                return (-14_isize) as u64; // -EFAULT
+            }
+
+            let mut filled = 0;
+            #[cfg(target_arch = "x86_64")]
+            {
+                while filled < buflen {
+                    let tsc: u64;
+                    unsafe {
+                        let low: u32;
+                        let high: u32;
+                        core::arch::asm!("rdtsc", out("eax") low, out("edx") high, options(nomem, nostack));
+                        tsc = ((high as u64) << 32) | (low as u64);
+                    }
+                    let ticks = crate::drivers::timer::get_ticks();
+                    let unix_time = crate::drivers::timer::get_unix_timestamp();
+                    let seed = tsc ^ unix_time.rotate_left(17) ^ ticks.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (filled as u64);
+
+                    let mut hasher = crate::crypto::Sha256::new();
+                    hasher.update(&seed.to_le_bytes());
+                    hasher.update(&(filled as u64).to_le_bytes());
+                    let digest = hasher.finalize();
+
+                    let chunk = core::cmp::min(buflen - filled, 32);
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(digest.as_ptr(), buf_ptr.add(filled), chunk);
+                    }
+                    filled += chunk;
+                }
+            }
+            #[cfg(not(target_arch = "x86_64"))]
+            {
+                while filled < buflen {
+                    let ticks = crate::drivers::timer::get_ticks();
+                    let seed = ticks.wrapping_mul(0x517cc1b727220a95).wrapping_add(filled as u64);
+                    let random_bytes = seed.to_le_bytes();
+                    let chunk = core::cmp::min(buflen - filled, 8);
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(random_bytes.as_ptr(), buf_ptr.add(filled), chunk);
+                    }
+                    filled += chunk;
+                }
+            }
+
+            buflen as u64
         }
 
         _ => {

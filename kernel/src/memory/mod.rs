@@ -11,6 +11,7 @@ pub mod frame_allocator;
 pub mod heap;
 pub mod memmap;
 pub mod paging;
+pub mod demand_paging;
 
 pub use memmap::MemMap;
 
