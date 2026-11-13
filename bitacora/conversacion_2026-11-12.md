@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 29
+// Total de interacciones del día: 30
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -672,6 +672,44 @@ implementa lo mas importante y al final dime que falta
        6. Valida el rechazo de punteros nulos (`-EFAULT`), longitudes vacías y archivos con formato corrupto (`-EINVAL`).
 - **Resultados de Verificación Automatizada (100% Aprobadas):**
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 28 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con GICv2, Generic Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC y Beaver Shell).
+- Se entregó el balance riguroso, honesto y priorizado de lo que resta para completar Beaver OS.
+
+================================================================================
+
+## Interacción #30 [21:35:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Siguiendo de forma innegociable el principio de que **cada cambio técnico requiere una prueba automatizada verificada al 100%**, y en estricto cumplimiento de la **Regla 5 (Prohibición Estricta de Datos Simulados y Código Hardcodeado)**, se identificó e implementó la característica técnica de más alta prioridad en la capa de almacenamiento masivo y compatibilidad UEFI:
+  1. **Tablas de Particiones GPT Nativas (GUID Partition Table) y Protective MBR ([kernel/src/storage/gpt.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/storage/gpt.rs), [kernel/src/storage/ab_slot.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/storage/ab_slot.rs)):**
+     - **Reemplazo Integral del Código Simulado:** Se eliminó por completo la inyección en memoria de particiones artificiales fijas, sustituyéndola por lectura, parseo, verificación matemática de checksums IEEE 802.3 CRC32 y escritura sector a sector en el medio de bloques físico (`BLOCK_DEVICE`).
+     - **Mapeo Físico y Estándar UEFI:**
+       * **LBA 0 (Protective MBR):** Entrada de partición en offset 446 con tipo `0xEE`, firma de arranque `0x55AA` en offset 510 para resguardar el disco contra herramientas de particionado MBR heredadas.
+       * **LBA 1 (Primary GPT Header):** Firma mágica `"EFI PART"` (`0x5452415020494645`), revisión `0x00010000`, tamaño 92 bytes, cálculo y verificación de CRC32 sobre los campos de cabecera excluyendo el propio checksum, MyLBA = 1, AlternateLBA = `total_sectors - 1`, FirstUsableLBA = 34, LastUsableLBA = `total_sectors - 34`, PartitionEntryLBA = 2, NumEntries = 128, EntrySize = 128 bytes y PartitionEntryArrayCRC32.
+       * **LBA 2..33 (Partition Entry Array):** 32 sectores dedicados a 128 entradas de 128 bytes cada una. Parseo verídico de GUID de tipo, GUID único de partición, StartingLBA, EndingLBA, atributos y nombre de partición decodificado en UTF-16LE.
+       * **Validación Rigurosa UEFI:** Filtro de entradas según `start_lba >= first_usable_lba && end_lba <= last_usable_lba && end_lba >= start_lba` para descartar sectores con datos no particionados.
+     - **Corrección de Conflicto de Sectores en Respaldo A/B:**
+       * Se reubicó `BACKUP_BOOT_LBA` en [`ab_slot.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/storage/ab_slot.rs) del sector 16 (que colisionaba físicamente con las entradas 57..60 de la tabla GPT) al sector 20446 (último sector utilizable antes de la cabecera GPT secundaria), preservando el estándar de particionado UEFI sin corrupciones cruzadas.
+       * Se actualizó `BeaverBootRecord` incorporando la tabla de particiones MBR (`[u8; 64]`) en offset 446 con la entrada Protective MBR `0xEE`.
+  2. **Ampliación de la Suite Automatizada a 29 Pruebas ([kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs)):**
+     - Se añadió la **Prueba 29 (`gpt_partition_table_and_protective_mbr`)**, la cual:
+       1. Valida el escaneo verídico de la tabla GPT desde el medio de bloques.
+       2. Certifica la presencia del Protective MBR en LBA 0 con tipo `0xEE`.
+       3. Comprueba MyLBA = 1, FirstUsableLBA = 34 y Backup LBA ubicado al final del medio.
+       4. Verifica las 3 particiones legítimas:
+          - Partición 1: EFI System Partition (`GUID_EFI_SYSTEM`, LBA 34..255).
+          - Partición 2: BeaverOS Root (`GUID_BEAVER_ROOT`, LBA 256..8448).
+          - Partición 3: BeaverOS Slot-B Mirror (`GUID_BEAVER_ROOT`, LBA 8449..16640).
+       5. Lee físicamente LBA 1 y verifica el checksum CRC32 computado contra el almacenado.
+       6. Lee físicamente LBA 2 (descriptor de entrada en disco) y valida el GUID y starting LBA físico.
+       7. Comprueba la fidelidad del informe textual de particiones emitido por `get_summary()`.
+- **Resultados de Verificación Automatizada (100% Aprobadas):**
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 29 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con GICv2, Generic Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC y Beaver Shell).
 - Se entregó el balance riguroso, honesto y priorizado de lo que resta para completar Beaver OS.
 

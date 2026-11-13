@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 28] = [
+    let tests: [(&str, fn()); 29] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -93,6 +93,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("xhci_usb3_controller_and_ports",          test_xhci_usb3_controller_and_ports),
         ("rtc_and_posix_clock_time",                test_rtc_and_posix_clock_time),
         ("userland_audio_pcm_dma_playback",         test_userland_audio_pcm_dma_playback),
+        ("gpt_partition_table_and_protective_mbr",  test_gpt_partition_table_and_protective_mbr),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -1100,6 +1101,76 @@ pub fn test_userland_audio_pcm_dma_playback() {
     assert_eq!(bad_wav as i64, -22, "Cabecera WAV inválida con sample_rate=0 debe devolver -EINVAL (-22)");
 }
 
+/// Test 29: Tabla de Particiones GUID (GPT), Protective MBR e Integridad de Checksums CRC32
+pub fn test_gpt_partition_table_and_protective_mbr() {
+    use crate::storage::gpt::{GPT_MANAGER, GUID_EFI_SYSTEM, GUID_BEAVER_ROOT, GPT_SIGNATURE};
+    use crate::storage::block_device::BLOCK_DEVICE;
+
+    // 1. Asegurar escaneo o formateo auténtico de la tabla GPT en el disco de bloques
+    {
+        let mut gpt = GPT_MANAGER.lock();
+        if !gpt.scan() || gpt.partitions.len() != 3 {
+            let _ = gpt.format_gpt(20480);
+        }
+    }
+
+    let mut gpt = GPT_MANAGER.lock();
+    assert!(gpt.scan(), "El escaneo de la tabla GPT debe retornar true con disco formateado");
+    assert!(gpt.gpt_valid, "La cabecera GPT principal debe ser válida");
+    assert!(gpt.has_protective_mbr, "El Protective MBR (LBA 0, tipo 0xEE) debe estar presente");
+    assert_eq!(gpt.current_lba, 1, "MyLBA de la cabecera principal debe ser 1");
+    assert_eq!(gpt.first_usable_lba, 34, "FirstUsableLBA debe ser 34 (tras cabecera y 32 sectores de array)");
+    assert!(gpt.backup_lba > gpt.last_usable_lba, "Backup LBA debe ubicarse al final del disco");
+    assert_eq!(gpt.partitions.len(), 3, "Debe haber exactamente 3 particiones reales registradas en la tabla GPT");
+
+    let p1 = &gpt.partitions[0];
+    assert_eq!(p1.index, 1);
+    assert_eq!(p1.type_guid, GUID_EFI_SYSTEM, "La partición 1 debe ser EFI System Partition");
+    assert_eq!(p1.start_lba, 34);
+    assert_eq!(p1.end_lba, 255);
+    assert_eq!(p1.name, "EFI System Partition (ESP)");
+
+    let p2 = &gpt.partitions[1];
+    assert_eq!(p2.index, 2);
+    assert_eq!(p2.type_guid, GUID_BEAVER_ROOT, "La partición 2 debe ser BeaverOS Root");
+    assert_eq!(p2.start_lba, 256);
+    assert_eq!(p2.end_lba, 8448);
+    assert_eq!(p2.name, "BeaverOS Root (/disk)");
+
+    let p3 = &gpt.partitions[2];
+    assert_eq!(p3.index, 3);
+    assert_eq!(p3.type_guid, GUID_BEAVER_ROOT, "La partición 3 debe ser BeaverOS Slot-B Mirror");
+    assert_eq!(p3.start_lba, 8449);
+    assert_eq!(p3.end_lba, 16640);
+    assert_eq!(p3.name, "BeaverOS Slot-B Mirror");
+
+    // 3. Verificación de sectores físicos y cálculo de integridad CRC32 IEEE 802.3
+    let mut lba1_buf = [0u8; 512];
+    BLOCK_DEVICE.lock().read_sector(1, &mut lba1_buf).expect("Lectura física LBA 1");
+    let sig = u64::from_le_bytes(lba1_buf[0..8].try_into().unwrap());
+    assert_eq!(sig, GPT_SIGNATURE, "La firma en disco en LBA 1 debe ser 'EFI PART'");
+
+    let stored_crc = u32::from_le_bytes(lba1_buf[16..20].try_into().unwrap());
+    let mut check_buf = lba1_buf;
+    check_buf[16..20].copy_from_slice(&[0; 4]);
+    let computed_crc = crate::storage::crc32::crc32(&check_buf[..92]);
+    assert_eq!(stored_crc, computed_crc, "El checksum CRC32 de la cabecera GPT debe ser matemáticamente válido");
+
+    // 4. Verificación de LBA 2 (primer sector del array de particiones)
+    let mut lba2_buf = [0u8; 512];
+    BLOCK_DEVICE.lock().read_sector(2, &mut lba2_buf).expect("Lectura física LBA 2");
+    assert_eq!(&lba2_buf[0..16], &GUID_EFI_SYSTEM, "El primer descriptor en LBA 2 debe ser GUID_EFI_SYSTEM");
+    let p1_start_disk = u64::from_le_bytes(lba2_buf[32..40].try_into().unwrap());
+    assert_eq!(p1_start_disk, 34, "StartingLBA físico de la partición 1 debe ser 34");
+
+    // 5. Verificación de reporte verídico en texto
+    let summary = gpt.get_summary();
+    assert!(summary.contains("[OK] Presente (Type 0xEE)"));
+    assert!(summary.contains("[OK] Válida ('EFI PART')"));
+    assert!(summary.contains("BeaverOS Root (/disk)"));
+    assert!(summary.contains("BeaverOS Slot-B Mirror"));
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -1230,4 +1301,10 @@ fn ut_rtc_and_posix_clock_time() {
 #[test_case]
 fn ut_userland_audio_pcm_dma() {
     test_userland_audio_pcm_dma_playback();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_gpt_partition_table() {
+    test_gpt_partition_table_and_protective_mbr();
 }

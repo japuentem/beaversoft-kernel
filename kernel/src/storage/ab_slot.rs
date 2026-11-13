@@ -11,7 +11,7 @@ use crate::vga::VgaColor;
 use crate::{kprintln, kprint_color};
 
 pub const PRIMARY_BOOT_LBA: u32 = 0;
-pub const BACKUP_BOOT_LBA: u32  = 16; // Sector de respaldo LBA 16
+pub const BACKUP_BOOT_LBA: u32  = 20446; // Sector de respaldo LBA 20446 (respetando array GPT LBA 2..33)
 
 const MAGIC: [u8; 8] = *b"BEAVR_OS";
 const BOOT_SIGNATURE_55AA: [u8; 2] = [0x55, 0xAA];
@@ -46,7 +46,7 @@ impl SlotMetadata {
     }
 }
 
-// Tamaño total = 8 + 4 + 4 + 1 + 8 + 20 + 20 + 4 + 441 + 2 = 512 bytes exactos (1 sector)
+// Tamaño total = 8 + 4 + 4 + 1 + 8 + 20 + 20 + 4 + 377 + 64 + 2 = 512 bytes exactos (1 sector)
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct BeaverBootRecord {
@@ -58,12 +58,19 @@ pub struct BeaverBootRecord {
     pub slot_a: SlotMetadata,
     pub slot_b: SlotMetadata,
     pub backup_lba: u32,
-    pub reserved: [u8; 441],
-    pub boot_signature: [u8; 2], // 0x55, 0xAA (Offset 510..512)
+    pub reserved: [u8; 377],
+    pub mbr_partition_table: [u8; 64], // Offset 446..510: MBR Partition Table (Protective MBR 0xEE)
+    pub boot_signature: [u8; 2],       // 0x55, 0xAA (Offset 510..512)
 }
 
 impl BeaverBootRecord {
     pub const fn default_config() -> Self {
+        let mut mbr_table = [0u8; 64];
+        // Entrada MBR 1 (offset 0..16 dentro de mbr_table): Protective MBR tipo 0xEE
+        mbr_table[4] = 0xEE;
+        mbr_table[8] = 0x01; // Starting LBA 1
+        mbr_table[12] = 0xFF; mbr_table[13] = 0x4F; // 20479 LBA (little endian)
+
         Self {
             magic: MAGIC,
             version: 1,
@@ -73,7 +80,8 @@ impl BeaverBootRecord {
             slot_a: SlotMetadata::new(32, 64, 0, 4), // Slot A en LBA 32
             slot_b: SlotMetadata::new(100, 64, 0, 1), // Slot B en LBA 100 (Golden Image)
             backup_lba: BACKUP_BOOT_LBA,
-            reserved: [0; 441],
+            reserved: [0; 377],
+            mbr_partition_table: mbr_table,
             boot_signature: BOOT_SIGNATURE_55AA,
         }
     }
@@ -161,8 +169,15 @@ impl BootSlotController {
             self.record = sec0;
             self.initialized = true;
 
-            // Sincronizar copia de respaldo si fuera necesario
-            if !backup.is_valid() {
+            // Asegurar que la tabla de particiones MBR contenga la entrada Protective MBR (0xEE) para GPT
+            if self.record.mbr_partition_table[4] != 0xEE {
+                self.record.mbr_partition_table[4] = 0xEE;
+                self.record.mbr_partition_table[8] = 0x01;
+                self.record.mbr_partition_table[12] = 0xFF;
+                self.record.mbr_partition_table[13] = 0x4F;
+                self.save_metadata();
+            } else if !backup.is_valid() {
+                // Sincronizar copia de respaldo si fuera necesario
                 let _ = BLOCK_DEVICE.lock().write_sector(BACKUP_BOOT_LBA, &sec0_buf);
             }
         } else if backup.is_valid() {
