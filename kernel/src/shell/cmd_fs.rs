@@ -68,7 +68,11 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
 
         "cat" => {
             if args.is_empty() {
-                kprintln!("Uso: cat <ruta_del_archivo>  (ejemplo: cat /system/passwd)");
+                if let Some(piped) = crate::shell::get_piped_stdin() {
+                    kprint!("{}", piped);
+                } else {
+                    kprintln!("Uso: cat <ruta_del_archivo>  (ejemplo: cat /system/passwd)");
+                }
             } else {
                 let path = shell.resolve_path(args[0]);
                 let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
@@ -153,92 +157,137 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
         }
 
         "head" => {
-            if args.is_empty() {
-                kprintln!("Uso: head [-n N] <archivo>  (ejemplo: head /sys/beaverfs)");
-                return true;
-            }
-            let (count, file_arg) = if args[0] == "-n" && args.len() >= 3 {
-                (args[1].parse::<usize>().unwrap_or(10), args[2])
+            let (count, file_arg_opt) = if !args.is_empty() && args[0] == "-n" {
+                let n = args.get(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+                (n, args.get(2).copied())
+            } else if !args.is_empty() {
+                (10, Some(args[0]))
             } else {
-                (10, args[0])
+                (10, None)
             };
-            let path = shell.resolve_path(file_arg);
-            let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
-            match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
-                Ok(text) => {
-                    for line in text.lines().take(count) {
-                        kprintln!("{}", line);
+
+            let text_opt = if let Some(file_arg) = file_arg_opt {
+                let path = shell.resolve_path(file_arg);
+                let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
+                match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
+                    Ok(txt) => Some(txt),
+                    Err(e) => {
+                        kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e);
+                        return true;
                     }
                 }
-                Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e),
+            } else {
+                crate::shell::get_piped_stdin()
+            };
+
+            if let Some(text) = text_opt {
+                for line in text.lines().take(count) {
+                    kprintln!("{}", line);
+                }
+            } else {
+                kprintln!("Uso: head [-n N] [archivo]");
             }
         }
 
         "tail" => {
-            if args.is_empty() {
-                kprintln!("Uso: tail [-n N] <archivo>  (ejemplo: tail /disk/notas.txt)");
-                return true;
-            }
-            let (count, file_arg) = if args[0] == "-n" && args.len() >= 3 {
-                (args[1].parse::<usize>().unwrap_or(10), args[2])
+            let (count, file_arg_opt) = if !args.is_empty() && args[0] == "-n" {
+                let n = args.get(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+                (n, args.get(2).copied())
+            } else if !args.is_empty() {
+                (10, Some(args[0]))
             } else {
-                (10, args[0])
+                (10, None)
             };
-            let path = shell.resolve_path(file_arg);
-            let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
-            match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
-                Ok(text) => {
-                    let lines: Vec<&str> = text.lines().collect();
-                    let start = lines.len().saturating_sub(count);
-                    for line in &lines[start..] {
-                        kprintln!("{}", line);
+
+            let text_opt = if let Some(file_arg) = file_arg_opt {
+                let path = shell.resolve_path(file_arg);
+                let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
+                match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
+                    Ok(txt) => Some(txt),
+                    Err(e) => {
+                        kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e);
+                        return true;
                     }
                 }
-                Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e),
+            } else {
+                crate::shell::get_piped_stdin()
+            };
+
+            if let Some(text) = text_opt {
+                let lines: Vec<&str> = text.lines().collect();
+                let start = lines.len().saturating_sub(count);
+                for line in &lines[start..] {
+                    kprintln!("{}", line);
+                }
+            } else {
+                kprintln!("Uso: tail [-n N] [archivo]");
             }
         }
 
         "grep" => {
-            if args.len() < 2 {
-                kprintln!("Uso: grep <patron> <archivo>  (ejemplo: grep ATA /sys/disks)");
-                return true;
-            }
-            let pattern = args[0];
-            let path = shell.resolve_path(args[1]);
-            let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
-            match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
-                Ok(text) => {
-                    let mut matches = 0;
-                    for (idx, line) in text.lines().enumerate() {
-                        if line.contains(pattern) {
-                            kprint_color!(VgaColor::Yellow, VgaColor::Black, "{}: ", idx + 1);
-                            kprintln!("{}", line);
-                            matches += 1;
-                        }
-                    }
-                    if matches == 0 {
-                        kprintln!("(Sin coincidencias para '{}')", pattern);
+            let (pattern, text_opt) = if args.len() == 1 {
+                if let Some(piped) = crate::shell::get_piped_stdin() {
+                    (args[0], Some(piped))
+                } else {
+                    kprintln!("Uso: grep <patron> [archivo]  (ejemplo: grep ATA /sys/disks)");
+                    return true;
+                }
+            } else if args.len() >= 2 {
+                let pattern = args[0];
+                let path = shell.resolve_path(args[1]);
+                let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
+                match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
+                    Ok(txt) => (pattern, Some(txt)),
+                    Err(e) => {
+                        kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e);
+                        return true;
                     }
                 }
-                Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e),
+            } else {
+                kprintln!("Uso: grep <patron> [archivo]");
+                return true;
+            };
+
+            if let Some(text) = text_opt {
+                let mut matches = 0;
+                for (idx, line) in text.lines().enumerate() {
+                    if line.contains(pattern) {
+                        kprint_color!(VgaColor::Yellow, VgaColor::Black, "{}: ", idx + 1);
+                        kprintln!("{}", line);
+                        matches += 1;
+                    }
+                }
+                if matches == 0 && crate::shell::get_piped_stdin().is_none() {
+                    kprintln!("(Sin coincidencias para '{}')", pattern);
+                }
             }
         }
 
         "wc" => {
-            if args.is_empty() {
-                kprintln!("Uso: wc <archivo>  (ejemplo: wc /disk/notas.txt)");
-                return true;
-            }
-            let path = shell.resolve_path(args[0]);
-            let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
-            match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
-                Ok(text) => {
-                    let lines = text.lines().count();
-                    let words = text.split_whitespace().count();
-                    let bytes = text.len();
-                    kprintln!("{:>8} {:>8} {:>8} {}", lines, words, bytes, path);
+            let (text_opt, label) = if args.is_empty() {
+                if let Some(piped) = crate::shell::get_piped_stdin() {
+                    (Some(piped), alloc::string::String::from("(pipe)"))
+                } else {
+                    kprintln!("Uso: wc [archivo]  (ejemplo: wc /disk/notas.txt)");
+                    return true;
                 }
-                Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e),
+            } else {
+                let path = shell.resolve_path(args[0]);
+                let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
+                match crate::fs::vfs::VFS.lock().read_file(&path, curr_uid, curr_gid) {
+                    Ok(text) => (Some(text), path),
+                    Err(e) => {
+                        kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] {}\n", e);
+                        return true;
+                    }
+                }
+            };
+
+            if let Some(text) = text_opt {
+                let lines = text.lines().count();
+                let words = text.split_whitespace().count();
+                let bytes = text.len();
+                kprintln!("{:>8} {:>8} {:>8} {}", lines, words, bytes, label);
             }
         }
 

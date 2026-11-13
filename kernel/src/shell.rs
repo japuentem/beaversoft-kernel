@@ -23,6 +23,15 @@ use crate::vga::{VgaColor, VGA_WRITER};
 use crate::{kprint, kprintln, kprint_color};
 
 pub static CURRENT_WORKING_DIR: SpinMutex<String> = SpinMutex::new(String::new());
+pub static PIPED_STDIN: SpinMutex<Option<String>> = SpinMutex::new(None);
+
+pub fn set_piped_stdin(val: Option<String>) {
+    *PIPED_STDIN.lock() = val;
+}
+
+pub fn get_piped_stdin() -> Option<String> {
+    PIPED_STDIN.lock().clone()
+}
 
 pub fn get_current_dir() -> String {
     if let Some(dir) = CURRENT_WORKING_DIR.try_lock() {
@@ -212,6 +221,102 @@ impl Shell {
     }
 
     pub fn execute_command(&mut self, input: &str) {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        // 1. Manejo de Pipelines (|)
+        if trimmed.contains('|') {
+            self.execute_pipeline(trimmed);
+            return;
+        }
+
+        // 2. Manejo de Redirección (> o >>)
+        if trimmed.contains('>') {
+            self.execute_redirection(trimmed);
+            return;
+        }
+
+        // 3. Ejecución directa
+        self.execute_single_command(trimmed);
+    }
+
+    pub fn execute_pipeline(&mut self, input: &str) {
+        let stages: Vec<&str> = input.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if stages.is_empty() {
+            return;
+        }
+
+        let mut current_input: Option<String> = None;
+
+        for (i, &stage) in stages.iter().enumerate() {
+            let is_last = i == stages.len() - 1;
+
+            set_piped_stdin(current_input.take());
+
+            if !is_last {
+                crate::console::start_stdout_capture(true);
+            }
+
+            if is_last && stage.contains('>') {
+                self.execute_redirection(stage);
+            } else {
+                self.execute_single_command(stage);
+            }
+
+            if !is_last {
+                current_input = crate::console::stop_stdout_capture();
+            }
+        }
+
+        set_piped_stdin(None);
+    }
+
+    pub fn execute_redirection(&mut self, input: &str) {
+        let (append, parts) = if input.contains(">>") {
+            let p: Vec<&str> = input.splitn(2, ">>").collect();
+            (true, p)
+        } else {
+            let p: Vec<&str> = input.splitn(2, '>').collect();
+            (false, p)
+        };
+
+        if parts.len() < 2 {
+            kprintln!("Sintaxis de redireccion invalida");
+            return;
+        }
+
+        let cmd_part = parts[0].trim();
+        let file_part = parts[1].trim();
+        if file_part.is_empty() {
+            kprintln!("Falta el archivo destino de redireccion");
+            return;
+        }
+
+        let target_path = self.resolve_path(file_part);
+
+        crate::console::start_stdout_capture(true);
+        self.execute_single_command(cmd_part);
+        let output = crate::console::stop_stdout_capture().unwrap_or_default();
+
+        let (curr_uid, curr_gid, _) = crate::task::scheduler::SCHEDULER.lock().current_credentials();
+        let mut vfs = crate::fs::vfs::VFS.lock();
+
+        let content_to_write = if append {
+            let mut existing = vfs.read_file(&target_path, curr_uid, curr_gid).unwrap_or_default();
+            existing.push_str(&output);
+            existing.into_bytes()
+        } else {
+            output.into_bytes()
+        };
+
+        if let Err(e) = vfs.create_file(&target_path, &content_to_write, curr_uid, curr_gid) {
+            crate::kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR REDIRECCION] {}\n", e);
+        }
+    }
+
+    pub fn execute_single_command(&mut self, input: &str) {
         if input.is_empty() {
             return;
         }

@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 23] = [
+    let tests: [(&str, fn()); 24] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -88,6 +88,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("beaverfs_hierarchical_subdirectories",    test_beaverfs_hierarchical_subdirectories),
         ("preemptive_userland_task_scheduling",     test_preemptive_userland_task_scheduling),
         ("tcp_concurrent_listen_accept",            test_tcp_concurrent_listen_accept),
+        ("shell_pipes_and_redirection",             test_shell_pipes_and_redirection),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -789,6 +790,46 @@ pub fn test_tcp_concurrent_listen_accept() {
     bsd_close(srv_sock);
 }
 
+/// Test 24: Tuberías y Redirección en Beaver Shell (`|`, `>`, `>>`)
+pub fn test_shell_pipes_and_redirection() {
+    use crate::shell::Shell;
+    use crate::fs::vfs::VFS;
+
+    let mut shell = Shell::new();
+
+    // 1. Redirección simple con sobrescritura (`>`)
+    shell.execute_command("echo Beaver OS Pipelines > /disk/test_pipe.txt");
+    
+    let content1 = VFS.lock().read_file("/disk/test_pipe.txt", 0, 0)
+        .expect("El archivo /disk/test_pipe.txt debio crearse mediante redireccion '>'");
+    assert!(content1.contains("Beaver OS Pipelines"), "El archivo debe contener el texto redirigido");
+
+    // 2. Redirección acumulativa (`>>`)
+    shell.execute_command("echo Segunda Linea Redirigida >> /disk/test_pipe.txt");
+    let content2 = VFS.lock().read_file("/disk/test_pipe.txt", 0, 0)
+        .expect("Lectura tras append '>>'");
+    assert!(content2.contains("Beaver OS Pipelines"), "Debe preservar la primera linea");
+    assert!(content2.contains("Segunda Linea Redirigida"), "Debe contener la linea anadida");
+
+    // 3. Tubería con filtrado grep y redirección combinada (`|` + `>`)
+    shell.execute_command("cat /disk/test_pipe.txt | grep Segunda > /disk/grep_out.txt");
+    let content_grep = VFS.lock().read_file("/disk/grep_out.txt", 0, 0)
+        .expect("Lectura de salida de tuberia grep");
+    assert!(content_grep.contains("Segunda Linea Redirigida"), "Grep debe haber capturado la segunda linea");
+    assert!(!content_grep.contains("Beaver OS Pipelines"), "Grep no debe contener lineas que no coinciden");
+
+    // 4. Conteo de palabras y líneas a través de tubería (`cat | wc`)
+    shell.execute_command("cat /disk/test_pipe.txt | wc > /disk/wc_out.txt");
+    let content_wc = VFS.lock().read_file("/disk/wc_out.txt", 0, 0)
+        .expect("Lectura de salida de tuberia wc");
+    assert!(content_wc.contains("(pipe)"), "WC debe reportar el flujo procesado desde stdin pipe");
+
+    // Limpieza de archivos temporales de prueba
+    let _ = VFS.lock().remove_file("/disk/test_pipe.txt", 0, 0);
+    let _ = VFS.lock().remove_file("/disk/grep_out.txt", 0, 0);
+    let _ = VFS.lock().remove_file("/disk/wc_out.txt", 0, 0);
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -889,4 +930,10 @@ fn ut_device_profile() {
 #[test_case]
 fn ut_cec_touchscreen_safe() {
     test_cec_and_touchscreen_safe_dispatch();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_shell_pipes_and_redirection() {
+    test_shell_pipes_and_redirection();
 }
