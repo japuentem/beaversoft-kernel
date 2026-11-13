@@ -272,3 +272,18 @@ pub fn execute_elf(path: &str) -> Result<String, String> {
 
     Ok(format!("Proceso '{}' ejecutado exitosamente en Ring 3", filename))
 }
+
+/// Programa la ejecución en segundo plano (asíncrona y concurrente) de un binario ELF64 en el planificador
+pub fn spawn_elf_bg(path: &str) -> Result<crate::task::TaskId, String> {
+    let (data, filename) = {
+        let vfs = VFS.lock();
+        let bytes = vfs.read_file_bytes(path, 0, 0).map_err(|e| format!("No se pudo abrir '{}': {}", path, e))?;
+        let name = path.rsplit('/').next().unwrap_or(path).to_string();
+        (bytes, name)
+    };
+
+    let static_name: &'static str = alloc::boxed::Box::leak(filename.into_boxed_str());
+    crate::task::scheduler::SCHEDULER.lock()
+        .spawn_user_elf(static_name, &data)
+        .map_err(|e| format!("Error programando tarea de usuario: {}", e))
+}

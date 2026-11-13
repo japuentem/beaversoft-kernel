@@ -125,9 +125,10 @@ impl<'a> ElfBinary<'a> {
         list
     }
 
-    /// Carga el binario en un espacio de direcciones `TTBR0_EL1` aislado por proceso y salta a `EL0`
+    /// Prepara el espacio de direcciones aislado (`TTBR0_EL1`), mapea los segmentos PT_LOAD
+    /// y la pila de usuario, devolviendo `(proc_ttbr0, entry, user_stack_top)`.
     #[cfg(target_arch = "aarch64")]
-    pub fn load_and_execute(&self) -> Result<(), &'static str> {
+    pub fn prepare_user_space(&self) -> Result<(u64, u64, u64), &'static str> {
         use crate::arch::aarch64::mmu::Aarch64Mmu;
 
         let entry = self.header.entry;
@@ -198,6 +199,14 @@ impl<'a> ElfBinary<'a> {
             Aarch64Mmu::map_user_page(proc_ttbr0, stack_vaddr, stack_frame as u64, true)?;
         }
         let user_stack_top = AARCH64_USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
+        Ok((proc_ttbr0, entry, user_stack_top))
+    }
+
+    /// Carga el binario en un espacio de direcciones `TTBR0_EL1` aislado por proceso y salta a `EL0`
+    #[cfg(target_arch = "aarch64")]
+    pub fn load_and_execute(&self) -> Result<(), &'static str> {
+        use crate::arch::aarch64::mmu::Aarch64Mmu;
+        let (proc_ttbr0, entry, user_stack_top) = self.prepare_user_space()?;
 
         Aarch64Mmu::set_ttbr0(proc_ttbr0);
         Aarch64Mmu::flush_tlb();
@@ -217,19 +226,13 @@ impl<'a> ElfBinary<'a> {
         Ok(())
     }
 
-    /// Carga el binario en un espacio de direcciones `CR3` dedicado y salta a Ring 3
+    /// Prepara el espacio de direcciones aislado (`CR3`), mapea los segmentos PT_LOAD
+    /// y la pila de usuario, devolviendo `(proc_cr3, entry_rip, user_stack_top)`.
     #[cfg(target_arch = "x86_64")]
-    pub fn load_and_execute(&self) -> Result<(), &'static str> {
+    pub fn prepare_user_space(&self) -> Result<(u64, u64, u64), &'static str> {
         let entry_rip = self.header.entry;
-        let ph_count = self.header.ph_num;
-
         let proc_cr3 = paging::create_process_address_space()
             .ok_or("No hay marcos libres para crear el espacio de direcciones (CR3) del proceso ELF")?;
-
-        kprintln!("==================== CARGADOR DE BINARIOS ELF64 ====================");
-        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Espacio de Proceso CR3: {:#010x} (PAGE_USER aislado)\n", proc_cr3);
-        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Punto de Entrada (RIP): {:#010x}\n", entry_rip);
-        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Cantidad Segmentos   : {}\n", ph_count);
 
         let segments = self.program_headers();
         let mut loaded_count = 0;
@@ -243,9 +246,6 @@ impl<'a> ElfBinary<'a> {
             let target_vaddr = ph.vaddr;
 
             if seg_type == PT_LOAD {
-                kprintln!("  -> Segmento PT_LOAD en {:#010x} | File: {} B | Mem: {} B | Flags: 0x{:x}",
-                    target_vaddr, file_sz, mem_sz, flags);
-
                 if file_offset + file_sz > self.data.len() {
                     return Err("El segmento excede los límites del archivo ELF");
                 }
@@ -302,6 +302,32 @@ impl<'a> ElfBinary<'a> {
         }
         let user_stack_top = USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
 
+        Ok((proc_cr3, entry_rip, user_stack_top))
+    }
+
+    /// Carga el binario en un espacio de direcciones `CR3` dedicado y salta a Ring 3
+    #[cfg(target_arch = "x86_64")]
+    pub fn load_and_execute(&self) -> Result<(), &'static str> {
+        let (proc_cr3, entry_rip, user_stack_top) = self.prepare_user_space()?;
+
+        let ph_num = self.header.ph_num;
+        kprintln!("==================== CARGADOR DE BINARIOS ELF64 ====================");
+        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Espacio de Proceso CR3: {:#010x} (PAGE_USER aislado)\n", proc_cr3);
+        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Punto de Entrada (RIP): {:#010x}\n", entry_rip);
+        kprint_color!(VgaColor::LightCyan, VgaColor::Black, "  * Cantidad Segmentos   : {}\n", ph_num);
+
+        let segments = self.program_headers();
+        for ph in segments {
+            if ph.seg_type == PT_LOAD {
+                let vaddr = ph.vaddr;
+                let file_sz = ph.file_size;
+                let mem_sz = ph.mem_size;
+                let flags = ph.flags;
+                kprintln!("  -> Segmento PT_LOAD en {:#010x} | File: {} B | Mem: {} B | Flags: 0x{:x}",
+                    vaddr, file_sz, mem_sz, flags);
+            }
+        }
+
         SCHEDULER.lock().set_current_cr3(proc_cr3);
         // SAFETY: `proc_cr3` incluye las tablas supervisoras del kernel (`PAGE_USER = 0`) y los segmentos del ELF (`PAGE_USER = 1`).
         unsafe {
@@ -321,6 +347,7 @@ impl<'a> ElfBinary<'a> {
 
         let guard_top = core::ptr::addr_of!(crate::usermode::KERNEL_GUARD_STACK) as u64 + crate::usermode::KERNEL_GUARD_STACK_SIZE as u64;
         crate::gdt::set_tss_rsp0(guard_top);
+        crate::syscall::set_syscall_kernel_stack(guard_top);
 
         // Salto a Ring 3 con retorno seguro al supervisor
         crate::syscall::CURRENT_USER_BRK.store(crate::syscall::USER_HEAP_START, core::sync::atomic::Ordering::Release);

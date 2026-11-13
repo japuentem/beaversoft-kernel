@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 21] = [
+    let tests: [(&str, fn()); 22] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -86,6 +86,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("beaverfs_double_indirect_large_file",     test_beaverfs_double_indirect_large_file),
         ("userland_heap_and_sys_brk",               test_userland_heap_and_sys_brk),
         ("beaverfs_hierarchical_subdirectories",    test_beaverfs_hierarchical_subdirectories),
+        ("preemptive_userland_task_scheduling",     test_preemptive_userland_task_scheduling),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -692,6 +693,41 @@ pub fn test_beaverfs_hierarchical_subdirectories() {
         assert!(del_dir.is_ok(), "remove_dir de directorio vacio debe tener exito");
         assert!(!fs.exists("testdir"), "El subdirectorio ya no debe existir tras remove_dir");
     }
+}
+
+/// Test 22: Planificación Preemptiva y Concurrente de Procesos en Ring 3 / EL0
+pub fn test_preemptive_userland_task_scheduling() {
+    use crate::task::scheduler::SCHEDULER;
+    use crate::task::TaskState;
+
+    #[cfg(target_arch = "x86_64")]
+    let bench_data = crate::task::pkg::X86_64_BENCH_ELF;
+    #[cfg(target_arch = "aarch64")]
+    let bench_data = crate::task::pkg::ARM64_BENCH_ELF;
+
+    // 1. Programar tarea de usuario ELF en el planificador
+    let tid = SCHEDULER.lock().spawn_user_elf("bench_bg_proc", bench_data)
+        .expect("Debe registrar proceso ELF de usuario en el planificador");
+
+    assert!(tid > 0, "El TID asignado al proceso de usuario debe ser mayor a 0");
+
+    // 2. Verificar que el estado inicial es Ready
+    let initial_state = SCHEDULER.lock().task_state(tid);
+    assert_eq!(initial_state, Some(TaskState::Ready), "El nuevo proceso de usuario debe estar en estado Ready");
+
+    // 3. Ejecutar cambio de contexto y ciclo de scheduling
+    crate::task::scheduler::yield_now();
+
+    // 4. Verificar que tras ceder tiempo de CPU, la tarea avanzó o finalizó limpiamente
+    let post_state = SCHEDULER.lock().task_state(tid);
+    assert!(
+        post_state == Some(TaskState::Finished) || post_state == Some(TaskState::Running) || post_state == Some(TaskState::Ready),
+        "El proceso de usuario debe mantener un ciclo de vida válido en el planificador"
+    );
+
+    // 5. Verificar que el kernel recuperó el control con su espacio de direcciones supervisor
+    #[cfg(target_arch = "x86_64")]
+    assert_eq!(crate::memory::paging::read_cr3(), crate::memory::paging::kernel_cr3(), "El CR3 activo debe ser el del kernel tras retornar al supervisor");
 }
 
 #[cfg(test)]

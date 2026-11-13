@@ -869,23 +869,33 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
                 }
                 "run" => {
                     if args.len() < 2 {
-                        kprintln!("Uso: pkg run <nombre_o_ruta>  (ejemplo: pkg run hello o pkg run /disk/bin/sysinfo.elf)");
+                        kprintln!("Uso: pkg run <nombre_o_ruta> [&]  (ejemplo: pkg run hello o pkg run /disk/bin/bench.elf &)");
                         return true;
                     }
-                    let path = if args[1].starts_with('/') {
-                        args[1].to_string()
-                    } else if args[1].ends_with(".elf") {
-                        format!("/disk/bin/{}", args[1])
+                    let is_bg = args.iter().any(|&a| a == "&");
+                    let target = args.iter().skip(1).find(|&&a| a != "&").copied().unwrap_or(args[1]);
+                    let path = if target.starts_with('/') {
+                        target.to_string()
+                    } else if target.ends_with(".elf") {
+                        format!("/disk/bin/{}", target)
                     } else {
-                        format!("/disk/bin/{}.elf", args[1])
+                        format!("/disk/bin/{}.elf", target)
                     };
-                    kprint_color!(VgaColor::Yellow, VgaColor::Black, "[CARGANDO ELF64] {}\n", path);
-                    match crate::task::pkg::execute_elf(&path) {
-                        Ok(output) => {
-                            kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[SALIDA RING 3]: ");
-                            kprintln!("{}", output);
+                    if is_bg {
+                        kprint_color!(VgaColor::Yellow, VgaColor::Black, "[PROGRAMANDO ELF64 EN SEGUNDO PLANO] {}\n", path);
+                        match crate::task::pkg::spawn_elf_bg(&path) {
+                            Ok(tid) => kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[BG] Proceso '{}' programado en segundo plano con TID {}.\n", path, tid),
+                            Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR DE PROGRAMACION] {}\n", e),
                         }
-                        Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR DE EJECUCION] {}\n", e),
+                    } else {
+                        kprint_color!(VgaColor::Yellow, VgaColor::Black, "[CARGANDO ELF64] {}\n", path);
+                        match crate::task::pkg::execute_elf(&path) {
+                            Ok(output) => {
+                                kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[SALIDA RING 3]: ");
+                                kprintln!("{}", output);
+                            }
+                            Err(e) => kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR DE EJECUCION] {}\n", e),
+                        }
                     }
                 }
                 "info" => {

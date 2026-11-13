@@ -69,6 +69,26 @@ impl Scheduler {
         id
     }
 
+    /// Registra y programa una nueva tarea de espacio de usuario (Ring 3 / EL0) a partir de un binario ELF64
+    pub fn spawn_user_elf(&mut self, name: &'static str, elf_data: &[u8]) -> Result<TaskId, &'static str> {
+        let elf = crate::elf::ElfBinary::parse(elf_data)?;
+        let (proc_cr3, user_entry, user_stack_top) = elf.prepare_user_space()?;
+        let id = self.next_id;
+        self.next_id += 1;
+        let task = Task::new_user(id, name, proc_cr3, user_entry, user_stack_top);
+        self.tasks.push(task);
+        Ok(id)
+    }
+
+    /// Registra una tarea de usuario ya preparada con su CR3, entry point y user_stack_top
+    pub fn spawn_user_task(&mut self, name: &'static str, cr3: u64, entry: u64, user_stack_top: u64) -> TaskId {
+        let id = self.next_id;
+        self.next_id += 1;
+        let task = Task::new_user(id, name, cr3, entry, user_stack_top);
+        self.tasks.push(task);
+        id
+    }
+
     /// Consulta el estado actual de una tarea por su ID
     pub fn task_state(&self, id: TaskId) -> Option<TaskState> {
         self.tasks.iter().find(|t| t.id == id).map(|t| t.state)
@@ -83,7 +103,7 @@ impl Scheduler {
     pub fn wait_pid(&mut self, target_id: TaskId) -> Option<u64> {
         if let Some(pos) = self.tasks.iter().position(|t| t.id == target_id) {
             if self.tasks[pos].state == TaskState::Finished {
-                return Some(0);
+                return Some(self.tasks[pos].exit_code.unwrap_or(0));
             }
         }
         None
@@ -121,8 +141,24 @@ impl Scheduler {
         kprintln!("===================================================================================");
     }
 
+    /// Devuelve información de ejecución de usuario (user_entry, user_stack_top, cr3) para la tarea activa
+    pub fn current_user_task_info(&self) -> Option<(u64, u64, u64)> {
+        let idx = self.get_task_index_for_current_core()?;
+        let t = self.tasks.get(idx)?;
+        Some((t.user_entry, t.user_stack_top, t.cr3))
+    }
+
+    /// Asigna el código de salida de terminación a la tarea activa
+    pub fn set_current_exit_code(&mut self, code: u64) {
+        if let Some(idx) = self.get_task_index_for_current_core() {
+            if let Some(t) = self.tasks.get_mut(idx) {
+                t.exit_code = Some(code);
+            }
+        }
+    }
+
     /// Obtiene el índice de la tarea activa para el núcleo que efectúa la llamada
-    fn get_task_index_for_current_core(&self) -> Option<usize> {
+    pub fn get_task_index_for_current_core(&self) -> Option<usize> {
         let core = crate::apic::current_apic_id();
         let core_idx = (core as usize).min(15);
         if core != 0 {
@@ -361,10 +397,26 @@ pub fn schedule() {
         let prev_sp = &mut sched.tasks[prev_idx].stack_ptr as *mut *mut u8;
         let next_sp = sched.tasks[next_idx].stack_ptr;
         let next_cr3 = sched.tasks[next_idx].cr3;
-        Some((prev_sp, next_sp, next_cr3))
+        let next_kstack = sched.tasks[next_idx].kernel_stack_top();
+
+        // Preservar y conmutar el contexto supervisor_rsp para aislamiento de Ring 3
+        sched.tasks[prev_idx].supervisor_rsp = crate::syscall::get_supervisor_rsp();
+        crate::syscall::set_supervisor_rsp(sched.tasks[next_idx].supervisor_rsp);
+
+        Some((prev_sp, next_sp, next_cr3, next_kstack))
     }; // <-- ¡EL CERROJO DEL SCHEDULER SE LIBERA AQUÍ MISMO!
 
-    if let Some((prev_sp, next_sp, next_cr3)) = context_switch_args {
+    if let Some((prev_sp, next_sp, next_cr3, next_kstack)) = context_switch_args {
+        // Actualizar TSS.RSP0 y SYSCALL_KERNEL_STACK_TOP para que interrupciones y syscalls
+        // de la tarea entrante utilicen su propia pila de guardia de kernel
+        let kstack = if next_kstack != 0 {
+            next_kstack
+        } else {
+            core::ptr::addr_of!(crate::usermode::KERNEL_GUARD_STACK) as u64 + crate::usermode::KERNEL_GUARD_STACK_SIZE as u64
+        };
+        crate::gdt::set_tss_rsp0(kstack);
+        crate::syscall::set_syscall_kernel_stack(kstack);
+
         if next_cr3 != 0 && crate::memory::paging::read_cr3() != next_cr3 {
             // SAFETY: `next_cr3` es una tabla PML4 válida de tarea que incluye los mapeos supervisores del kernel.
             unsafe {

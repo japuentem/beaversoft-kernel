@@ -291,6 +291,26 @@ return_to_supervisor:
 #[no_mangle]
 pub static mut SUPERVISOR_RSP: u64 = 0;
 
+#[inline]
+pub fn get_supervisor_rsp() -> u64 {
+    unsafe { SUPERVISOR_RSP }
+}
+
+#[inline]
+pub fn set_supervisor_rsp(rsp: u64) {
+    unsafe { SUPERVISOR_RSP = rsp; }
+}
+
+#[inline]
+pub fn set_syscall_kernel_stack(stack_top: u64) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        SYSCALL_KERNEL_STACK_TOP = stack_top;
+    }
+    #[cfg(target_arch = "aarch64")]
+    let _ = stack_top;
+}
+
 #[cfg(target_arch = "x86_64")]
 extern "C" {
     fn syscall_handler_asm();
