@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 25] = [
+    let tests: [(&str, fn()); 26] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -90,6 +90,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("tcp_concurrent_listen_accept",            test_tcp_concurrent_listen_accept),
         ("shell_pipes_and_redirection",             test_shell_pipes_and_redirection),
         ("desktop_compositor_user_window_ipc",      test_desktop_compositor_user_window_ipc),
+        ("xhci_usb3_controller_and_ports",          test_xhci_usb3_controller_and_ports),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -916,6 +917,55 @@ pub fn test_desktop_compositor_user_window_ipc() {
     assert!(WINDOW_MGR.lock().get_user_window(win_id as u32).is_none(), "La ventana debe ser eliminada del WindowManager");
 }
 
+/// Test 26: Controlador Host USB 3.0 Moderno (xHCI), Root Hub y Detección de Dispositivos Reales
+pub fn test_xhci_usb3_controller_and_ports() {
+    use crate::drivers::usb::{USB_MANAGER, UsbPortSpeed, get_usb_summary};
+
+    // 1. Inicializar el subsistema USB y escanear el bus PCI
+    crate::drivers::usb::init();
+
+    let usb = USB_MANAGER.lock();
+    assert!(usb.initialized, "El subsistema USB debe estar marcado como inicializado");
+
+    // 2. Verificar detección del controlador xHCI USB 3.0 en PCI
+    assert!(!usb.xhci_controllers.is_empty(), "Debe detectar al menos un controlador xHCI USB 3.0 en el bus PCI");
+    let xhci = &usb.xhci_controllers[0];
+
+    assert!(xhci.mmio_base > 0, "La dirección base MMIO BAR0 debe ser válida y no nula");
+    assert!(xhci.cap_length >= 0x20, "Longitud de registros de capacidad xHCI debe ser >= 0x20");
+    assert!(xhci.max_ports >= 4, "xHCI debe soportar al menos 4 puertos Root Hub");
+    assert!(xhci.is_running, "El motor del Host Controller debe estar en estado de ejecución (Run/Stop = 1)");
+    assert!(xhci.dcbaap > 0, "DCBAA debe haber sido asignado con una dirección de memoria física válida");
+    assert!(xhci.crcr > 0, "CRCR (Command Ring Control Register) debe estar configurado");
+
+    // 3. Verificar estado de los puertos del Root Hub (PORTSC)
+    assert_eq!(xhci.ports.len(), xhci.max_ports as usize, "Se deben haber explorado todos los puertos Root Hub");
+
+    let connected_ports = xhci.ports.iter().filter(|p| p.connected).count();
+    assert!(connected_ports >= 1, "Debe haber al menos 1 dispositivo USB conectado al Root Hub");
+
+    let kbd_port = xhci.ports.iter().find(|p| p.connected).expect("Puerto conectado");
+    assert!(
+        kbd_port.speed == UsbPortSpeed::HighSpeed || kbd_port.speed == UsbPortSpeed::FullSpeed,
+        "El puerto USB debe negociar velocidad válida (High-Speed o Full-Speed)"
+    );
+    assert!(kbd_port.powered, "El puerto conectado debe tener alimentación activa (PP = 1)");
+
+    // 4. Verificar lista jerárquica de dispositivos reales conectados
+    assert!(!usb.devices.is_empty(), "La lista de dispositivos conectados debe contener el hardware detectado");
+    assert!(
+        usb.devices[0].speed == UsbPortSpeed::HighSpeed || usb.devices[0].speed == UsbPortSpeed::FullSpeed,
+        "La velocidad del dispositivo debe ser coherente con el puerto"
+    );
+
+    // 5. Validar que el reporte de resumen genere información auténtica del hardware
+    let expected_speed_str = kbd_port.speed.as_str();
+    drop(usb);
+    let summary = get_usb_summary();
+    assert!(summary.contains("xHCI USB 3.0 Host Controller"), "El resumen debe describir el controlador xHCI detectado");
+    assert!(summary.contains(expected_speed_str), "El resumen debe reflejar la velocidad negociada en hardware");
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -1028,4 +1078,10 @@ fn ut_shell_pipes_and_redirection() {
 #[test_case]
 fn ut_desktop_compositor_user_window_ipc() {
     test_desktop_compositor_user_window_ipc();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_xhci_usb3_controller() {
+    test_xhci_usb3_controller_and_ports();
 }
