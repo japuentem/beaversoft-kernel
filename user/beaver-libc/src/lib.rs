@@ -20,6 +20,7 @@ pub const SYS_YIELD:    u64 = 24;
 pub const SYS_GETPID:   u64 = 39;
 pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
+pub const SYS_WAITPID:  u64 = 61;
 pub const SYS_UPTIME:   u64 = 99;
 pub const SYS_SLEEP:    u64 = 102;
 pub const SYS_BEEP:     u64 = 103;
@@ -119,6 +120,15 @@ pub fn beep(hz: u32, duration_ms: u32) {
 pub fn exit(code: u64) -> ! {
     unsafe { syscall1(SYS_EXIT, code); }
     loop {}
+}
+
+pub fn waitpid(pid: u64) -> Result<u64, isize> {
+    let res = unsafe { syscall3(SYS_WAITPID, pid, 0, 0) } as isize;
+    if res < 0 {
+        Err(res)
+    } else {
+        Ok(res as u64)
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

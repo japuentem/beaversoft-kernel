@@ -388,6 +388,11 @@ pub fn test_smp_distributed_scheduler() {
     let tid = sched.spawn("smp_test_worker", || {});
     assert!(tid > 0, "El TID de la nueva tarea debe ser mayor que 0");
 
+    let kernel_cr3 = crate::memory::paging::kernel_cr3();
+    let tid2 = sched.spawn_with_cr3("smp_cr3_worker", kernel_cr3, || {});
+    assert!(tid2 > tid, "La tarea con CR3 aislado debe tener un ID sucesivo");
+    assert_eq!(sched.task_state(tid2), Some(crate::task::TaskState::Ready));
+
     let smp = crate::apic::SMP.lock();
     assert!(!smp.cores.is_empty(), "SMP debe contener la lista de núcleos descubiertos");
 }
@@ -544,6 +549,10 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     assert!(cur_brk >= USER_HEAP_START, "SYS_BRK(0) debe retornar al menos USER_HEAP_START");
     let new_brk = syscall_dispatch(SYS_BRK, cur_brk + 4096, 0, 0);
     assert_eq!(new_brk, cur_brk + 4096, "SYS_BRK debe expandir el heap de usuario");
+
+    // 7. Verificación de SYS_WAITPID (cosecha y sincronización de procesos)
+    let wait_res = syscall_dispatch(SYS_WAITPID, 9999, 0, 0);
+    assert_eq!(wait_res as i64, -10, "SYS_WAITPID sobre proceso inexistente debe devolver -ECHILD (-10)");
 }
 
 /// Test 17: Verificación de detección real de perfil de dispositivo (ACPI FADT / SMBIOS / Periféricos)

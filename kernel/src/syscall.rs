@@ -59,6 +59,7 @@ pub const SYS_YIELD:    u64 = 24;
 pub const SYS_GETPID:   u64 = 39;
 pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
+pub const SYS_WAITPID:  u64 = 61;
 pub const SYS_UPTIME:   u64 = 99;
 pub const SYS_SLEEP:    u64 = 102;
 pub const SYS_BEEP:     u64 = 103;
@@ -735,6 +736,24 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
             } else {
                 crate::task::scheduler::mark_finished_and_yield();
                 0
+            }
+        }
+
+        // SYS_WAITPID (61): Espera la finalización de una tarea hija o proceso
+        SYS_WAITPID => {
+            let target_pid = arg0;
+            let state_opt = crate::task::scheduler::SCHEDULER.lock().task_state(target_pid);
+            match state_opt {
+                Some(crate::task::TaskState::Finished) => {
+                    let _ = crate::task::scheduler::SCHEDULER.lock().wait_pid(target_pid);
+                    0
+                }
+                Some(_) => {
+                    (-10_isize) as u64 // -ECHILD (tarea aún en ejecución / no finalizada)
+                }
+                None => {
+                    (-10_isize) as u64 // -ECHILD (No existe tal tarea)
+                }
             }
         }
 

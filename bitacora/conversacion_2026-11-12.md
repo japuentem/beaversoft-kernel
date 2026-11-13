@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 19
+// Total de interacciones del día: 20
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -380,5 +380,33 @@ implementa lo mas importante y al final dime que falta, y dime de los puntos imp
 - Verificación observada tras los cambios:
   - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 20 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
   - `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (GICv2, Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC, `hello.elf`, `malloc()` y Beaver Shell).
+
+================================================================================
+
+## Interacción #20 [18:05:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se implementaron y consolidaron las dos características arquitectónicas de mayor impacto en Beaver OS:
+  1. **Expansión de Capacidad de Almacenamiento en BeaverFS ([kernel/src/storage/beaverfs.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/storage/beaverfs.rs)):**
+     - Se rediseñó el `DiskInode` (64 bytes exactos) para incluir direccionamiento doblemente indirecto (`double_indirect: u32`).
+     - Se eliminó el límite restrictivo previo de 68 KiB por archivo, expandiendo la capacidad a **8.06 MiB** (7 bloques directos de 512 B + 1 bloque indirecto simple de 128 punteros + 1 bloque indirecto doble de hasta 128×128 punteros = 16,519 bloques).
+     - Se agregaron rutinas completas de lectura, escritura y truncado/eliminación (`write_file`, `read_file`, `remove_file`) con asignación y liberación limpia en el bitmap de bloques.
+  2. **Primitivas de Ciclo de Vida y Sincronización de Procesos ([kernel/src/task/scheduler.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/task/scheduler.rs), [kernel/src/syscall.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/syscall.rs), [user/beaver-libc/src/lib.rs](file:///d:/proyectos_personales/beaversoft-kernel/user/beaver-libc/src/lib.rs)):**
+     - Se agregó soporte para registrar tareas con espacio de direcciones virtuales aislado (`spawn_with_cr3(name, cr3, entry)`).
+     - Se implementó la llamada al sistema POSIX **`SYS_WAITPID` (Syscall 61)** y su wrapper estándar en `beaver-libc` (`waitpid(pid)`), permitiendo a procesos padre cosechar el estado de terminación de procesos hijos y evitar procesos zombi.
+  3. **Expansión y Verificación de la Suite de Pruebas Automatizadas:**
+     - Se añadieron dos nuevas pruebas unitarias al kernel ([kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs)), ampliando la suite oficial de 18 a **20 pruebas**:
+       - **Prueba 19 (`beaverfs_double_indirect_large_file`)**: Escribe y lee un archivo de 75 KiB (150 bloques, superando con creces el límite anterior de 135 bloques), verificando integridad byte a byte y desasignación total en disco.
+       - **Prueba 20 (`userland_heap_and_sys_brk`)**: Comprueba el mapeo dinámico y expansión del heap de usuario vía `SYS_BRK`.
+     - Se agregaron aserciones para `spawn_with_cr3` en la prueba 13 y `SYS_WAITPID` en la prueba 16.
+- **Resultados de Verificación Automatizada:**
+  - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 20 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  - `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación en `aarch64` con MMU, VirtIO-blk, VirtIO-net, EL0+SVC y ejecución de `malloc()` en espacio de usuario).
+- Se proporcionó al usuario un desglose conciso y priorizado de los hitos técnicos restantes para un sistema operativo de producción.
 
 ================================================================================

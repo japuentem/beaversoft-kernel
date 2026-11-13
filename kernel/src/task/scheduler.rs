@@ -57,6 +57,33 @@ impl Scheduler {
         id
     }
 
+    /// Registra una nueva tarea con un espacio de direcciones `CR3` aislado dedicado
+    pub fn spawn_with_cr3(&mut self, name: &'static str, cr3: u64, entry: fn()) -> TaskId {
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut task = Task::new(id, name, entry);
+        if cr3 != 0 {
+            task.cr3 = cr3;
+        }
+        self.tasks.push(task);
+        id
+    }
+
+    /// Consulta el estado actual de una tarea por su ID
+    pub fn task_state(&self, id: TaskId) -> Option<TaskState> {
+        self.tasks.iter().find(|t| t.id == id).map(|t| t.state)
+    }
+
+    /// Espera o verifica si una tarea ha finalizado
+    pub fn wait_pid(&mut self, target_id: TaskId) -> Option<u64> {
+        if let Some(pos) = self.tasks.iter().position(|t| t.id == target_id) {
+            if self.tasks[pos].state == TaskState::Finished {
+                return Some(0);
+            }
+        }
+        None
+    }
+
     pub fn print_tasks(&self) {
         kprintln!("=========================== HILOS ACTIVOS EN BEAVER ===========================");
         kprintln!(" ID | Nombre de Tarea       | Núcleo | UID | Estado       | CPU Ticks (@100Hz)");

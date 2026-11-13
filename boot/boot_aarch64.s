@@ -94,7 +94,7 @@ _el1_entry:
 5:  wfi
     b       5b
 
-.section .bss
+.section .bss, "aw", @nobits
 .align 16
 .global _stack_bottom
 .global _stack_top
