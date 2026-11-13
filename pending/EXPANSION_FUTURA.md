@@ -43,3 +43,4 @@ Beaver OS compila y ejecuta nativamente en modo bi-arquitectura verificada:
 4. **Validación en Hardware Emulado y Real:**
    - Automatización de arranque en QEMU (`qemu-system-riscv64 -M virt`).
    - Soporte para placas monoplaca reales accesibles en el mercado (e.g. StarFive VisionFive 2, SiFive HiFive Unleashed).
+

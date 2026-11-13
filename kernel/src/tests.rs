@@ -569,6 +569,11 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     // 7. Verificación de SYS_WAITPID (cosecha y sincronización de procesos)
     let wait_res = syscall_dispatch(SYS_WAITPID, 9999, 0, 0, 0, 0);
     assert_eq!(wait_res as i64, -10, "SYS_WAITPID sobre proceso inexistente debe devolver -ECHILD (-10)");
+
+    // 8. Verificación de formato POSIX estándar de procesos (ps -efa)
+    let ps_out = crate::fs::vfs::generate_posix_ps_efa();
+    assert!(ps_out.contains("UID        PID  PPID  C STIME TTY          TIME CMD"), "ps -efa debe emitir encabezado POSIX estándar");
+    assert!(ps_out.contains("root"), "ps -efa debe reflejar tareas con UID root");
 }
 
 /// Test 17: Verificación de detección real de perfil de dispositivo (ACPI FADT / SMBIOS / Periféricos)

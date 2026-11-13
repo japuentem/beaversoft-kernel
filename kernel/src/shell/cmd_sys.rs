@@ -309,7 +309,12 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
         }
 
         "ps" => {
-            kprintln!("{}", crate::fs::vfs::generate_human_tasks());
+            let has_ef = args.iter().any(|&a| a == "-efa" || a == "-ef" || a == "-aux" || a == "-e" || a == "-a" || a == "-f");
+            if has_ef {
+                kprintln!("{}", crate::fs::vfs::generate_posix_ps_efa());
+            } else {
+                kprintln!("{}", crate::fs::vfs::generate_human_tasks());
+            }
         }
 
         "tasks" => {

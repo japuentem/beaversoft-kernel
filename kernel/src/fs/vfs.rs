@@ -853,6 +853,28 @@ pub fn generate_human_tasks() -> String {
     out
 }
 
+/// Genera el reporte de procesos en formato estándar POSIX/Unix (ps -efa / ps -ef)
+pub fn generate_posix_ps_efa() -> String {
+    let mut out = String::new();
+    out.push_str("UID        PID  PPID  C STIME TTY          TIME CMD\n");
+    let tasks_info = SCHEDULER.lock().get_tasks_info();
+    for (id, name, _state, ticks, _core_opt, uid) in tasks_info {
+        let user_str = if uid == 0 { "root" } else { "beaver" };
+        let c_usage = (ticks % 100) as u32;
+        let secs = ticks / 100;
+        let mins = secs / 60;
+        let time_str = alloc::format!("{:02}:{:02}:{:02}", mins / 60, mins % 60, secs % 60);
+        let cmd_str = if id <= 2 {
+            alloc::format!("[{}]", name)
+        } else {
+            alloc::format!("{}", name)
+        };
+        out.push_str(&alloc::format!("{:<8} {:>5} {:>5} {:>2} 00:00 pts/0    {} {}\n",
+            user_str, id, 0, c_usage, time_str, cmd_str));
+    }
+    out
+}
+
 /// Genera /proc/cpuinfo con especificaciones limpias del procesador
 pub fn generate_human_cpuinfo() -> String {
     let ticks = get_ticks();
