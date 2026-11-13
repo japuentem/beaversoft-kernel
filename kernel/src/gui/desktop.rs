@@ -614,6 +614,38 @@ pub fn render_desktop() {
         }
     }
 
+    // 3.1 Renderizado de Ventanas de Usuario en Espacio de Usuario (Desktop Compositor IPC)
+    let user_wins_render: Vec<(u32, String, usize, usize, usize, usize, bool)> = {
+        let mgr = WINDOW_MGR.lock();
+        mgr.user_windows.iter().filter(|w| !w.minimized).map(|w| {
+            (w.id, w.title.clone(), w.x, w.y, w.width, w.height, mgr.active_user_win == Some(w.id))
+        }).collect()
+    };
+
+    for (uid, title, wx, wy, ww, wh, is_active) in user_wins_render {
+        Canvas::draw_window(wx, wy, ww, wh, &title, is_active);
+        let mgr = WINDOW_MGR.lock();
+        if let Some(uwin) = mgr.get_user_window(uid) {
+            let cx = wx + 2;
+            let cy = wy + 26;
+            let cw = uwin.client_w;
+            let ch = uwin.client_h;
+            for row in 0..ch {
+                let py = cy + row;
+                let buf_row_offset = row * cw;
+                for col in 0..cw {
+                    let px = cx + col;
+                    let pixel_idx = buf_row_offset + col;
+                    if pixel_idx < uwin.buffer.len() {
+                        let color = uwin.buffer[pixel_idx];
+                        Canvas::put_pixel(px, py, color);
+                    }
+                }
+            }
+        }
+        Canvas::mark_dirty_rect(wx, wy, ww, wh);
+    }
+
     // 4. Pie de Página / Ticker de Estado del Kernel (Minimalista)
     Canvas::draw_string_prop(
         20,
@@ -1239,6 +1271,42 @@ pub fn handle_mouse_event(state: crate::drivers::mouse::MouseState) {
     if mode == GuiViewMode::Desktop {
         if left_pressed_now {
             if let Some(mut mgr) = WINDOW_MGR.try_lock() {
+                if let Some(hit) = mgr.hit_test_user_windows(mx, my) {
+                    match hit {
+                        (uid, crate::gui::window::UserWindowHit::CloseButton) => {
+                            mgr.push_user_window_event(uid, crate::gui::window::GuiEvent {
+                                event_type: crate::gui::window::GUI_EVENT_CLOSE,
+                                param1: 0,
+                                param2: 0,
+                                param3: 0,
+                            });
+                            crate::drivers::audio::click_feedback();
+                            drop(mgr);
+                            render_desktop();
+                            return;
+                        }
+                        (uid, crate::gui::window::UserWindowHit::TitleBar) => {
+                            mgr.start_user_drag(uid, mx, my);
+                            drop(mgr);
+                            render_desktop();
+                            return;
+                        }
+                        (uid, crate::gui::window::UserWindowHit::ClientArea(cx, cy)) => {
+                            mgr.bring_user_win_to_front(uid);
+                            mgr.push_user_window_event(uid, crate::gui::window::GuiEvent {
+                                event_type: crate::gui::window::GUI_EVENT_CLICK,
+                                param1: cx as u32,
+                                param2: cy as u32,
+                                param3: 1,
+                            });
+                            crate::drivers::audio::click_feedback();
+                            drop(mgr);
+                            render_desktop();
+                            return;
+                        }
+                    }
+                }
+
                 if let Some((win_id, btn)) = mgr.hit_test_buttons(mx, my) {
                     crate::drivers::audio::click_feedback();
                     match btn {

@@ -25,6 +25,29 @@ pub const SYS_UPTIME:   u64 = 99;
 pub const SYS_SLEEP:    u64 = 102;
 pub const SYS_BEEP:     u64 = 103;
 
+// Protocolo de Ventanas de Usuario vía IPC (Desktop Compositor IPC)
+pub const SYS_GUI_CREATE_WINDOW:   u64 = 120;
+pub const SYS_GUI_DESTROY_WINDOW:  u64 = 121;
+pub const SYS_GUI_DRAW_RECT:       u64 = 122;
+pub const SYS_GUI_DRAW_TEXT:       u64 = 123;
+pub const SYS_GUI_BLIT:            u64 = 124;
+pub const SYS_GUI_GET_EVENT:       u64 = 125;
+pub const SYS_GUI_INVALIDATE:      u64 = 126;
+
+pub const GUI_EVENT_CLICK: u32 = 1;
+pub const GUI_EVENT_KEY: u32 = 2;
+pub const GUI_EVENT_CLOSE: u32 = 3;
+pub const GUI_EVENT_FOCUS: u32 = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuiEvent {
+    pub event_type: u32,
+    pub param1: u32,
+    pub param2: u32,
+    pub param3: u32,
+}
+
 #[inline(always)]
 pub unsafe fn syscall0(nr: u64) -> u64 {
     let ret: u64;
@@ -62,6 +85,16 @@ pub unsafe fn syscall3(nr: u64, a0: u64, a1: u64, a2: u64) -> u64 {
     asm!("syscall", inout("rax") nr => ret, in("rdi") a0, in("rsi") a1, in("rdx") a2, out("rcx") _, out("r11") _, options(nostack));
     #[cfg(target_arch = "aarch64")]
     asm!("svc #0", in("x8") nr, inout("x0") a0 => ret, in("x1") a1, in("x2") a2, options(nostack));
+    ret
+}
+
+#[inline(always)]
+pub unsafe fn syscall4(nr: u64, a0: u64, a1: u64, a2: u64, a3: u64) -> u64 {
+    let ret: u64;
+    #[cfg(target_arch = "x86_64")]
+    asm!("syscall", inout("rax") nr => ret, in("rdi") a0, in("rsi") a1, in("rdx") a2, in("r10") a3, out("rcx") _, out("r11") _, options(nostack));
+    #[cfg(target_arch = "aarch64")]
+    asm!("svc #0", in("x8") nr, inout("x0") a0 => ret, in("x1") a1, in("x2") a2, in("x3") a3, options(nostack));
     ret
 }
 
@@ -220,5 +253,50 @@ unsafe impl core::alloc::GlobalAlloc for BeaverUserAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: core::alloc::Layout) {
         free(ptr);
     }
+}
+
+pub fn gui_create_window(title: &str, x: usize, y: usize, width: usize, height: usize) -> Result<u32, isize> {
+    let dims: u64 = ((width as u64) << 16) | (height as u64);
+    let coords: u64 = ((x as u64) << 16) | (y as u64);
+    let res = unsafe { syscall4(SYS_GUI_CREATE_WINDOW, title.as_ptr() as u64, title.len() as u64, dims, coords) };
+    if res == u64::MAX {
+        Err(-1)
+    } else {
+        Ok(res as u32)
+    }
+}
+
+pub fn gui_destroy_window(win_id: u32) -> Result<(), isize> {
+    let res = unsafe { syscall1(SYS_GUI_DESTROY_WINDOW, win_id as u64) };
+    if res == u64::MAX {
+        Err(-1)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn gui_draw_rect(win_id: u32, rx: usize, ry: usize, rw: usize, rh: usize, color: u32) -> Result<(), isize> {
+    let coords: u64 = ((rx as u64) << 16) | (ry as u64);
+    let dims: u64 = ((rw as u64) << 16) | (rh as u64);
+    let res = unsafe { syscall4(SYS_GUI_DRAW_RECT, win_id as u64, coords, dims, color as u64) };
+    if res == u64::MAX {
+        Err(-1)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn gui_get_event(win_id: u32) -> Option<GuiEvent> {
+    let mut event = GuiEvent { event_type: 0, param1: 0, param2: 0, param3: 0 };
+    let res = unsafe { syscall2(SYS_GUI_GET_EVENT, win_id as u64, &mut event as *mut _ as u64) };
+    if res == 1 {
+        Some(event)
+    } else {
+        None
+    }
+}
+
+pub fn gui_invalidate(win_id: u32) {
+    unsafe { syscall1(SYS_GUI_INVALIDATE, win_id as u64) };
 }
 

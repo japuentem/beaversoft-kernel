@@ -92,8 +92,10 @@ pub extern "C" fn aarch64_handle_sync(frame: &mut TrapFrame) {
         let arg1 = frame.x0;
         let arg2 = frame.x1;
         let arg3 = frame.x2;
+        let arg4 = frame.x3;
+        let arg5 = frame.x4;
 
-        frame.x0 = crate::syscall::syscall_dispatch(sys_no, arg1, arg2, arg3);
+        frame.x0 = crate::syscall::syscall_dispatch(sys_no, arg1, arg2, arg3, arg4, arg5);
     } else {
         // Error de memoria o aborto de instrucción: Supervisor Anti-BSOD destruye el proceso de usuario
         super::uart::Pl011Uart::write_str("[ARM64 SUPERVISOR] Excepción sincrónica capturada en EL0/EL1.\n");

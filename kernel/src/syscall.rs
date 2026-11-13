@@ -81,6 +81,15 @@ pub const SYS_MUTEX_UNLOCK: u64 = 115;
 pub const SYS_SEM_WAIT:     u64 = 116;
 pub const SYS_SEM_POST:     u64 = 117;
 
+// Protocolo de Ventanas de Usuario vía IPC (Desktop Compositor IPC)
+pub const SYS_GUI_CREATE_WINDOW:   u64 = 120;
+pub const SYS_GUI_DESTROY_WINDOW:  u64 = 121;
+pub const SYS_GUI_DRAW_RECT:       u64 = 122;
+pub const SYS_GUI_DRAW_TEXT:       u64 = 123;
+pub const SYS_GUI_BLIT:            u64 = 124;
+pub const SYS_GUI_GET_EVENT:       u64 = 125;
+pub const SYS_GUI_INVALIDATE:      u64 = 126;
+
 // Límites y estado del Heap para procesos de usuario Ring 3 / EL0
 #[cfg(target_arch = "x86_64")]
 pub const USER_HEAP_START: u64 = 0x0000_0000_5000_0000;
@@ -191,6 +200,9 @@ pub fn init_syscalls() {
     }
 }
 
+#[no_mangle]
+pub static mut USER_RSP_SCRATCH: u64 = 0;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Stub de assembly: puente Ring 3 → Ring 0
 // ──────────────────────────────────────────────────────────────────────────────
@@ -200,14 +212,14 @@ core::arch::global_asm!(r#"
 .global syscall_handler_asm
 syscall_handler_asm:
     /* 1. Guardar RSP usuario y saltar a pila kernel */
-    mov r10, rsp
+    mov qword ptr [rip + USER_RSP_SCRATCH], rsp
     lea rsp, [rip + SYSCALL_KERNEL_STACK_TOP]
     mov rsp, [rsp]
 
     /* 2. Preservar contexto de usuario */
     push rcx        /* RIP retorno (sysretq lo necesita en RCX) */
     push r11        /* RFLAGS guardado */
-    push r10        /* RSP usuario */
+    push qword ptr [rip + USER_RSP_SCRATCH] /* RSP usuario */
     push rbp
     push rbx
     push r12
@@ -217,19 +229,25 @@ syscall_handler_asm:
 
     /* 3. Reacomodar registros a la ABI de llamada en C (System V AMD64):
           Rust ABI espera:
-            RDI = arg0 (nr)
-            RSI = arg1 (a0)
-            RDX = arg2 (a1)
-            RCX = arg3 (a2)
+            RDI = nr
+            RSI = arg0
+            RDX = arg1
+            RCX = arg2
+            R8  = arg3
+            R9  = arg4
           En llamada syscall de usuario:
             RAX = syscall number
-            RDI = a0
-            RSI = a1
-            RDX = a2
+            RDI = arg0
+            RSI = arg1
+            RDX = arg2
+            R10 = arg3
+            R8  = arg4
     */
-    mov rcx, rdx    /* a2 */
-    mov rdx, rsi    /* a1 */
-    mov rsi, rdi    /* a0 */
+    mov r9, r8      /* arg4 */
+    mov r8, r10     /* arg3 */
+    mov rcx, rdx    /* arg2 */
+    mov rdx, rsi    /* arg1 */
+    mov rsi, rdi    /* arg0 */
     mov rdi, rax    /* syscall nr */
     call syscall_dispatch
 
@@ -397,13 +415,13 @@ static USER_SEMAPHORES: [core::sync::atomic::AtomicU32; 16] = [
     core::sync::atomic::AtomicU32::new(1), core::sync::atomic::AtomicU32::new(1),
 ];
 
-/// Valida si un puntero y rango de longitud pertenecen a memoria de usuario válida
+/// Valida si un puntero y rango de longitud pertenecen a memoria válida
 fn is_valid_user_ptr(ptr: u64, len: usize) -> bool {
     if len == 0 {
         return true;
     }
     match ptr.checked_add(len as u64) {
-        Some(end) => ptr > 0 && end <= 0x0000_7FFF_FFFF_FFFF,
+        Some(end) => ptr > 0 && (end <= 0x0000_7FFF_FFFF_FFFF || ptr >= 0xFFFF_8000_0000_0000),
         None => false,
     }
 }
@@ -429,7 +447,7 @@ fn read_user_string(ptr: u64, max_len: usize) -> Option<String> {
 // Despachador Rust de syscalls (Ring 0)
 // ──────────────────────────────────────────────────────────────────────────────
 #[no_mangle]
-pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 {
+pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, _arg4: u64) -> u64 {
     match nr {
         // SYS_READ: fd=arg0, buf=arg1, count=arg2
         SYS_READ => {
@@ -983,6 +1001,108 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64) -> 
         SYS_SEM_POST => {
             let idx = (arg0 as usize) % 16;
             USER_SEMAPHORES[idx].fetch_add(1, core::sync::atomic::Ordering::Release);
+            0
+        }
+
+        // Protocolo de Ventanas de Usuario vía IPC (Desktop Compositor IPC)
+        SYS_GUI_CREATE_WINDOW => {
+            // arg0: title_ptr, arg1: title_len, arg2: (width << 16) | height, arg3: (x << 16) | y
+            let title_ptr = arg0;
+            let title_len = (arg1 as usize).min(64);
+            if !is_valid_user_ptr(title_ptr, title_len) {
+                return u64::MAX;
+            }
+            let slice = unsafe { core::slice::from_raw_parts(title_ptr as *const u8, title_len) };
+            let title = core::str::from_utf8(slice).unwrap_or("User App");
+            let w = (arg2 >> 16) as usize;
+            let h = (arg2 & 0xFFFF) as usize;
+            let x = (arg3 >> 16) as usize;
+            let y = (arg3 & 0xFFFF) as usize;
+            let tid = crate::task::scheduler::SCHEDULER.lock().current_task_id();
+            match crate::gui::window::WINDOW_MGR.lock().create_user_window(tid, title, x, y, w, h) {
+                Ok(win_id) => win_id as u64,
+                Err(_) => u64::MAX,
+            }
+        }
+
+        SYS_GUI_DESTROY_WINDOW => {
+            let win_id = arg0 as u32;
+            match crate::gui::window::WINDOW_MGR.lock().destroy_user_window(win_id) {
+                Ok(()) => 0,
+                Err(_) => u64::MAX,
+            }
+        }
+
+        SYS_GUI_DRAW_RECT => {
+            // arg0: win_id, arg1: (rx << 16) | ry, arg2: (rw << 16) | rh, arg3: color_argb
+            let win_id = arg0 as u32;
+            let rx = (arg1 >> 16) as usize;
+            let ry = (arg1 & 0xFFFF) as usize;
+            let rw = (arg2 >> 16) as usize;
+            let rh = (arg2 & 0xFFFF) as usize;
+            let color = arg3 as u32;
+            match crate::gui::window::WINDOW_MGR.lock().draw_rect_user_window(win_id, rx, ry, rw, rh, color) {
+                Ok(()) => 0,
+                Err(_) => u64::MAX,
+            }
+        }
+
+        SYS_GUI_DRAW_TEXT => {
+            // arg0: win_id, arg1: (tx << 16) | ty, arg2: text_ptr, arg3: (text_len << 32) | (color & 0xFFFF_FFFF)
+            let win_id = arg0 as u32;
+            let tx = (arg1 >> 16) as usize;
+            let ty = (arg1 & 0xFFFF) as usize;
+            let text_ptr = arg2;
+            let text_len = ((arg3 >> 32) as usize).min(128);
+            let color = (arg3 & 0xFFFF_FFFF) as u32;
+            if !is_valid_user_ptr(text_ptr, text_len) {
+                return u64::MAX;
+            }
+            let slice = unsafe { core::slice::from_raw_parts(text_ptr as *const u8, text_len) };
+            let text = core::str::from_utf8(slice).unwrap_or("");
+            match crate::gui::window::WINDOW_MGR.lock().draw_text_user_window(win_id, tx, ty, text, color) {
+                Ok(()) => 0,
+                Err(_) => u64::MAX,
+            }
+        }
+
+        SYS_GUI_BLIT => {
+            // arg0: win_id, arg1: buf_ptr, arg2: pixel_count
+            let win_id = arg0 as u32;
+            let buf_ptr = arg1;
+            let count = arg2 as usize;
+            if !is_valid_user_ptr(buf_ptr, count * 4) {
+                return u64::MAX;
+            }
+            let slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u32, count) };
+            match crate::gui::window::WINDOW_MGR.lock().blit_user_window(win_id, slice) {
+                Ok(()) => 0,
+                Err(_) => u64::MAX,
+            }
+        }
+
+        SYS_GUI_GET_EVENT => {
+            // arg0: win_id, arg1: event_buf_ptr (*mut GuiEvent)
+            let win_id = arg0 as u32;
+            let event_ptr = arg1;
+            if !is_valid_user_ptr(event_ptr, core::mem::size_of::<crate::gui::window::GuiEvent>()) {
+                return u64::MAX;
+            }
+            if let Some(event) = crate::gui::window::WINDOW_MGR.lock().poll_user_window_event(win_id) {
+                unsafe {
+                    *(event_ptr as *mut crate::gui::window::GuiEvent) = event;
+                }
+                1 // Evento obtenido
+            } else {
+                0 // Sin eventos pendientes
+            }
+        }
+
+        SYS_GUI_INVALIDATE => {
+            let win_id = arg0 as u32;
+            if let Some(win) = crate::gui::window::WINDOW_MGR.lock().get_user_window(win_id) {
+                crate::gui::canvas::Canvas::mark_dirty_rect(win.x, win.y, win.width, win.height);
+            }
             0
         }
 

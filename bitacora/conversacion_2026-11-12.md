@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 25
+// Total de interacciones del día: 26
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -543,5 +543,37 @@ implementa lo mas importante y al final dime que falta
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 24 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con GICv2, Generic Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC y Beaver Shell).
 - Se entregó el balance riguroso, honesto y priorizado de lo que resta para completar Beaver OS.
+
+================================================================================
+
+## Interacción #26 [20:23:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Siguiendo de forma innegociable el principio de que **cada cambio técnico requiere una prueba automatizada verificada al 100%**, se identificó e implementó la característica arquitectónica de más alto impacto en el subsistema gráfico y de aislamiento de procesos:
+  1. **Protocolo de Ventanas de Usuario vía IPC (Desktop Compositor IPC & Syscalls 120-126) ([kernel/src/gui/window.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/window.rs), [kernel/src/gui/desktop.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/desktop.rs), [kernel/src/syscall.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/syscall.rs), [kernel/src/arch/aarch64/exceptions.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/arch/aarch64/exceptions.rs), [user/beaver-libc/src/lib.rs](file:///d:/proyectos_personales/beaversoft-kernel/user/beaver-libc/src/lib.rs)):**
+     - Se crearon las estructuras fundamentales de ventanas de usuario y eventos gráficos: `UserWindow`, `GuiEvent` y `UserWindowHit`.
+     - En `WindowManager` se implementaron los métodos de ciclo de vida y renderizado: `create_user_window()`, `destroy_user_window()`, `draw_rect_user_window()`, `draw_text_user_window()`, `blit_user_window()`, `poll_user_window_event()`, `push_user_window_event()`, `bring_user_win_to_front()` y `hit_test_user_windows()`.
+     - En `desktop.rs`, el compositor de escritorio (`render_desktop()`) ahora compone e itera en su doble búfer todas las ventanas de usuario activas, proyectando sus backbuffers de píxeles ARGB delimitados por el marco de ventana, botones de control y sombras de `Canvas::draw_window()`, actualizando rectángulos sucios (`Canvas::mark_dirty_rect`).
+     - El despachador de eventos de ratón (`handle_mouse_event`) ahora enruta los clics hacia la ventana de usuario correspondiente (botón cerrar $\rightarrow$ `GUI_EVENT_CLOSE`, barra de título $\rightarrow$ arrastre dinámico, área de cliente $\rightarrow$ `GUI_EVENT_CLICK` con coordenadas relativas locales).
+     - Se implementó la pasarela completa de llamadas al sistema en Ring 0 (`SYS_GUI_CREATE_WINDOW`, `SYS_GUI_DESTROY_WINDOW`, `SYS_GUI_DRAW_RECT`, `SYS_GUI_DRAW_TEXT`, `SYS_GUI_BLIT`, `SYS_GUI_GET_EVENT`, `SYS_GUI_INVALIDATE`), preservando los registros de System V AMD64 (`R10` como `arg3`, `R8` como `arg4`) en `syscall_handler_asm` sin colisiones mediante `USER_RSP_SCRATCH`.
+     - Se expusieron las funciones cliente en `user/beaver-libc` (`gui_create_window`, `gui_destroy_window`, `gui_draw_rect`, `gui_get_event`, `gui_invalidate`).
+  2. **Ampliación de la Suite Automatizada a 25 Pruebas ([kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs)):**
+     - Se añadió la **Prueba 25 (`desktop_compositor_user_window_ipc`)**, la cual:
+       1. Crea una ventana de usuario real mediante `SYS_GUI_CREATE_WINDOW` con título, dimensiones y coordenadas.
+       2. Valida la asignación de `win_id >= 1000` y el dimensionamiento del backbuffer cliente (`client_w * client_h`).
+       3. Dibuja primitivas rectangulares vía `SYS_GUI_DRAW_RECT` y verifica el color exacto en el backbuffer.
+       4. Dibuja texto con fuentes tipográficas mediante `SYS_GUI_DRAW_TEXT`.
+       5. Transfiere un búfer de píxeles en bloque (blit) vía `SYS_GUI_BLIT`.
+       6. Encola y consume eventos de interfaz mediante `SYS_GUI_GET_EVENT`, validando las coordenadas relativas y el vaciado de la cola.
+       7. Marca invalidación y destruye la ventana con `SYS_GUI_DESTROY_WINDOW`, certificando su desasignación limpia.
+- **Resultados de Verificación Automatizada (100% Aprobadas):**
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 25 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con GICv2, Generic Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC y Beaver Shell).
+- Se entregó el balance sincero y priorizado de lo que resta para completar Beaver OS.
 
 ================================================================================

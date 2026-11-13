@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 24] = [
+    let tests: [(&str, fn()); 25] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -89,6 +89,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("preemptive_userland_task_scheduling",     test_preemptive_userland_task_scheduling),
         ("tcp_concurrent_listen_accept",            test_tcp_concurrent_listen_accept),
         ("shell_pipes_and_redirection",             test_shell_pipes_and_redirection),
+        ("desktop_compositor_user_window_ipc",      test_desktop_compositor_user_window_ipc),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -501,40 +502,40 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     use crate::syscall::*;
 
     // 1. Verificación de SYS_UPTIME y SYS_GETPID
-    let uptime = syscall_dispatch(SYS_UPTIME, 0, 0, 0);
+    let uptime = syscall_dispatch(SYS_UPTIME, 0, 0, 0, 0, 0);
     assert!(uptime <= 1_000_000, "SYS_UPTIME debe retornar un tiempo valido");
 
-    let pid = syscall_dispatch(SYS_GETPID, 0, 0, 0);
+    let pid = syscall_dispatch(SYS_GETPID, 0, 0, 0, 0, 0);
     assert!(pid < 1000, "SYS_GETPID debe retornar el TID actual");
 
     // 2. Verificación de SYS_WRITE en stdout (fd 1)
     let test_msg = b"[TEST-SYSCALL] Prueba directa de SYS_WRITE POSIX\n";
-    let bytes_written = syscall_dispatch(SYS_WRITE, 1, test_msg.as_ptr() as u64, test_msg.len() as u64);
+    let bytes_written = syscall_dispatch(SYS_WRITE, 1, test_msg.as_ptr() as u64, test_msg.len() as u64, 0, 0);
     assert_eq!(bytes_written, test_msg.len() as u64, "SYS_WRITE debe escribir todos los bytes");
 
     // 3. Verificación de SYS_OPEN, SYS_WRITE, SYS_LSEEK, SYS_READ y SYS_CLOSE sobre VFS
     let path = b"/test_syscall.txt\0";
-    let fd = syscall_dispatch(SYS_OPEN, path.as_ptr() as u64, 64, 0); // O_CREAT
+    let fd = syscall_dispatch(SYS_OPEN, path.as_ptr() as u64, 64, 0, 0, 0); // O_CREAT
     assert!(fd >= 3, "Descriptor fd de archivo debe ser >= 3");
 
     let payload = b"Beaver OS POSIX Syscalls OK!";
-    let w = syscall_dispatch(SYS_WRITE, fd, payload.as_ptr() as u64, payload.len() as u64);
+    let w = syscall_dispatch(SYS_WRITE, fd, payload.as_ptr() as u64, payload.len() as u64, 0, 0);
     assert_eq!(w, payload.len() as u64, "Debe escribir la carga util completa");
 
     // Rebobinar con SYS_LSEEK a 0
-    let seek_res = syscall_dispatch(SYS_LSEEK, fd, 0, 0);
+    let seek_res = syscall_dispatch(SYS_LSEEK, fd, 0, 0, 0, 0);
     assert_eq!(seek_res, 0, "LSEEK a SEEK_SET 0");
 
     let mut read_buf = [0u8; 64];
-    let r = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, payload.len() as u64);
+    let r = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, payload.len() as u64, 0, 0);
     assert_eq!(r, payload.len() as u64, "Debe leer exactamente los bytes escritos");
     assert_eq!(&read_buf[..payload.len()], payload, "El contenido leido debe ser identico");
 
-    let close_res = syscall_dispatch(SYS_CLOSE, fd, 0, 0);
+    let close_res = syscall_dispatch(SYS_CLOSE, fd, 0, 0, 0, 0);
     assert_eq!(close_res, 0, "SYS_CLOSE debe retornar 0 en descriptor valido");
 
     // Descriptor cerrado debe fallar con -EBADF
-    let bad_read = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, 10);
+    let bad_read = syscall_dispatch(SYS_READ, fd, read_buf.as_mut_ptr() as u64, 10, 0, 0);
     assert_eq!(bad_read as i64, -9, "SYS_READ en fd cerrado debe retornar -EBADF (-9)");
 
     // 4. Verificación de binarios ELF Rust auténticos en Ring 3 (/disk/bin/hello.elf y bench.elf)
@@ -553,13 +554,13 @@ pub fn test_posix_syscalls_and_beaver_libc() {
     assert!(bs_res.is_ok(), "BeaverScript debe ejecutarse en Ring 3 sin fallos");
 
     // 6. Verificación de SYS_BRK (heap dinámico de usuario en Ring 3)
-    let cur_brk = syscall_dispatch(SYS_BRK, 0, 0, 0);
+    let cur_brk = syscall_dispatch(SYS_BRK, 0, 0, 0, 0, 0);
     assert!(cur_brk >= USER_HEAP_START, "SYS_BRK(0) debe retornar al menos USER_HEAP_START");
-    let new_brk = syscall_dispatch(SYS_BRK, cur_brk + 4096, 0, 0);
+    let new_brk = syscall_dispatch(SYS_BRK, cur_brk + 4096, 0, 0, 0, 0);
     assert_eq!(new_brk, cur_brk + 4096, "SYS_BRK debe expandir el heap de usuario");
 
     // 7. Verificación de SYS_WAITPID (cosecha y sincronización de procesos)
-    let wait_res = syscall_dispatch(SYS_WAITPID, 9999, 0, 0);
+    let wait_res = syscall_dispatch(SYS_WAITPID, 9999, 0, 0, 0, 0);
     assert_eq!(wait_res as i64, -10, "SYS_WAITPID sobre proceso inexistente debe devolver -ECHILD (-10)");
 }
 
@@ -636,15 +637,15 @@ pub fn test_beaverfs_double_indirect_large_file() {
 pub fn test_userland_heap_and_sys_brk() {
     use crate::syscall::*;
 
-    let initial_brk = syscall_dispatch(SYS_BRK, 0, 0, 0);
+    let initial_brk = syscall_dispatch(SYS_BRK, 0, 0, 0, 0, 0);
     assert!(initial_brk >= USER_HEAP_START, "SYS_BRK(0) debe devolver la base del heap de usuario");
 
     // Solicitar expansión de 2 páginas (8 KiB)
     let requested = initial_brk + 8192;
-    let new_brk = syscall_dispatch(SYS_BRK, requested, 0, 0);
+    let new_brk = syscall_dispatch(SYS_BRK, requested, 0, 0, 0, 0);
     assert_eq!(new_brk, requested, "SYS_BRK debe asignar y mapear las páginas solicitadas en el proceso");
 
-    let current = syscall_dispatch(SYS_BRK, 0, 0, 0);
+    let current = syscall_dispatch(SYS_BRK, 0, 0, 0, 0, 0);
     assert_eq!(current, requested, "Consulta de program break debe reflejar el nuevo límite");
 }
 
@@ -830,6 +831,91 @@ pub fn test_shell_pipes_and_redirection() {
     let _ = VFS.lock().remove_file("/disk/wc_out.txt", 0, 0);
 }
 
+/// Test 25: Protocolo de Ventanas de Usuario vía IPC (Desktop Compositor IPC & Syscalls)
+pub fn test_desktop_compositor_user_window_ipc() {
+    use crate::syscall::*;
+    use crate::gui::window::{WINDOW_MGR, GuiEvent, GUI_EVENT_CLICK};
+
+    // 1. Creación de ventana de usuario mediante llamada al sistema (SYS_GUI_CREATE_WINDOW)
+    let title = b"Calculadora Ring 3\0";
+    let dims: u64 = (320 << 16) | 240; // width=320, height=240
+    let coords: u64 = (150 << 16) | 120; // x=150, y=120
+    let win_id = syscall_dispatch(SYS_GUI_CREATE_WINDOW, title.as_ptr() as u64, 18, dims, coords, 0);
+    assert!(win_id >= 1000 && win_id != u64::MAX, "SYS_GUI_CREATE_WINDOW debe asignar un ID de ventana >= 1000");
+
+    // 2. Verificación de existencia y dimensiones calculadas en el WindowManager
+    {
+        let mgr = WINDOW_MGR.lock();
+        let win = mgr.get_user_window(win_id as u32).expect("La ventana de usuario debe registrarse en WINDOW_MGR");
+        assert_eq!(win.title.as_str(), "Calculadora Ring 3");
+        assert_eq!(win.width, 320);
+        assert_eq!(win.height, 240);
+        assert_eq!(win.client_w, 316); // 320 - 4
+        assert_eq!(win.client_h, 212); // 240 - 28
+        assert_eq!(win.buffer.len(), 316 * 212, "El backbuffer cliente debe coincidir con client_w * client_h");
+    }
+
+    // 3. Dibujo de primitivas (rectángulo) mediante SYS_GUI_DRAW_RECT
+    let rect_coords: u64 = (10 << 16) | 10;
+    let rect_dims: u64 = (60 << 16) | 40;
+    let color_amber: u64 = 0x00FFBF00; // Ámbar Beaver
+    let draw_res = syscall_dispatch(SYS_GUI_DRAW_RECT, win_id, rect_coords, rect_dims, color_amber, 0);
+    assert_eq!(draw_res, 0, "SYS_GUI_DRAW_RECT debe retornar 0 en éxito");
+
+    {
+        let mgr = WINDOW_MGR.lock();
+        let win = mgr.get_user_window(win_id as u32).unwrap();
+        assert_eq!(win.buffer[10 * win.client_w + 10], 0x00FFBF00, "El píxel en el backbuffer debe reflejar el color dibujado");
+    }
+
+    // 4. Dibujo de texto mediante SYS_GUI_DRAW_TEXT
+    let text = b"OK";
+    let text_arg: u64 = ((text.len() as u64) << 32) | 0x00FFFFFF; // Blanco
+    let text_res = syscall_dispatch(SYS_GUI_DRAW_TEXT, win_id, (20 << 16) | 20, text.as_ptr() as u64, text_arg, 0);
+    assert_eq!(text_res, 0, "SYS_GUI_DRAW_TEXT debe retornar 0 en éxito");
+
+    // 5. Transferencia de píxeles en bloque (Blit) mediante SYS_GUI_BLIT
+    let test_pixels = [0x0000FF00_u32; 32]; // Verde
+    let blit_res = syscall_dispatch(SYS_GUI_BLIT, win_id, test_pixels.as_ptr() as u64, 32, 0, 0);
+    assert_eq!(blit_res, 0, "SYS_GUI_BLIT debe retornar 0 en éxito");
+
+    {
+        let mgr = WINDOW_MGR.lock();
+        let win = mgr.get_user_window(win_id as u32).unwrap();
+        assert_eq!(win.buffer[0], 0x0000FF00, "El primer píxel del backbuffer debe reflejar los datos blitteados");
+    }
+
+    // 6. Encolado y recepción de eventos de ratón y ventana (SYS_GUI_GET_EVENT)
+    WINDOW_MGR.lock().push_user_window_event(win_id as u32, GuiEvent {
+        event_type: GUI_EVENT_CLICK,
+        param1: 50,
+        param2: 80,
+        param3: 1,
+    });
+
+    let mut event = GuiEvent { event_type: 0, param1: 0, param2: 0, param3: 0 };
+    let poll_res = syscall_dispatch(SYS_GUI_GET_EVENT, win_id, &mut event as *mut _ as u64, 0, 0, 0);
+    assert_eq!(poll_res, 1, "SYS_GUI_GET_EVENT debe retornar 1 cuando hay un evento disponible");
+    assert_eq!(event.event_type, GUI_EVENT_CLICK, "El tipo de evento debe ser Click");
+    assert_eq!(event.param1, 50, "Coordenada relativa X del clic");
+    assert_eq!(event.param2, 80, "Coordenada relativa Y del clic");
+    assert_eq!(event.param3, 1, "Botón izquierdo");
+
+    // Verificar que la cola de eventos quedó vacía
+    let empty_poll = syscall_dispatch(SYS_GUI_GET_EVENT, win_id, &mut event as *mut _ as u64, 0, 0, 0);
+    assert_eq!(empty_poll, 0, "SYS_GUI_GET_EVENT debe retornar 0 cuando la cola está vacía");
+
+    // 7. Invalidación y recomposición mediante SYS_GUI_INVALIDATE
+    let inv_res = syscall_dispatch(SYS_GUI_INVALIDATE, win_id, 0, 0, 0, 0);
+    assert_eq!(inv_res, 0, "SYS_GUI_INVALIDATE debe procesar el marcado dirty de la ventana");
+
+    // 8. Destrucción de la ventana mediante SYS_GUI_DESTROY_WINDOW
+    let destroy_res = syscall_dispatch(SYS_GUI_DESTROY_WINDOW, win_id, 0, 0, 0, 0);
+    assert_eq!(destroy_res, 0, "SYS_GUI_DESTROY_WINDOW debe retornar 0 en éxito");
+
+    assert!(WINDOW_MGR.lock().get_user_window(win_id as u32).is_none(), "La ventana debe ser eliminada del WindowManager");
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -936,4 +1022,10 @@ fn ut_cec_touchscreen_safe() {
 #[test_case]
 fn ut_shell_pipes_and_redirection() {
     test_shell_pipes_and_redirection();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_desktop_compositor_user_window_ipc() {
+    test_desktop_compositor_user_window_ipc();
 }

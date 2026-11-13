@@ -8,7 +8,50 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use alloc::string::String;
 use crate::sync::SpinMutex;
+
+pub const GUI_EVENT_CLICK: u32 = 1;
+pub const GUI_EVENT_KEY: u32 = 2;
+pub const GUI_EVENT_CLOSE: u32 = 3;
+pub const GUI_EVENT_FOCUS: u32 = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuiEvent {
+    pub event_type: u32, // 1 = Click, 2 = KeyPress, 3 = Close, 4 = Focus
+    pub param1: u32,     // x (relativo al contenido) o código de tecla
+    pub param2: u32,     // y (relativo al contenido) o modificadores
+    pub param3: u32,     // botón (1 = Izquierdo, 2 = Derecho)
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum UserWindowHit {
+    CloseButton,
+    TitleBar,
+    ClientArea(usize, usize),
+}
+
+#[derive(Clone, Debug)]
+pub struct UserWindow {
+    pub id: u32,
+    pub owner_tid: u64,
+    pub title: String,
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+    pub client_w: usize,
+    pub client_h: usize,
+    pub minimized: bool,
+    pub maximized: bool,
+    pub restore_x: usize,
+    pub restore_y: usize,
+    pub restore_w: usize,
+    pub restore_h: usize,
+    pub buffer: Vec<u32>,
+    pub event_queue: Vec<GuiEvent>,
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum WindowId {
@@ -53,6 +96,10 @@ pub struct WindowManager {
     pub dragging_window: Option<WindowId>,
     pub drag_offset_x: usize,
     pub drag_offset_y: usize,
+    pub user_windows: Vec<UserWindow>,
+    pub next_user_win_id: u32,
+    pub active_user_win: Option<u32>,
+    pub dragging_user_window: Option<u32>,
 }
 
 impl WindowManager {
@@ -74,6 +121,10 @@ impl WindowManager {
             dragging_window: None,
             drag_offset_x: 0,
             drag_offset_y: 0,
+            user_windows: Vec::new(),
+            next_user_win_id: 1000,
+            active_user_win: None,
+            dragging_user_window: None,
         }
     }
 
@@ -401,6 +452,21 @@ impl WindowManager {
                     return true;
                 }
             }
+        } else if let Some(id) = self.dragging_user_window {
+            let offset_x = self.drag_offset_x;
+            let offset_y = self.drag_offset_y;
+            let (scr_w, scr_h) = crate::gui::canvas::Canvas::screen_dimensions();
+            if let Some(win) = self.get_user_window_mut(id) {
+                let max_x = scr_w.saturating_sub(win.width);
+                let max_y = scr_h.saturating_sub(60 + win.height).max(32);
+                let new_x = mx.saturating_sub(offset_x).clamp(0, max_x);
+                let new_y = my.saturating_sub(offset_y).clamp(32, max_y);
+                if win.x != new_x || win.y != new_y {
+                    win.x = new_x;
+                    win.y = new_y;
+                    return true;
+                }
+            }
         }
         false
     }
@@ -408,6 +474,198 @@ impl WindowManager {
     /// Finaliza el arrastre
     pub fn stop_drag(&mut self) {
         self.dragging_window = None;
+        self.dragging_user_window = None;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Gestión y Despacho de Ventanas de Usuario (Desktop Compositor IPC)
+    // ────────────────────────────────────────────────────────────────────────
+
+    pub fn create_user_window(
+        &mut self,
+        owner_tid: u64,
+        title: &str,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<u32, &'static str> {
+        if self.user_windows.len() >= 16 {
+            return Err("Límite de ventanas de usuario alcanzado (máx. 16)");
+        }
+        let id = self.next_user_win_id;
+        self.next_user_win_id += 1;
+
+        let w = width.clamp(120, 1024);
+        let h = height.clamp(80, 768);
+        let client_w = w.saturating_sub(4);
+        let client_h = h.saturating_sub(28);
+
+        let uwin = UserWindow {
+            id,
+            owner_tid,
+            title: String::from(title),
+            x,
+            y,
+            width: w,
+            height: h,
+            client_w,
+            client_h,
+            minimized: false,
+            maximized: false,
+            restore_x: x,
+            restore_y: y,
+            restore_w: w,
+            restore_h: h,
+            buffer: alloc::vec![0xFFFFFFFF_u32; client_w * client_h],
+            event_queue: Vec::new(),
+        };
+
+        self.user_windows.push(uwin);
+        self.active_user_win = Some(id);
+        Ok(id)
+    }
+
+    pub fn destroy_user_window(&mut self, id: u32) -> Result<(), &'static str> {
+        let before = self.user_windows.len();
+        self.user_windows.retain(|w| w.id != id);
+        if self.user_windows.len() < before {
+            if self.active_user_win == Some(id) {
+                self.active_user_win = self.user_windows.last().map(|w| w.id);
+            }
+            Ok(())
+        } else {
+            Err("Ventana de usuario no encontrada")
+        }
+    }
+
+    pub fn get_user_window(&self, id: u32) -> Option<&UserWindow> {
+        self.user_windows.iter().find(|w| w.id == id)
+    }
+
+    pub fn get_user_window_mut(&mut self, id: u32) -> Option<&mut UserWindow> {
+        self.user_windows.iter_mut().find(|w| w.id == id)
+    }
+
+    pub fn draw_rect_user_window(
+        &mut self,
+        id: u32,
+        rx: usize,
+        ry: usize,
+        rw: usize,
+        rh: usize,
+        color: u32,
+    ) -> Result<(), &'static str> {
+        let win = self.get_user_window_mut(id).ok_or("Ventana no encontrada")?;
+        let cw = win.client_w;
+        let ch = win.client_h;
+        for row in ry..(ry + rh).min(ch) {
+            let row_offset = row * cw;
+            for col in rx..(rx + rw).min(cw) {
+                win.buffer[row_offset + col] = color;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn draw_text_user_window(
+        &mut self,
+        id: u32,
+        tx: usize,
+        ty: usize,
+        text: &str,
+        color: u32,
+    ) -> Result<(), &'static str> {
+        let win = self.get_user_window_mut(id).ok_or("Ventana no encontrada")?;
+        let cw = win.client_w;
+        let ch = win.client_h;
+
+        let mut curr_x = tx;
+        for c in text.chars() {
+            let glyph = crate::gui::font::get_glyph(c);
+            for row in 0..16 {
+                let py = ty + row;
+                if py >= ch {
+                    break;
+                }
+                let byte = glyph[row];
+                let row_offset = py * cw;
+                for col in 0..8 {
+                    let px = curr_x + col;
+                    if px >= cw {
+                        break;
+                    }
+                    if (byte >> (7 - col)) & 1 == 1 {
+                        win.buffer[row_offset + px] = color;
+                    }
+                }
+            }
+            curr_x += 8;
+        }
+        Ok(())
+    }
+
+    pub fn blit_user_window(&mut self, id: u32, pixel_data: &[u32]) -> Result<(), &'static str> {
+        let win = self.get_user_window_mut(id).ok_or("Ventana no encontrada")?;
+        let copy_len = pixel_data.len().min(win.buffer.len());
+        win.buffer[..copy_len].copy_from_slice(&pixel_data[..copy_len]);
+        Ok(())
+    }
+
+    pub fn poll_user_window_event(&mut self, id: u32) -> Option<GuiEvent> {
+        let win = self.get_user_window_mut(id)?;
+        if !win.event_queue.is_empty() {
+            Some(win.event_queue.remove(0))
+        } else {
+            None
+        }
+    }
+
+    pub fn push_user_window_event(&mut self, id: u32, event: GuiEvent) {
+        if let Some(win) = self.get_user_window_mut(id) {
+            if win.event_queue.len() < 32 {
+                win.event_queue.push(event);
+            }
+        }
+    }
+
+    pub fn bring_user_win_to_front(&mut self, id: u32) {
+        if let Some(pos) = self.user_windows.iter().position(|w| w.id == id) {
+            let win = self.user_windows.remove(pos);
+            self.user_windows.push(win);
+            self.active_user_win = Some(id);
+        }
+    }
+
+    pub fn start_user_drag(&mut self, id: u32, mx: usize, my: usize) {
+        let win_coords = self.get_user_window(id).map(|w| (w.x, w.y));
+        if let Some((win_x, win_y)) = win_coords {
+            self.dragging_user_window = Some(id);
+            self.drag_offset_x = mx.saturating_sub(win_x);
+            self.drag_offset_y = my.saturating_sub(win_y);
+            self.bring_user_win_to_front(id);
+        }
+    }
+
+    pub fn hit_test_user_windows(&self, mx: usize, my: usize) -> Option<(u32, UserWindowHit)> {
+        for win in self.user_windows.iter().rev() {
+            if win.minimized {
+                continue;
+            }
+            if mx >= win.x && mx <= win.x + win.width && my >= win.y && my <= win.y + win.height {
+                if my <= win.y + 26 {
+                    if mx >= win.x + 8 && mx <= win.x + 24 {
+                        return Some((win.id, UserWindowHit::CloseButton));
+                    }
+                    return Some((win.id, UserWindowHit::TitleBar));
+                } else {
+                    let rel_x = mx.saturating_sub(win.x + 2);
+                    let rel_y = my.saturating_sub(win.y + 26);
+                    return Some((win.id, UserWindowHit::ClientArea(rel_x, rel_y)));
+                }
+            }
+        }
+        None
     }
 }
 
