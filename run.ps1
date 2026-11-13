@@ -191,7 +191,7 @@ if ($Iso) {
         "-drive", "id=sata0,file=$DiskImg,format=raw,if=none",
         "-device", "ide-hd,drive=sata0,bus=ahci0.0",
         "-device", "qemu-xhci,id=xhci0",
-        "-device", "usb-kbd,bus=xhci0.0",
+        "-device", "usb-tablet,bus=xhci0.0",
         "-nic", "model=e1000",
         "-smp", "4",
         "-m", "512M",
@@ -240,7 +240,7 @@ if ($Iso) {
         "-device", "ide-hd,drive=sata0,bus=ahci0.0",
         "-drive", "file=fat:rw:$UefiRoot,format=raw,index=1,media=disk",
         "-device", "qemu-xhci,id=xhci0",
-        "-device", "usb-kbd,bus=xhci0.0",
+        "-device", "usb-tablet,bus=xhci0.0",
         "-nic", "model=e1000",
         "-smp", "4",
         "-m", "512M",
@@ -258,7 +258,7 @@ if ($Iso) {
         "-drive", "id=sata0,file=$DiskImg,format=raw,if=none",
         "-device", "ide-hd,drive=sata0,bus=ahci0.0",
         "-device", "qemu-xhci,id=xhci0",
-        "-device", "usb-kbd,bus=xhci0.0",
+        "-device", "usb-tablet,bus=xhci0.0",
         "-nic", "model=e1000",
         "-smp", "4",
         "-serial", "stdio"
@@ -311,7 +311,7 @@ if ($Test) {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "C:\Program Files\qemu\qemu-system-x86_64.exe"
     $psi.WorkingDirectory = (Get-Location).Path
-    $psi.Arguments = "-drive `"if=pflash,format=raw,readonly=on,file=$OvmfFirmware`" -device ahci,id=ahci0 -drive id=sata0,file=$DiskImg,format=raw,if=none -device ide-hd,drive=sata0,bus=ahci0.0 -drive file=fat:rw:$UefiRoot,format=raw,index=1,media=disk -device qemu-xhci,id=xhci0 -device usb-kbd,bus=xhci0.0 -nic model=e1000 -smp 4 -m 512M -device isa-debug-exit,iobase=0xf4,iosize=0x04 -chardev stdio,id=char0,logfile=$LogFile,signal=off -serial chardev:char0 -display none"
+    $psi.Arguments = "-drive `"if=pflash,format=raw,readonly=on,file=$OvmfFirmware`" -device ahci,id=ahci0 -drive id=sata0,file=$DiskImg,format=raw,if=none -device ide-hd,drive=sata0,bus=ahci0.0 -drive file=fat:rw:$UefiRoot,format=raw,index=1,media=disk -device qemu-xhci,id=xhci0 -device usb-tablet,bus=xhci0.0 -nic model=e1000 -smp 4 -m 512M -device isa-debug-exit,iobase=0xf4,iosize=0x04 -chardev stdio,id=char0,logfile=$LogFile,signal=off -serial chardev:char0 -display none"
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
