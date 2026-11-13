@@ -1080,53 +1080,21 @@ pub fn print_cpuinfo() {
 }
 
 pub fn print_date() {
-    fn bcd_to_bin(val: u8) -> u8 {
-        (val & 0x0F) + ((val >> 4) * 10)
-    }
+    let rtc_utc = crate::drivers::timer::read_rtc_datetime();
+    let rtc_local = crate::drivers::timer::local_datetime();
+    let unix_ts = crate::drivers::timer::get_unix_timestamp();
+    let chip_name = crate::drivers::timer::get_rtc_source_name();
+    let uptime = crate::drivers::timer::get_uptime_seconds();
+    let ticks = crate::drivers::timer::get_ticks();
 
-    // SAFETY: Lectura de los registros del reloj CMOS RTC mediante los puertos I/O 0x70 y 0x71 en Ring 0.
-    unsafe {
-        crate::io::outb(0x70, 0x0A);
-        while (crate::io::inb(0x71) & 0x80) != 0 {
-            core::hint::spin_loop();
-        }
-
-        crate::io::outb(0x70, 0x00);
-        let sec = crate::io::inb(0x71);
-        crate::io::outb(0x70, 0x02);
-        let min = crate::io::inb(0x71);
-        crate::io::outb(0x70, 0x04);
-        let hour = crate::io::inb(0x71);
-        crate::io::outb(0x70, 0x07);
-        let day = crate::io::inb(0x71);
-        crate::io::outb(0x70, 0x08);
-        let month = crate::io::inb(0x71);
-        crate::io::outb(0x70, 0x09);
-        let year = crate::io::inb(0x71);
-
-        crate::io::outb(0x70, 0x0B);
-        let b = crate::io::inb(0x71);
-        let is_bcd = (b & 0x04) == 0;
-
-        let (sec, min, hour, day, month, year) = if is_bcd {
-            (
-                bcd_to_bin(sec),
-                bcd_to_bin(min),
-                bcd_to_bin(hour),
-                bcd_to_bin(day),
-                bcd_to_bin(month),
-                bcd_to_bin(year) as u16 + 2000,
-            )
-        } else {
-            (sec, min, hour, day, month, year as u16 + 2000)
-        };
-
-        kprintln!("==================== RELOJ DE TIEMPO REAL (CMOS RTC) ====================");
-        kprintln!("  Fecha Hardware: {:02}/{:02}/{:04}", day, month, year);
-        kprintln!("  Hora Hardware:  {:02}:{:02}:{:02} UTC", hour, min, sec);
-        kprintln!("  Uptime Kernel:  {} segundos ({} ticks)", crate::drivers::timer::get_uptime_seconds(), crate::drivers::timer::get_ticks());
-        kprintln!("=========================================================================");
-    }
+    kprintln!("==================== RELOJ DE TIEMPO REAL (HARDWARE RTC) ====================");
+    kprintln!("  Dispositivo RTC:    {}", chip_name);
+    kprintln!("  Fecha Hardware:     {:02}/{:02}/{:04}", rtc_utc.day, rtc_utc.month, rtc_utc.year);
+    kprintln!("  Hora Universal UTC: {:02}:{:02}:{:02} UTC", rtc_utc.hour, rtc_utc.minute, rtc_utc.second);
+    kprintln!("  Hora Local (UTC-6): {:02}:{:02}:{:02} CST", rtc_local.hour, rtc_local.minute, rtc_local.second);
+    kprintln!("  Marca de Tiempo:    {} segundos (Unix Epoch)", unix_ts);
+    kprintln!("  Tiempo de Actividad:{} segundos ({} ticks)", uptime, ticks);
+    kprintln!("=============================================================================");
 }
 
 pub fn print_free() {

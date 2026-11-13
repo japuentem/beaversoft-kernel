@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 26] = [
+    let tests: [(&str, fn()); 27] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -91,6 +91,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("shell_pipes_and_redirection",             test_shell_pipes_and_redirection),
         ("desktop_compositor_user_window_ipc",      test_desktop_compositor_user_window_ipc),
         ("xhci_usb3_controller_and_ports",          test_xhci_usb3_controller_and_ports),
+        ("rtc_and_posix_clock_time",                test_rtc_and_posix_clock_time),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -966,6 +967,70 @@ pub fn test_xhci_usb3_controller_and_ports() {
     assert!(summary.contains(expected_speed_str), "El resumen debe reflejar la velocidad negociada en hardware");
 }
 
+/// Test 27: Reloj de Tiempo Real (Hardware RTC), Conversión Epoch y Syscalls de Tiempo POSIX
+pub fn test_rtc_and_posix_clock_time() {
+    use crate::drivers::timer::{read_rtc_datetime, local_datetime, get_unix_timestamp, datetime_to_unix, unix_to_datetime, get_uptime_seconds};
+    use crate::syscall::{syscall_dispatch, SYS_GETTIMEOFDAY, SYS_CLOCK_GETTIME, SYS_TIME, TimeVal, TimeZone, TimeSpec, CLOCK_REALTIME, CLOCK_MONOTONIC};
+
+    // 1. Verificación de lectura de fecha y hora del hardware RTC (CMOS en x86 / PL031 en ARM64)
+    let utc = read_rtc_datetime();
+    assert!(utc.year >= 2026, "El año del reloj hardware debe ser >= 2026");
+    assert!(utc.month >= 1 && utc.month <= 12, "El mes debe estar en 1..=12");
+    assert!(utc.day >= 1 && utc.day <= 31, "El día debe estar en 1..=31");
+    assert!(utc.hour <= 23, "La hora debe estar en 0..=23");
+    assert!(utc.minute <= 59, "Los minutos deben estar en 0..=59");
+    assert!(utc.second <= 59, "Los segundos deben estar en 0..=59");
+
+    let local = local_datetime();
+    assert!(local.month >= 1 && local.month <= 12, "Mes local válido");
+    assert!(local.day >= 1 && local.day <= 31, "Día local válido");
+
+    // 2. Verificación de marca de tiempo Unix Epoch (> 1.700.000.000 segundos correspondientes a 2023+)
+    let ts = get_unix_timestamp();
+    assert!(ts >= 1_700_000_000, "La marca de tiempo Unix debe ser válida para la era moderna (>= 1.700.000.000 s)");
+
+    // 3. Verificación de bi-direccionalidad matemática del algoritmo de calendario gregoriano
+    let calculated_unix = datetime_to_unix(&utc);
+    let reconverted_dt = unix_to_datetime(calculated_unix);
+    assert_eq!(reconverted_dt, utc, "La conversión Unix <-> Fecha gregoriana debe ser biyectiva y exacta");
+
+    // 4. Verificación de llamada al sistema POSIX gettimeofday (SYS_GETTIMEOFDAY 96)
+    let mut tv = TimeVal { tv_sec: 0, tv_usec: 0 };
+    let mut tz = TimeZone { tz_minuteswest: 0, tz_dsttime: 0 };
+    let ret_tod = syscall_dispatch(SYS_GETTIMEOFDAY, &mut tv as *mut _ as u64, &mut tz as *mut _ as u64, 0, 0, 0);
+    assert_eq!(ret_tod, 0, "SYS_GETTIMEOFDAY debe retornar 0 en éxito");
+    assert!(tv.tv_sec >= 1_700_000_000, "tv_sec debe contener la época Unix actual");
+    assert!(tv.tv_usec < 1_000_000, "tv_usec debe ser sub-segundo (< 1.000.000 us)");
+    assert_eq!(tz.tz_minuteswest, 360, "tz_minuteswest debe ser 360 minutos (UTC-6 México Centro)");
+
+    // 5. Verificación de llamada al sistema POSIX clock_gettime (SYS_CLOCK_GETTIME 228)
+    let mut ts_real = TimeSpec { tv_sec: 0, tv_nsec: 0 };
+    let ret_real = syscall_dispatch(SYS_CLOCK_GETTIME, CLOCK_REALTIME, &mut ts_real as *mut _ as u64, 0, 0, 0);
+    assert_eq!(ret_real, 0, "clock_gettime(CLOCK_REALTIME) debe retornar 0");
+    assert!(ts_real.tv_sec >= 1_700_000_000, "CLOCK_REALTIME tv_sec debe ser consistente con la época");
+    assert!(ts_real.tv_nsec < 1_000_000_000, "tv_nsec debe ser sub-segundo (< 1.000.000.000 ns)");
+
+    let mut ts_mono = TimeSpec { tv_sec: 0, tv_nsec: 0 };
+    let ret_mono = syscall_dispatch(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, &mut ts_mono as *mut _ as u64, 0, 0, 0);
+    assert_eq!(ret_mono, 0, "clock_gettime(CLOCK_MONOTONIC) debe retornar 0");
+    let cur_uptime = get_uptime_seconds();
+    assert!(ts_mono.tv_sec == cur_uptime || ts_mono.tv_sec + 1 == cur_uptime, "CLOCK_MONOTONIC debe reflejar el uptime del kernel");
+
+    // Identificador de reloj inválido debe fallar con -EINVAL (-22)
+    let bad_clk = syscall_dispatch(SYS_CLOCK_GETTIME, 9999, &mut ts_mono as *mut _ as u64, 0, 0, 0);
+    assert_eq!(bad_clk as i64, -22, "clock_gettime con clk_id invalido debe retornar -EINVAL (-22)");
+
+    // 6. Verificación de llamada al sistema POSIX time (SYS_TIME 201)
+    let mut tloc: u64 = 0;
+    let ret_time = syscall_dispatch(SYS_TIME, &mut tloc as *mut _ as u64, 0, 0, 0, 0);
+    assert!(ret_time >= 1_700_000_000, "SYS_TIME debe devolver la época Unix");
+    assert_eq!(ret_time, tloc, "SYS_TIME debe escribir el mismo valor en tloc");
+
+    // 7. Verificación de robustez ante punteros nulos o fallos de memoria (-EFAULT)
+    let fault_tod = syscall_dispatch(SYS_CLOCK_GETTIME, CLOCK_REALTIME, 0, 0, 0, 0);
+    assert_eq!(fault_tod as i64, -14, "clock_gettime con puntero nulo debe retornar -EFAULT (-14)");
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -1084,4 +1149,10 @@ fn ut_desktop_compositor_user_window_ipc() {
 #[test_case]
 fn ut_xhci_usb3_controller() {
     test_xhci_usb3_controller_and_ports();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_rtc_and_posix_clock_time() {
+    test_rtc_and_posix_clock_time();
 }

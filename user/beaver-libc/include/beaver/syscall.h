@@ -21,8 +21,11 @@
 #define SYS_getpid  39
 #define SYS_execve  59
 #define SYS_exit    60
-#define SYS_uptime  99
-#define SYS_sleep  102
+#define SYS_gettimeofday  96
+#define SYS_uptime        99
+#define SYS_sleep        102
+#define SYS_time         201
+#define SYS_clock_gettime 228
 
 // IPC y sincronización
 #define SYS_ipc_send     110

@@ -39,12 +39,15 @@ pub fn get_uptime_seconds() -> u64 {
 }
 
 // ============================================================================
-// CMOS Real-Time Clock (RTC) Driver - Fecha y Hora del Hardware
+// CMOS Real-Time Clock (RTC) Driver - Fecha y Hora del Hardware (x86_64)
 // ============================================================================
 
+#[cfg(target_arch = "x86_64")]
 const CMOS_ADDR: u16 = 0x70;
+#[cfg(target_arch = "x86_64")]
 const CMOS_DATA: u16 = 0x71;
 
+#[cfg(target_arch = "x86_64")]
 fn cmos_read(reg: u8) -> u8 {
     // SAFETY: Selección de registro CMOS en puerto 0x70 y lectura del dato en 0x71 en modo supervisor.
     unsafe {
@@ -53,15 +56,17 @@ fn cmos_read(reg: u8) -> u8 {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn is_updating_rtc() -> bool {
     (cmos_read(0x0A) & 0x80) != 0
 }
 
+#[cfg(target_arch = "x86_64")]
 fn bcd_to_bin(val: u8) -> u8 {
     ((val >> 4) * 10) + (val & 0x0F)
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct RtcDateTime {
     pub second: u8,
     pub minute: u8,
@@ -71,47 +76,164 @@ pub struct RtcDateTime {
     pub year: u16,
 }
 
-/// Lee la fecha y hora física del hardware desde el chip CMOS RTC
+// ============================================================================
+// ARM PrimeCell PL031 Real-Time Clock (RTC MMIO 0x09010000)
+// ============================================================================
+pub const PL031_RTC_BASE: usize = 0x0901_0000;
+
+/// Lee el contador de segundos de la época Unix directamente del chip PL031 RTC
+pub fn read_pl031_unix_timestamp() -> u64 {
+    // SAFETY: Lectura MMIO volátil de 32 bits del registro RTC_DR (offset 0x00)
+    // mapeado en la región Device de 0..1 GiB en EL1.
+    let secs = unsafe { core::ptr::read_volatile(PL031_RTC_BASE as *const u32) };
+    secs as u64
+}
+
+/// Comprueba si el hardware PL031 RTC está presente leyendo los registros de identificación periférica
+pub fn is_pl031_present() -> bool {
+    // Offset 0xFE0 = 0x31 (PartNumber0), 0xFE4 = 0x10 (PartNumber1), 0xFE8 = 0x04 (Designer0 ARM)
+    let id0 = unsafe { core::ptr::read_volatile((PL031_RTC_BASE + 0xFE0) as *const u32) } & 0xFF;
+    let id1 = unsafe { core::ptr::read_volatile((PL031_RTC_BASE + 0xFE4) as *const u32) } & 0xFF;
+    id0 == 0x31 && id1 == 0x10
+}
+
+/// Identifica el tipo y bus del chip RTC del hardware actual
+pub fn get_rtc_source_name() -> &'static str {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if is_pl031_present() {
+            "ARM PrimeCell PL031 RTC (MMIO 0x09010000)"
+        } else {
+            "ARM Generic Timer (Emulated RTC)"
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        "CMOS Real-Time Clock MC146818 (I/O 0x70/0x71)"
+    }
+}
+
+/// Determina si un año gregoriano es bisiesto
+pub fn is_leap_year(year: u16) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Convierte una estructura de fecha y hora gregoriana a segundos Unix (desde 1970-01-01 00:00:00 UTC)
+pub fn datetime_to_unix(dt: &RtcDateTime) -> u64 {
+    let mut days = 0u64;
+    for y in 1970..dt.year {
+        days += if is_leap_year(y) { 366 } else { 365 };
+    }
+    for m in 1..dt.month {
+        days += days_in_month(m, dt.year) as u64;
+    }
+    days += (dt.day.saturating_sub(1)) as u64;
+    days * 86400 + (dt.hour as u64) * 3600 + (dt.minute as u64) * 60 + (dt.second as u64)
+}
+
+/// Convierte un número de segundos de la época Unix a una estructura de fecha y hora gregoriana (UTC)
+pub fn unix_to_datetime(secs: u64) -> RtcDateTime {
+    let second = (secs % 60) as u8;
+    let total_mins = secs / 60;
+    let minute = (total_mins % 60) as u8;
+    let total_hours = total_mins / 60;
+    let hour = (total_hours % 24) as u8;
+    let mut remaining_days = (total_hours / 24) as u32;
+
+    let mut year = 1970u16;
+    loop {
+        let leap = is_leap_year(year);
+        let days_in_cur_year = if leap { 366 } else { 365 };
+        if remaining_days < days_in_cur_year {
+            break;
+        }
+        remaining_days -= days_in_cur_year;
+        year += 1;
+    }
+
+    let mut month = 1u8;
+    for m in 1..=12 {
+        let dim = days_in_month(m, year) as u32;
+        if remaining_days < dim {
+            month = m;
+            break;
+        }
+        remaining_days -= dim;
+    }
+    let day = (remaining_days + 1) as u8;
+
+    RtcDateTime { second, minute, hour, day, month, year }
+}
+
+/// Obtiene la marca de tiempo de la época Unix actual (segundos UTC) desde el hardware
+pub fn get_unix_timestamp() -> u64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let secs = read_pl031_unix_timestamp();
+        if secs > 0 {
+            return secs;
+        }
+    }
+
+    let dt = read_rtc_datetime();
+    datetime_to_unix(&dt)
+}
+
+/// Lee la fecha y hora física del hardware desde el chip RTC (CMOS en x86 / PL031 en ARM64)
 pub fn read_rtc_datetime() -> RtcDateTime {
-    let mut retries = 0;
-    while is_updating_rtc() && retries < 1000 {
-        core::hint::spin_loop();
-        retries += 1;
+    #[cfg(target_arch = "aarch64")]
+    {
+        let secs = read_pl031_unix_timestamp();
+        if secs > 0 {
+            return unix_to_datetime(secs);
+        }
     }
 
-    let mut sec = cmos_read(0x00);
-    let mut min = cmos_read(0x02);
-    let mut hour = cmos_read(0x04);
-    let mut day = cmos_read(0x07);
-    let mut month = cmos_read(0x08);
-    let mut year = cmos_read(0x09) as u16;
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut retries = 0;
+        while is_updating_rtc() && retries < 1000 {
+            core::hint::spin_loop();
+            retries += 1;
+        }
 
-    let register_b = cmos_read(0x0B);
+        let mut sec = cmos_read(0x00);
+        let mut min = cmos_read(0x02);
+        let mut hour = cmos_read(0x04);
+        let mut day = cmos_read(0x07);
+        let mut month = cmos_read(0x08);
+        let mut year = cmos_read(0x09) as u16;
 
-    // Convertir de BCD a binario si el RTC opera en BCD (típico en PC x86)
-    if (register_b & 0x04) == 0 {
-        sec = bcd_to_bin(sec);
-        min = bcd_to_bin(min);
-        hour = bcd_to_bin(hour & 0x7F) | (hour & 0x80);
-        day = bcd_to_bin(day);
-        month = bcd_to_bin(month);
-        year = bcd_to_bin(year as u8) as u16;
+        let register_b = cmos_read(0x0B);
+
+        // Convertir de BCD a binario si el RTC opera en BCD (típico en PC x86)
+        if (register_b & 0x04) == 0 {
+            sec = bcd_to_bin(sec);
+            min = bcd_to_bin(min);
+            hour = bcd_to_bin(hour & 0x7F) | (hour & 0x80);
+            day = bcd_to_bin(day);
+            month = bcd_to_bin(month);
+            year = bcd_to_bin(year as u8) as u16;
+        }
+
+        // Reloj 12 horas a 24 horas si aplica
+        if (register_b & 0x02) == 0 && (hour & 0x80) != 0 {
+            hour = ((hour & 0x7F) + 12) % 24;
+        }
+
+        year += 2000;
+        if month == 0 || month > 12 {
+            month = 1;
+        }
+        if day == 0 || day > 31 {
+            day = 1;
+        }
+
+        return RtcDateTime { second: sec, minute: min, hour, day, month, year };
     }
 
-    // Reloj 12 horas a 24 horas si aplica
-    if (register_b & 0x02) == 0 && (hour & 0x80) != 0 {
-        hour = ((hour & 0x7F) + 12) % 24;
-    }
-
-    year += 2000;
-    if month == 0 || month > 12 {
-        month = 1;
-    }
-    if day == 0 || day > 31 {
-        day = 1;
-    }
-
-    RtcDateTime { second: sec, minute: min, hour, day, month, year }
+    #[allow(unreachable_code)]
+    RtcDateTime { second: 0, minute: 0, hour: 0, day: 1, month: 1, year: 2026 }
 }
 
 /// Desfase de zona horaria local respecto a UTC (México Centro: UTC-6).

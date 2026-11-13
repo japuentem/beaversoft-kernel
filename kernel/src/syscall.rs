@@ -67,9 +67,37 @@ pub const SYS_LISTEN:   u64 = 50;
 pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
 pub const SYS_WAITPID:  u64 = 61;
-pub const SYS_UPTIME:   u64 = 99;
-pub const SYS_SLEEP:    u64 = 102;
-pub const SYS_BEEP:     u64 = 103;
+pub const SYS_GETTIMEOFDAY:  u64 = 96;
+pub const SYS_UPTIME:         u64 = 99;
+pub const SYS_SLEEP:          u64 = 102;
+pub const SYS_BEEP:           u64 = 103;
+pub const SYS_TIME:           u64 = 201;
+pub const SYS_CLOCK_GETTIME:  u64 = 228;
+
+// Estructuras de tiempo POSIX para espacio de usuario
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TimeVal {
+    pub tv_sec: u64,
+    pub tv_usec: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TimeZone {
+    pub tz_minuteswest: i32,
+    pub tz_dsttime: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TimeSpec {
+    pub tv_sec: u64,
+    pub tv_nsec: u64,
+}
+
+pub const CLOCK_REALTIME: u64 = 0;
+pub const CLOCK_MONOTONIC: u64 = 1;
 
 // IPC y sincronización en Ring 3
 pub const SYS_IPC_SEND:     u64 = 110;
@@ -904,9 +932,87 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64, arg
             }
         }
 
+        // SYS_GETTIMEOFDAY (96): tv_ptr=arg0, tz_ptr=arg1
+        SYS_GETTIMEOFDAY => {
+            let tv_ptr = arg0;
+            let tz_ptr = arg1;
+
+            if tv_ptr != 0 {
+                if !is_valid_user_ptr(tv_ptr, core::mem::size_of::<TimeVal>()) {
+                    return (-14_isize) as u64; // -EFAULT
+                }
+                let sec = crate::drivers::timer::get_unix_timestamp();
+                let usec = (crate::drivers::timer::get_ticks() % 100) * 10_000;
+                let tv = TimeVal { tv_sec: sec, tv_usec: usec };
+                unsafe {
+                    core::ptr::write(tv_ptr as *mut TimeVal, tv);
+                }
+            }
+
+            if tz_ptr != 0 {
+                if !is_valid_user_ptr(tz_ptr, core::mem::size_of::<TimeZone>()) {
+                    return (-14_isize) as u64; // -EFAULT
+                }
+                let tz = TimeZone {
+                    tz_minuteswest: (-crate::drivers::timer::TZ_OFFSET_HOURS as i32) * 60,
+                    tz_dsttime: 0,
+                };
+                unsafe {
+                    core::ptr::write(tz_ptr as *mut TimeZone, tz);
+                }
+            }
+
+            0
+        }
+
         // SYS_UPTIME: segundos de actividad
         SYS_UPTIME => {
             crate::drivers::timer::get_uptime_seconds()
+        }
+
+        // SYS_TIME (201): tloc=arg0
+        SYS_TIME => {
+            let tloc = arg0;
+            let sec = crate::drivers::timer::get_unix_timestamp();
+            if tloc != 0 {
+                if !is_valid_user_ptr(tloc, 8) {
+                    return (-14_isize) as u64; // -EFAULT
+                }
+                unsafe {
+                    core::ptr::write(tloc as *mut u64, sec);
+                }
+            }
+            sec
+        }
+
+        // SYS_CLOCK_GETTIME (228): clk_id=arg0, tp_ptr=arg1
+        SYS_CLOCK_GETTIME => {
+            let clk_id = arg0;
+            let tp_ptr = arg1;
+
+            if !is_valid_user_ptr(tp_ptr, core::mem::size_of::<TimeSpec>()) {
+                return (-14_isize) as u64; // -EFAULT
+            }
+
+            let (sec, nsec) = match clk_id {
+                CLOCK_REALTIME => {
+                    let s = crate::drivers::timer::get_unix_timestamp();
+                    let ns = (crate::drivers::timer::get_ticks() % 100) * 10_000_000;
+                    (s, ns)
+                }
+                CLOCK_MONOTONIC => {
+                    let s = crate::drivers::timer::get_uptime_seconds();
+                    let ns = (crate::drivers::timer::get_ticks() % 100) * 10_000_000;
+                    (s, ns)
+                }
+                _ => return (-22_isize) as u64, // -EINVAL
+            };
+
+            let ts = TimeSpec { tv_sec: sec, tv_nsec: nsec };
+            unsafe {
+                core::ptr::write(tp_ptr as *mut TimeSpec, ts);
+            }
+            0
         }
 
         // SYS_SLEEP (102)

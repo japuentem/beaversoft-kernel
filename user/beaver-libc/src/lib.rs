@@ -21,9 +21,36 @@ pub const SYS_GETPID:   u64 = 39;
 pub const SYS_EXECVE:   u64 = 59;
 pub const SYS_EXIT:     u64 = 60;
 pub const SYS_WAITPID:  u64 = 61;
-pub const SYS_UPTIME:   u64 = 99;
-pub const SYS_SLEEP:    u64 = 102;
-pub const SYS_BEEP:     u64 = 103;
+pub const SYS_GETTIMEOFDAY:  u64 = 96;
+pub const SYS_UPTIME:         u64 = 99;
+pub const SYS_SLEEP:          u64 = 102;
+pub const SYS_BEEP:           u64 = 103;
+pub const SYS_TIME:           u64 = 201;
+pub const SYS_CLOCK_GETTIME:  u64 = 228;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TimeVal {
+    pub tv_sec: u64,
+    pub tv_usec: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TimeZone {
+    pub tz_minuteswest: i32,
+    pub tz_dsttime: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TimeSpec {
+    pub tv_sec: u64,
+    pub tv_nsec: u64,
+}
+
+pub const CLOCK_REALTIME: u64 = 0;
+pub const CLOCK_MONOTONIC: u64 = 1;
 
 // Protocolo de Ventanas de Usuario vía IPC (Desktop Compositor IPC)
 pub const SYS_GUI_CREATE_WINDOW:   u64 = 120;
@@ -298,5 +325,27 @@ pub fn gui_get_event(win_id: u32) -> Option<GuiEvent> {
 
 pub fn gui_invalidate(win_id: u32) {
     unsafe { syscall1(SYS_GUI_INVALIDATE, win_id as u64) };
+}
+
+pub fn gettimeofday(tv: &mut TimeVal, tz: Option<&mut TimeZone>) -> i32 {
+    let tz_ptr = match tz {
+        Some(t) => t as *mut _ as u64,
+        None => 0,
+    };
+    let res = unsafe { syscall2(SYS_GETTIMEOFDAY, tv as *mut _ as u64, tz_ptr) };
+    res as i32
+}
+
+pub fn clock_gettime(clk_id: u64, ts: &mut TimeSpec) -> i32 {
+    let res = unsafe { syscall2(SYS_CLOCK_GETTIME, clk_id, ts as *mut _ as u64) };
+    res as i32
+}
+
+pub fn time(tloc: Option<&mut u64>) -> u64 {
+    let tloc_ptr = match tloc {
+        Some(p) => p as *mut _ as u64,
+        None => 0,
+    };
+    unsafe { syscall1(SYS_TIME, tloc_ptr) }
 }
 
