@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 20
+// Total de interacciones del día: 21
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -408,5 +408,32 @@ implementa lo mas importante y al final dime que falta
   - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 20 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
   - `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación en `aarch64` con MMU, VirtIO-blk, VirtIO-net, EL0+SVC y ejecución de `malloc()` en espacio de usuario).
 - Se proporcionó al usuario un desglose conciso y priorizado de los hitos técnicos restantes para un sistema operativo de producción.
+
+================================================================================
+
+## Interacción #21 [18:20:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante y al final dime que falta ¿cada cambio requiere una prueba?
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Se respondió puntualmente a la pregunta de si cada cambio requiere una prueba:
+  - De acuerdo con las reglas de proyecto de Beaversoft ([.agents/AGENTS.md](file:///d:/proyectos_personales/beaversoft-kernel/.agents/AGENTS.md)), **cada cambio de funcionalidad técnica o lógica** (sistema de archivos, memoria, llamadas al sistema, planificador de tareas, controladores de hardware) **requiere obligatoriamente la ejecución de la suite de pruebas automatizadas** (`run.ps1 -Test` y/o `run.ps1 -TestArm64`) bajo el principio estricto de no regresión para garantizar que ninguna funcionalidad previa se rompa. Los cambios puramente cosméticos (comentarios, arte ASCII, bitácora) están exentos de correr la suite y solo requieren `cargo check`. Además, cada nueva característica técnica de peso debe acompañarse de una prueba unitaria específica en [kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs).
+- Se implementó la característica arquitectónica más importante pendiente en el almacenamiento:
+  - **Subdirectorios Jerárquicos Persistentes en BeaverFS ([kernel/src/storage/beaverfs.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/storage/beaverfs.rs)):**
+    - Se eliminó la limitación de directorio plano de BeaverFS.
+    - Se implementaron las funciones de resolución de rutas relativas y jerárquicas: `resolve_dir_inode`, `resolve_parent_dir`, `find_entry_in_dir` y `add_entry_to_dir`.
+    - Se crearon las operaciones nativas en disco: `create_dir(path, uid, gid)` (asigna inodo de tipo `Directory` y bloque de entradas `DirEntry`), `remove_dir(path)` (valida que esté vacío y libera inodo y bloques en el bitmap), `list_dir(path)` (lista archivos y subcarpetas con tipo y permisos octales), `is_dir(path)` y `exists(path)`.
+    - Se adaptaron `write_file`, `read_file` y `remove_file` para soportar rutas jerárquicas anidadas (ej: `"docs/proyectos/reporte.txt"`).
+  - **Integración Transparente en el VFS ([kernel/src/fs/vfs.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/fs/vfs.rs)):**
+    - Enrutamiento transparente hacia BeaverFS en `create_dir`, `remove_file`, `list_dir`, `is_dir` y `exists` cuando la ruta comienza con `/disk/`.
+- **Ampliación de la Suite Automatizada a 21 Pruebas ([kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs)):**
+  - Se agregó la **Prueba 21 (`beaverfs_hierarchical_subdirectories`)**, la cual crea un subdirectorio en disco (`"testdir"`), escribe un archivo anidado (`"testdir/nested.txt"`), lee y valida su contenido byte a byte, lista el directorio, verifica la resolución a través de `/disk/testdir/nested.txt` en el VFS, y elimina ordenadamente el archivo y el subdirectorio validando la desasignación en el bitmap.
+- **Verificación Automatizada Observada:**
+  - `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 21 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  - `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con MMU, VirtIO-blk, VirtIO-net, EL0+SVC y ejecución en usuario).
+- Se proporcionó un resumen actualizado de lo que resta para completar Beaver OS.
 
 ================================================================================

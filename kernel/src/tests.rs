@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 20] = [
+    let tests: [(&str, fn()); 21] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -85,6 +85,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("cec_and_touchscreen_safe_dispatch",       test_cec_and_touchscreen_safe_dispatch),
         ("beaverfs_double_indirect_large_file",     test_beaverfs_double_indirect_large_file),
         ("userland_heap_and_sys_brk",               test_userland_heap_and_sys_brk),
+        ("beaverfs_hierarchical_subdirectories",    test_beaverfs_hierarchical_subdirectories),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -638,6 +639,55 @@ pub fn test_userland_heap_and_sys_brk() {
 
     let current = syscall_dispatch(SYS_BRK, 0, 0, 0);
     assert_eq!(current, requested, "Consulta de program break debe reflejar el nuevo límite");
+}
+
+/// Test 21: Verificación de subdirectorios jerárquicos persistentes en BeaverFS y su integración en VFS
+pub fn test_beaverfs_hierarchical_subdirectories() {
+    use crate::storage::beaverfs::BEAVER_FS;
+    use crate::fs::vfs::VFS;
+
+    // 1. Crear subdirectorio en BeaverFS directamente
+    {
+        let mut fs = BEAVER_FS.lock();
+        let res = fs.create_dir("testdir", 0, 0);
+        assert!(res.is_ok(), "create_dir en BeaverFS debe ser exitoso");
+        assert!(fs.is_dir("testdir"), "is_dir debe reconocer el nuevo subdirectorio");
+        assert!(fs.exists("testdir"), "exists debe confirmar la presencia del subdirectorio");
+
+        // 2. Escribir archivo dentro del subdirectorio
+        let write_res = fs.write_file("testdir/nested.txt", b"BeaverFS Subdir OK", 0, 0);
+        assert!(write_res.is_ok(), "write_file en ruta jerarquica debe tener exito");
+
+        // 3. Leer archivo dentro del subdirectorio
+        let content = fs.read_file("testdir/nested.txt").expect("read_file en subdirectorio");
+        assert_eq!(&content[..], b"BeaverFS Subdir OK", "El contenido del archivo anidado debe coincidir");
+
+        // 4. Listar el subdirectorio
+        let entries = fs.list_dir("testdir").expect("list_dir en subdirectorio");
+        assert!(entries.iter().any(|(name, is_dir, _, _)| name == "nested.txt" && !*is_dir), "list_dir debe incluir nested.txt");
+    }
+
+    // 5. Verificación a través del VFS transparente (/disk/...)
+    {
+        let vfs = VFS.lock();
+        assert!(vfs.is_dir("/disk/testdir"), "VFS is_dir debe resolver subdirectorios en /disk/");
+        let read_vfs = vfs.read_file_bytes("/disk/testdir/nested.txt", 0, 0).expect("VFS read en /disk/testdir/nested.txt");
+        assert_eq!(&read_vfs[..], b"BeaverFS Subdir OK", "VFS debe leer transparentemente archivos en subdirectorios de /disk");
+
+        let vfs_list = vfs.list_dir("/disk/testdir", 0, 0).expect("VFS list_dir en /disk/testdir");
+        assert!(vfs_list.iter().any(|(name, is_dir, _, _, _, _)| name == "nested.txt" && !*is_dir), "VFS list_dir debe reportar nested.txt");
+    }
+
+    // 6. Limpieza: borrar archivo anidado y subdirectorio
+    {
+        let mut fs = BEAVER_FS.lock();
+        let del_file = fs.remove_file("testdir/nested.txt");
+        assert!(del_file.is_ok(), "remove_file en subdirectorio debe tener exito");
+
+        let del_dir = fs.remove_dir("testdir");
+        assert!(del_dir.is_ok(), "remove_dir de directorio vacio debe tener exito");
+        assert!(!fs.exists("testdir"), "El subdirectorio ya no debe existir tras remove_dir");
+    }
 }
 
 #[cfg(test)]

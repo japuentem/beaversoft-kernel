@@ -358,17 +358,20 @@ impl BeaverFs {
         Err("No hay bloques de disco libres en BeaverFS")
     }
 
-    /// Busca un archivo en todos los bloques directos del directorio raíz
-    fn find_file_inode(&self, name: &str) -> Result<Option<(u32, u32, usize)>, &'static str> {
-        let root_inode = self.read_inode(0)?;
+    /// Busca una entrada por nombre en un directorio dado por su índice de inodo
+    pub fn find_entry_in_dir(&self, dir_inode_idx: u32, name: &str) -> Result<Option<(DirEntry, u32, usize)>, &'static str> {
+        let dir_inode = self.read_inode(dir_inode_idx)?;
+        if dir_inode.inode_type != InodeType::Directory as u8 {
+            return Err("El inodo especificado no es un directorio");
+        }
         let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
-        let root_blocks = root_inode.direct_blocks;
-        for root_block in root_blocks {
-            if root_block == 0 {
+        let direct = dir_inode.direct_blocks;
+        for block in direct {
+            if block == 0 {
                 continue;
             }
             let mut dir_buf = [0_u8; SECTOR_SIZE];
-            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + root_block, &mut dir_buf)?;
+            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + block, &mut dir_buf)?;
             for i in 0..entries_count {
                 // SAFETY: `i * size_of::<DirEntry>()` permanece dentro de los 512 bytes de `dir_buf` y `read_unaligned` soporta `#[repr(C, packed)]`.
                 let entry = unsafe {
@@ -376,98 +379,358 @@ impl BeaverFs {
                     core::ptr::read_unaligned(ptr)
                 };
                 if entry.is_valid() && entry.name_as_str() == name {
-                    return Ok(Some((entry.inode_index, root_block, i)));
+                    return Ok(Some((entry, block, i)));
                 }
             }
         }
         Ok(None)
     }
 
+    /// Resuelve una ruta jerárquica de directorio hasta obtener su índice de inodo
+    /// Ejemplo: "" o "/" -> Ok(0) (directorio raíz)
+    /// Ejemplo: "docs/work" -> resuelve "docs" en inodo 0, luego "work" en inodo de docs
+    pub fn resolve_dir_inode(&self, path: &str) -> Result<u32, &'static str> {
+        let clean = path.trim().trim_start_matches('/').trim_end_matches('/');
+        if clean.is_empty() {
+            return Ok(0);
+        }
+
+        let mut current_inode = 0;
+        for seg in clean.split('/') {
+            if seg.is_empty() {
+                continue;
+            }
+            let (entry, _, _) = self.find_entry_in_dir(current_inode, seg)?
+                .ok_or("Directorio intermedio no encontrado en BeaverFS")?;
+            if entry.entry_type != InodeType::Directory as u8 {
+                return Err("Un componente de la ruta no es un directorio");
+            }
+            current_inode = entry.inode_index;
+        }
+        Ok(current_inode)
+    }
+
+    /// Resuelve la ruta separando el inodo del directorio padre y el nombre final del elemento
+    /// Ejemplo: "docs/report.txt" -> Ok((inode_docs, "report.txt"))
+    /// Ejemplo: "report.txt" -> Ok((0, "report.txt"))
+    pub fn resolve_parent_dir<'a>(&self, path: &'a str) -> Result<(u32, &'a str), &'static str> {
+        let clean = path.trim().trim_start_matches('/').trim_end_matches('/');
+        if clean.is_empty() {
+            return Err("Ruta vacía");
+        }
+        if let Some(pos) = clean.rfind('/') {
+            let dir_part = &clean[..pos];
+            let name = &clean[pos + 1..];
+            let dir_inode = self.resolve_dir_inode(dir_part)?;
+            Ok((dir_inode, name))
+        } else {
+            Ok((0, clean))
+        }
+    }
+
+    /// Añade una entrada (archivo o subdirectorio) a un directorio dado por su inodo
+    pub fn add_entry_to_dir(&mut self, dir_inode_idx: u32, entry: DirEntry) -> Result<(), &'static str> {
+        let mut dir_inode = self.read_inode(dir_inode_idx)?;
+        if dir_inode.inode_type != InodeType::Directory as u8 {
+            return Err("El inodo destino no es un directorio");
+        }
+        let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
+
+        // 1. Buscar slot libre en los bloques asignados existentes
+        let direct = dir_inode.direct_blocks;
+        for block in direct {
+            if block == 0 {
+                continue;
+            }
+            let mut buf = [0_u8; SECTOR_SIZE];
+            let mut bd = BLOCK_DEVICE.lock();
+            bd.read_sector(BEAVERFS_START_LBA + block, &mut buf)?;
+            for i in 0..entries_count {
+                let existing = unsafe {
+                    let ptr = buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
+                    core::ptr::read_unaligned(ptr)
+                };
+                if existing.is_free() {
+                    unsafe {
+                        let ptr = buf.as_mut_ptr().add(i * core::mem::size_of::<DirEntry>());
+                        core::ptr::copy_nonoverlapping(&entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
+                    }
+                    bd.write_sector(BEAVERFS_START_LBA + block, &buf)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        // 2. Si no hay slot libre, asignar un nuevo bloque directo al directorio
+        for b in 0..7 {
+            if dir_inode.direct_blocks[b] == 0 {
+                let new_block = self.alloc_data_block()?;
+                let mut init_buf = [0_u8; SECTOR_SIZE];
+                let empty_entry = DirEntry::empty();
+                for i in 0..entries_count {
+                    unsafe {
+                        let ptr = init_buf.as_mut_ptr().add(i * core::mem::size_of::<DirEntry>());
+                        core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
+                    }
+                }
+                // Insertar la nueva entrada en el primer slot
+                unsafe {
+                    core::ptr::copy_nonoverlapping(&entry as *const DirEntry as *const u8, init_buf.as_mut_ptr(), core::mem::size_of::<DirEntry>());
+                }
+                BLOCK_DEVICE.lock().write_sector(BEAVERFS_START_LBA + new_block, &init_buf)?;
+                dir_inode.direct_blocks[b] = new_block;
+                dir_inode.block_count += 1;
+                self.write_inode(dir_inode_idx, &dir_inode)?;
+                return Ok(());
+            }
+        }
+
+        Err("Directorio lleno (límite de entradas por directorio alcanzado)")
+    }
+
+    /// Busca un archivo o subdirectorio por su ruta jerárquica
+    fn find_file_inode(&self, path: &str) -> Result<Option<(u32, u32, usize)>, &'static str> {
+        let (parent_inode_idx, name) = match self.resolve_parent_dir(path) {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        if let Some((entry, block, slot)) = self.find_entry_in_dir(parent_inode_idx, name)? {
+            Ok(Some((entry.inode_index, block, slot)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Crea un subdirectorio persistente en BeaverFS (ej: "docs" o "docs/proyectos")
+    pub fn create_dir(&mut self, path: &str, uid: u32, gid: u32) -> Result<(), &'static str> {
+        if !self.is_mounted {
+            return Err("BeaverFS no montado.");
+        }
+        let (parent_inode_idx, dir_name) = self.resolve_parent_dir(path)?;
+        if dir_name.is_empty() || dir_name.len() > 55 {
+            return Err("Nombre de directorio no válido (máximo 55 caracteres)");
+        }
+
+        // Comprobar que no exista ya un elemento con ese nombre
+        if self.find_entry_in_dir(parent_inode_idx, dir_name)?.is_some() {
+            return Err("Ya existe un archivo o directorio con ese nombre en BeaverFS");
+        }
+
+        // Asignar inodo de tipo Directorio
+        let new_inode_idx = self.alloc_inode(InodeType::Directory, 0o755, uid, gid)?;
+
+        // Asignar primer bloque de datos para las entradas del subdirectorio
+        let new_block = match self.alloc_data_block() {
+            Ok(b) => b,
+            Err(e) => {
+                let mut empty_inode = DiskInode::empty();
+                empty_inode.inode_type = InodeType::Free as u8;
+                let _ = self.write_inode(new_inode_idx, &empty_inode);
+                return Err(e);
+            }
+        };
+
+        let mut init_buf = [0_u8; SECTOR_SIZE];
+        let empty_entry = DirEntry::empty();
+        let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
+        for i in 0..entries_count {
+            unsafe {
+                let ptr = init_buf.as_mut_ptr().add(i * core::mem::size_of::<DirEntry>());
+                core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
+            }
+        }
+        BLOCK_DEVICE.lock().write_sector(BEAVERFS_START_LBA + new_block, &init_buf)?;
+
+        // Guardar inodo del nuevo directorio
+        let mut new_dir_inode = self.read_inode(new_inode_idx)?;
+        new_dir_inode.direct_blocks[0] = new_block;
+        new_dir_inode.block_count = 1;
+        new_dir_inode.size_bytes = 0;
+        self.write_inode(new_inode_idx, &new_dir_inode)?;
+
+        // Agregar la entrada al directorio padre
+        let entry = DirEntry::new(new_inode_idx, dir_name, InodeType::Directory as u8);
+        self.add_entry_to_dir(parent_inode_idx, entry)?;
+
+        Ok(())
+    }
+
+    /// Comprueba si una ruta corresponde a un directorio válido
+    pub fn is_dir(&self, path: &str) -> bool {
+        if !self.is_mounted {
+            return false;
+        }
+        match self.resolve_dir_inode(path) {
+            Ok(idx) => {
+                if let Ok(inode) = self.read_inode(idx) {
+                    inode.inode_type == InodeType::Directory as u8
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Comprueba si un archivo o directorio existe en BeaverFS
+    pub fn exists(&self, path: &str) -> bool {
+        if !self.is_mounted {
+            return false;
+        }
+        let clean = path.trim().trim_start_matches('/').trim_end_matches('/');
+        if clean.is_empty() {
+            return true;
+        }
+        if self.resolve_dir_inode(clean).is_ok() {
+            return true;
+        }
+        if let Ok((parent, name)) = self.resolve_parent_dir(clean) {
+            if let Ok(Some(_)) = self.find_entry_in_dir(parent, name) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Lista los archivos y subdirectorios dentro de una ruta de BeaverFS
+    pub fn list_dir(&self, path: &str) -> Result<Vec<(String, bool, usize, String)>, &'static str> {
+        if !self.is_mounted {
+            return Err("BeaverFS no montado.");
+        }
+        let dir_inode_idx = self.resolve_dir_inode(path)?;
+        let dir_inode = self.read_inode(dir_inode_idx)?;
+        if dir_inode.inode_type != InodeType::Directory as u8 {
+            return Err("La ruta especificada no es un directorio");
+        }
+
+        let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
+        let mut list = Vec::new();
+        let direct = dir_inode.direct_blocks;
+
+        for block in direct {
+            if block == 0 {
+                continue;
+            }
+            let mut buf = [0_u8; SECTOR_SIZE];
+            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + block, &mut buf)?;
+            for i in 0..entries_count {
+                let entry = unsafe {
+                    let ptr = buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
+                    core::ptr::read_unaligned(ptr)
+                };
+                if entry.is_valid() {
+                    let is_dir = entry.entry_type == InodeType::Directory as u8;
+                    let target_inode = self.read_inode(entry.inode_index).unwrap_or(DiskInode::empty());
+                    let size = target_inode.size_bytes as usize;
+                    let perms = target_inode.permissions;
+                    let prefix = if is_dir { 'd' } else { '-' };
+                    let r_u = if (perms & 0o400) != 0 { 'r' } else { '-' };
+                    let w_u = if (perms & 0o200) != 0 { 'w' } else { '-' };
+                    let x_u = if (perms & 0o100) != 0 { 'x' } else { '-' };
+                    let r_g = if (perms & 0o040) != 0 { 'r' } else { '-' };
+                    let w_g = if (perms & 0o020) != 0 { 'w' } else { '-' };
+                    let x_g = if (perms & 0o010) != 0 { 'x' } else { '-' };
+                    let r_o = if (perms & 0o004) != 0 { 'r' } else { '-' };
+                    let w_o = if (perms & 0o002) != 0 { 'w' } else { '-' };
+                    let x_o = if (perms & 0o001) != 0 { 'x' } else { '-' };
+                    let mode_str = alloc::format!("{}{}{}{}{}{}{}{}{}{}", prefix, r_u, w_u, x_u, r_g, w_g, x_g, r_o, w_o, x_o);
+                    list.push((String::from(entry.name_as_str()), is_dir, size, mode_str));
+                }
+            }
+        }
+        Ok(list)
+    }
+
+    /// Elimina un subdirectorio si está completamente vacío
+    pub fn remove_dir(&mut self, path: &str) -> Result<(), &'static str> {
+        if !self.is_mounted {
+            return Err("BeaverFS no montado.");
+        }
+        let (parent_inode_idx, dir_name) = self.resolve_parent_dir(path)?;
+        let (entry, target_block, slot) = self.find_entry_in_dir(parent_inode_idx, dir_name)?
+            .ok_or("Directorio no encontrado en BeaverFS")?;
+        if entry.entry_type != InodeType::Directory as u8 {
+            return Err("La ruta especificada no es un directorio");
+        }
+        let dir_inode_idx = entry.inode_index;
+        let dir_inode = self.read_inode(dir_inode_idx)?;
+
+        // Verificar que el directorio esté vacío
+        let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
+        let direct = dir_inode.direct_blocks;
+        for block in direct {
+            if block == 0 {
+                continue;
+            }
+            let mut buf = [0_u8; SECTOR_SIZE];
+            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + block, &mut buf)?;
+            for i in 0..entries_count {
+                let ent = unsafe {
+                    let ptr = buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
+                    core::ptr::read_unaligned(ptr)
+                };
+                if ent.is_valid() {
+                    return Err("El directorio no está vacío");
+                }
+            }
+        }
+
+        // 1. Liberar inodo
+        let mut free_inode = dir_inode;
+        free_inode.inode_type = InodeType::Free as u8;
+        self.write_inode(dir_inode_idx, &free_inode)?;
+
+        // 2. Liberar bloques del directorio en el bitmap
+        let mut bitmap = [0_u8; SECTOR_SIZE];
+        let mut bd = BLOCK_DEVICE.lock();
+        bd.read_sector(BEAVERFS_START_LBA + BLOCK_BITMAP_REL_LBA, &mut bitmap)?;
+        let direct = dir_inode.direct_blocks;
+        for blk in direct {
+            if blk >= DATA_BLOCKS_START_REL_LBA && blk < BEAVERFS_TOTAL_SECTORS {
+                let byte_idx = (blk / 8) as usize;
+                let bit_idx = (blk % 8) as u8;
+                if byte_idx < SECTOR_SIZE {
+                    bitmap[byte_idx] &= !(1 << bit_idx);
+                }
+            }
+        }
+        bd.write_sector(BEAVERFS_START_LBA + BLOCK_BITMAP_REL_LBA, &bitmap)?;
+
+        // 3. Limpiar entrada en el bloque del directorio padre
+        let mut dir_buf = [0_u8; SECTOR_SIZE];
+        bd.read_sector(BEAVERFS_START_LBA + target_block, &mut dir_buf)?;
+        let empty_entry = DirEntry::empty();
+        unsafe {
+            let ptr = dir_buf.as_mut_ptr().add(slot * core::mem::size_of::<DirEntry>());
+            core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
+        }
+        bd.write_sector(BEAVERFS_START_LBA + target_block, &dir_buf)?;
+
+        Ok(())
+    }
+
     /// Escribe un archivo persistente en disco (creándolo o sobrescribiéndolo con soporte multi-bloque)
-    pub fn write_file(&mut self, name: &str, content: &[u8], uid: u32, gid: u32) -> Result<(), &'static str> {
+    pub fn write_file(&mut self, path: &str, content: &[u8], uid: u32, gid: u32) -> Result<(), &'static str> {
         if !self.is_mounted {
             return Err("BeaverFS no montado. Ejecuta 'format-disk' o 'mount-disk' primero.");
         }
+        let (parent_inode_idx, name) = self.resolve_parent_dir(path)?;
         if name.is_empty() || name.len() > 55 {
             return Err("Nombre de archivo inválido (máximo 55 caracteres)");
         }
 
-        let entries_count = SECTOR_SIZE / core::mem::size_of::<DirEntry>();
-        let root_inode = self.read_inode(0)?;
-        let mut target_inode_idx = None;
-        let mut free_slot: Option<(u32, usize)> = None;
-        let root_blocks = root_inode.direct_blocks;
-
-        // 1. Escanear todos los bloques directos asignados al directorio raíz
-        for root_block in root_blocks {
-            if root_block == 0 {
-                continue;
-            }
-            let mut dir_buf = [0_u8; SECTOR_SIZE];
-            BLOCK_DEVICE.lock().read_sector(BEAVERFS_START_LBA + root_block, &mut dir_buf)?;
-            for i in 0..entries_count {
-                // SAFETY: `i < entries_count` garantiza que la lectura de `DirEntry` esté dentro de `dir_buf`.
-                let entry = unsafe {
-                    let ptr = dir_buf.as_ptr().add(i * core::mem::size_of::<DirEntry>()) as *const DirEntry;
-                    core::ptr::read_unaligned(ptr)
-                };
-                if entry.is_valid() && entry.name_as_str() == name {
-                    target_inode_idx = Some(entry.inode_index);
-                    break;
-                } else if entry.is_free() && free_slot.is_none() {
-                    free_slot = Some((root_block, i));
+        let existing_entry = self.find_entry_in_dir(parent_inode_idx, name)?;
+        let inode_idx = match existing_entry {
+            Some((entry, _, _)) => {
+                if entry.entry_type == InodeType::Directory as u8 {
+                    return Err("La ruta especificada es un directorio, no un archivo");
                 }
+                entry.inode_index
             }
-            if target_inode_idx.is_some() {
-                break;
-            }
-        }
-
-        let inode_idx = match target_inode_idx {
-            Some(idx) => idx,
             None => {
-                // Si no hay slot libre en los bloques existentes, asignar un nuevo bloque al directorio
-                let (target_block, slot) = match free_slot {
-                    Some(s) => s,
-                    None => {
-                        let mut root_mut = root_inode;
-                        let mut allocated = None;
-                        for b in 0..7 {
-                            if root_mut.direct_blocks[b] == 0 {
-                                let new_block = self.alloc_data_block()?;
-                                let empty_entry = DirEntry::empty();
-                                let mut init_buf = [0_u8; SECTOR_SIZE];
-                                for i in 0..entries_count {
-                                    // SAFETY: `i * size_of::<DirEntry>()` está dentro de `init_buf` (512 bytes) sin solapamiento.
-                                    unsafe {
-                                        let ptr = init_buf.as_mut_ptr().add(i * core::mem::size_of::<DirEntry>());
-                                        core::ptr::copy_nonoverlapping(&empty_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
-                                    }
-                                }
-                                BLOCK_DEVICE.lock().write_sector(BEAVERFS_START_LBA + new_block, &init_buf)?;
-                                root_mut.direct_blocks[b] = new_block;
-                                root_mut.block_count += 1;
-                                self.write_inode(0, &root_mut)?;
-                                allocated = Some((new_block, 0));
-                                break;
-                            }
-                        }
-                        allocated.ok_or("Directorio raíz lleno (límite de 64 archivos alcanzado)")?
-                    }
-                };
-
                 let new_idx = self.alloc_inode(InodeType::RegularFile, 0o644, uid, gid)?;
-                let new_entry = DirEntry::new(new_idx, name, 1);
-                let mut dir_buf = [0_u8; SECTOR_SIZE];
-                let mut bd = BLOCK_DEVICE.lock();
-                bd.read_sector(BEAVERFS_START_LBA + target_block, &mut dir_buf)?;
-                // SAFETY: `slot < entries_count` asegura que la escritura de `new_entry` (64 bytes) ocurra dentro de `dir_buf`.
-                unsafe {
-                    let ptr = dir_buf.as_mut_ptr().add(slot * core::mem::size_of::<DirEntry>());
-                    core::ptr::copy_nonoverlapping(&new_entry as *const DirEntry as *const u8, ptr, core::mem::size_of::<DirEntry>());
-                }
-                bd.write_sector(BEAVERFS_START_LBA + target_block, &dir_buf)?;
-                drop(bd);
+                let new_entry = DirEntry::new(new_idx, name, InodeType::RegularFile as u8);
+                self.add_entry_to_dir(parent_inode_idx, new_entry)?;
                 new_idx
             }
         };

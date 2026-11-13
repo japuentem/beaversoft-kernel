@@ -363,21 +363,19 @@ impl VirtualFileSystem {
     /// Lista los elementos dentro de un directorio validando permisos de lectura
     pub fn list_dir(&self, path: &str, uid: u32, gid: u32) -> Result<Vec<(String, bool, usize, u32, u32, String)>, &'static str> {
         let clean = path.trim().trim_end_matches('/');
-        if clean == "/disk" || clean == "disk" {
-            let files = crate::storage::beaverfs::BEAVER_FS.lock().list_files()?;
+        if clean == "/disk" || clean == "disk" || clean.starts_with("/disk/") || clean.starts_with("disk/") {
+            let rel = if clean == "/disk" || clean == "disk" {
+                ""
+            } else {
+                clean
+                    .trim_start_matches('/')
+                    .trim_start_matches("disk")
+                    .trim_start_matches('/')
+            };
+            let entries = crate::storage::beaverfs::BEAVER_FS.lock().list_dir(rel)?;
             let mut list = Vec::new();
-            for (name, size, perms) in files {
-                let r_u = if (perms & 0o400) != 0 { 'r' } else { '-' };
-                let w_u = if (perms & 0o200) != 0 { 'w' } else { '-' };
-                let x_u = if (perms & 0o100) != 0 { 'x' } else { '-' };
-                let r_g = if (perms & 0o040) != 0 { 'r' } else { '-' };
-                let w_g = if (perms & 0o020) != 0 { 'w' } else { '-' };
-                let x_g = if (perms & 0o010) != 0 { 'x' } else { '-' };
-                let r_o = if (perms & 0o004) != 0 { 'r' } else { '-' };
-                let w_o = if (perms & 0o002) != 0 { 'w' } else { '-' };
-                let x_o = if (perms & 0o001) != 0 { 'x' } else { '-' };
-                let mode_str = alloc::format!("-{}{}{}{}{}{}{}{}{}", r_u, w_u, x_u, r_g, w_g, x_g, r_o, w_o, x_o);
-                list.push((name, false, size as usize, 0, 0, mode_str));
+            for (name, is_dir, size, mode_str) in entries {
+                list.push((name, is_dir, size, 0, 0, mode_str));
             }
             return Ok(list);
         }
@@ -530,6 +528,18 @@ impl VirtualFileSystem {
             return Err("Ruta de directorio no válida");
         }
 
+        // Creación persistente de subdirectorios en BeaverFS (/disk)
+        if clean_path.starts_with("/disk/") || clean_path.starts_with("disk/") {
+            let rel = clean_path
+                .trim_start_matches('/')
+                .trim_start_matches("disk")
+                .trim_start_matches('/');
+            if rel.is_empty() {
+                return Err("Ruta de directorio en /disk no válida");
+            }
+            return crate::storage::beaverfs::BEAVER_FS.lock().create_dir(rel, uid, gid);
+        }
+
         let mut segments: Vec<&str> = clean_path
             .split('/')
             .filter(|s| !s.is_empty())
@@ -568,15 +578,20 @@ impl VirtualFileSystem {
         }
     }
 
-    /// Elimina un archivo en el VFS o en BeaverFS (/disk)
+    /// Elimina un archivo o directorio en el VFS o en BeaverFS (/disk)
     pub fn remove_file(&mut self, path: &str, uid: u32, gid: u32) -> Result<(), &'static str> {
         let clean_path = path.trim();
         if clean_path.starts_with("/disk/") || clean_path.starts_with("disk/") {
-            let filename = clean_path
+            let rel = clean_path
                 .trim_start_matches('/')
                 .trim_start_matches("disk")
                 .trim_start_matches('/');
-            return crate::storage::beaverfs::BEAVER_FS.lock().remove_file(filename);
+            let mut fs = crate::storage::beaverfs::BEAVER_FS.lock();
+            if fs.is_dir(rel) {
+                return fs.remove_dir(rel);
+            } else {
+                return fs.remove_file(rel);
+            }
         }
 
         let mut segments: Vec<&str> = clean_path
@@ -646,6 +661,13 @@ impl VirtualFileSystem {
         if clean.is_empty() || clean == "/disk" || clean == "disk" {
             return true;
         }
+        if clean.starts_with("/disk/") || clean.starts_with("disk/") {
+            let rel = clean
+                .trim_start_matches('/')
+                .trim_start_matches("disk")
+                .trim_start_matches('/');
+            return crate::storage::beaverfs::BEAVER_FS.lock().is_dir(rel);
+        }
         if let Some(node) = self.find_node(clean) {
             matches!(node.node_type, VfsNodeType::Directory(_))
         } else {
@@ -660,11 +682,11 @@ impl VirtualFileSystem {
             return true;
         }
         if clean.starts_with("/disk/") || clean.starts_with("disk/") {
-            let filename = clean
+            let rel = clean
                 .trim_start_matches('/')
                 .trim_start_matches("disk")
                 .trim_start_matches('/');
-            return crate::storage::beaverfs::BEAVER_FS.lock().read_file(filename).is_ok();
+            return crate::storage::beaverfs::BEAVER_FS.lock().exists(rel);
         }
         self.find_node(clean).is_some()
     }
