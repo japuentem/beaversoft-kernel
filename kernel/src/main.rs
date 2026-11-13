@@ -36,6 +36,7 @@ pub mod elf;
 pub mod apic;
 pub mod crypto;
 pub mod signal;
+pub mod wasm;
 pub mod tests;
 
 #[cfg(target_arch = "x86_64")]

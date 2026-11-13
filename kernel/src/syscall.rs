@@ -132,6 +132,32 @@ pub const SYS_SIGRETURN:           u64 = 15;
 // Generador de entropía y números aleatorios seguros
 pub const SYS_GETRANDOM:           u64 = 318;
 
+// Capa de Traducción de Linux ABI (Linux Syscall Translation Layer)
+pub const SYS_WRITEV:              u64 = 20;
+pub const SYS_UNAME:               u64 = 63;
+pub const SYS_ARCH_PRCTL:          u64 = 158;
+
+pub const ARCH_SET_FS:             u32 = 0x1002;
+pub const ARCH_GET_FS:             u32 = 0x1003;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct LinuxIoVec {
+    pub iov_base: u64,
+    pub iov_len: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct LinuxUtsname {
+    pub sysname: [u8; 65],
+    pub nodename: [u8; 65],
+    pub release: [u8; 65],
+    pub version: [u8; 65],
+    pub machine: [u8; 65],
+    pub domainname: [u8; 65],
+}
+
 // Límites y estado del Heap para procesos de usuario Ring 3 / EL0
 #[cfg(target_arch = "x86_64")]
 pub const USER_HEAP_START: u64 = 0x0000_0000_5000_0000;
@@ -1418,6 +1444,108 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64, arg
             }
 
             buflen as u64
+        }
+
+        // SYS_WRITEV (20) - Capa de Traducción de Linux ABI: fd=arg0, iov_ptr=arg1, iovcnt=arg2
+        SYS_WRITEV => {
+            let fd = arg0;
+            let iov_ptr = arg1;
+            let iovcnt = arg2 as usize;
+
+            if iovcnt == 0 || iovcnt > 1024 {
+                return (-22_isize) as u64; // -EINVAL
+            }
+            if !is_valid_user_ptr(iov_ptr, iovcnt * core::mem::size_of::<LinuxIoVec>()) {
+                return (-14_isize) as u64; // -EFAULT
+            }
+
+            let mut total_written: usize = 0;
+            let iov_slice = unsafe {
+                core::slice::from_raw_parts(iov_ptr as *const LinuxIoVec, iovcnt)
+            };
+
+            for vec in iov_slice {
+                if vec.iov_len > 0 {
+                    let res = syscall_dispatch(SYS_WRITE, fd, vec.iov_base, vec.iov_len, 0, 0);
+                    if (res as isize) < 0 {
+                        if total_written > 0 {
+                            return total_written as u64;
+                        } else {
+                            return res;
+                        }
+                    }
+                    total_written += res as usize;
+                }
+            }
+
+            total_written as u64
+        }
+
+        // SYS_UNAME (63) - Capa de Traducción de Linux ABI: buf_ptr=arg0
+        SYS_UNAME => {
+            let buf_ptr = arg0;
+            let uts_size = core::mem::size_of::<LinuxUtsname>();
+            if !is_valid_user_ptr(buf_ptr, uts_size) {
+                return (-14_isize) as u64; // -EFAULT
+            }
+
+            let mut uname = LinuxUtsname {
+                sysname: [0u8; 65],
+                nodename: [0u8; 65],
+                release: [0u8; 65],
+                version: [0u8; 65],
+                machine: [0u8; 65],
+                domainname: [0u8; 65],
+            };
+
+            let populate_field = |dest: &mut [u8; 65], val: &[u8]| {
+                let len = core::cmp::min(val.len(), 64);
+                dest[..len].copy_from_slice(&val[..len]);
+                dest[len] = 0;
+            };
+
+            populate_field(&mut uname.sysname, b"Linux");
+            populate_field(&mut uname.nodename, b"beaver");
+            populate_field(&mut uname.release, b"6.1.0-beaver-os");
+            populate_field(&mut uname.version, b"Beaver OS Linux ABI Translation Layer");
+            #[cfg(target_arch = "x86_64")]
+            populate_field(&mut uname.machine, b"x86_64");
+            #[cfg(target_arch = "aarch64")]
+            populate_field(&mut uname.machine, b"aarch64");
+            populate_field(&mut uname.domainname, b"(none)");
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(&uname as *const LinuxUtsname as *const u8, buf_ptr as *mut u8, uts_size);
+            }
+
+            0 // 0 = SUCCESS en estándar Linux
+        }
+
+        // SYS_ARCH_PRCTL (158) - Capa de Traducción de Linux ABI: code=arg0, addr=arg1
+        SYS_ARCH_PRCTL => {
+            let code = arg0 as u32;
+            let addr = arg1;
+            match code {
+                ARCH_SET_FS => {
+                    #[cfg(target_arch = "x86_64")]
+                    unsafe {
+                        wrmsr(0xC000_0100, addr);
+                    }
+                    0
+                }
+                ARCH_GET_FS => {
+                    if !is_valid_user_ptr(addr, 8) {
+                        return (-14_isize) as u64; // -EFAULT
+                    }
+                    #[cfg(target_arch = "x86_64")]
+                    unsafe {
+                        let fs_base = rdmsr(0xC000_0100);
+                        *(addr as *mut u64) = fs_base;
+                    }
+                    0
+                }
+                _ => (-22_isize) as u64, // -EINVAL
+            }
         }
 
         _ => {

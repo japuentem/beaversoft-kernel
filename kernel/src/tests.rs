@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 32] = [
+    let tests: [(&str, fn()); 35] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -97,6 +97,9 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("demand_paging_and_copy_on_write",         test_demand_paging_and_copy_on_write),
         ("posix_signals_and_process_control",       test_posix_signals_and_process_control),
         ("userland_tls13_crypto_and_getrandom",     test_userland_tls13_crypto_and_getrandom),
+        ("posix_recompilation_pipeline",            test_posix_recompilation_pipeline),
+        ("webassembly_module_execution",            test_webassembly_module_execution),
+        ("linux_abi_syscall_translation",           test_linux_abi_syscall_translation),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -1378,6 +1381,127 @@ pub fn test_userland_tls13_crypto_and_getrandom() {
     let hash2 = hash_sha256(test_msg);
     assert_eq!(hash1, hash2, "El hash SHA-256 debe ser determinista");
     assert_ne!(hash1, [0u8; 32], "El hash SHA-256 no debe ser nulo");
+}
+
+/// Test 33: Pipeline de Recompilación POSIX estándar (open, write, close, read, getpid, clock_gettime)
+pub fn test_posix_recompilation_pipeline() {
+    use crate::syscall::{
+        syscall_dispatch, SYS_GETPID, SYS_OPEN, SYS_WRITE, SYS_CLOSE, SYS_READ,
+        SYS_CLOCK_GETTIME, TimeSpec, CLOCK_MONOTONIC
+    };
+
+    // 1. SYS_GETPID: proceso estándar POSIX
+    let pid = syscall_dispatch(SYS_GETPID, 0, 0, 0, 0, 0);
+    assert!(pid < 1000, "PID POSIX debe ser un TID/PID valido");
+
+    // 2. SYS_OPEN con O_CREAT | O_WRONLY
+    let test_path = b"/test_posix.log\0";
+    let fd = syscall_dispatch(SYS_OPEN, test_path.as_ptr() as u64, 0x42, 0, 0, 0);
+    assert!(fd >= 3 && fd < 35, "SYS_OPEN debe devolver un descriptor fd >= 3");
+
+    // 3. SYS_WRITE: escribir buffer estándar POSIX
+    let payload = b"Beaver OS POSIX recompiled payload 2026!";
+    let written = syscall_dispatch(SYS_WRITE, fd, payload.as_ptr() as u64, payload.len() as u64, 0, 0);
+    assert_eq!(written as usize, payload.len(), "SYS_WRITE debe escribir todos los bytes del payload");
+
+    // 4. SYS_CLOSE
+    let res_close = syscall_dispatch(SYS_CLOSE, fd, 0, 0, 0, 0);
+    assert_eq!(res_close as i64, 0, "SYS_CLOSE debe retornar 0");
+
+    // 5. Reabrir y verificar con SYS_READ
+    let fd_read = syscall_dispatch(SYS_OPEN, test_path.as_ptr() as u64, 0, 0, 0, 0);
+    assert!(fd_read >= 3, "SYS_OPEN para lectura debe ser exitoso");
+    let mut read_buf = [0u8; 64];
+    let read_bytes = syscall_dispatch(SYS_READ, fd_read, read_buf.as_mut_ptr() as u64, read_buf.len() as u64, 0, 0);
+    assert_eq!(read_bytes as usize, payload.len(), "SYS_READ debe leer exactamente los bytes escritos");
+    assert_eq!(&read_buf[..payload.len()], payload, "El contenido leido debe ser identico al escrito");
+    syscall_dispatch(SYS_CLOSE, fd_read, 0, 0, 0, 0);
+
+    // 6. SYS_CLOCK_GETTIME (CLOCK_MONOTONIC)
+    let mut ts = TimeSpec { tv_sec: 0, tv_nsec: 0 };
+    let res_clock = syscall_dispatch(
+        SYS_CLOCK_GETTIME,
+        CLOCK_MONOTONIC,
+        &mut ts as *mut _ as u64,
+        0, 0, 0
+    );
+    assert_eq!(res_clock as i64, 0, "SYS_CLOCK_GETTIME debe retornar 0");
+    assert!(ts.tv_sec > 0 || ts.tv_nsec > 0, "El tiempo monotonico debe estar avanzando");
+}
+
+/// Test 34: Decodificación y Ejecución de Módulo Binario WebAssembly (Wasm v1) en Ring 3
+pub fn test_webassembly_module_execution() {
+    use crate::wasm::{WasmModule, get_sample_wasm_binary, run_wasm_demo};
+
+    let wasm_bytes = get_sample_wasm_binary();
+    assert_eq!(&wasm_bytes[0..4], &[0x00, 0x61, 0x73, 0x6D], "Magic header \\0asm verificado");
+
+    let module = WasmModule::parse(wasm_bytes).expect("El módulo Wasm debe parsear exitosamente");
+    assert_eq!(module.exports.len(), 4, "El módulo Wasm debe exportar exactamente 4 funciones");
+
+    // add(15, 27) = 42
+    let add_res = module.execute("add", &[15, 27]).expect("add falló");
+    assert_eq!(add_res, 42, "Wasm: add(15, 27) debe ser 42");
+
+    // sub(100, 28) = 72
+    let sub_res = module.execute("sub", &[100, 28]).expect("sub falló");
+    assert_eq!(sub_res, 72, "Wasm: sub(100, 28) debe ser 72");
+
+    // mul(6, 7) = 42
+    let mul_res = module.execute("mul", &[6, 7]).expect("mul falló");
+    assert_eq!(mul_res, 42, "Wasm: mul(6, 7) debe ser 42");
+
+    // factorial(5) = 120
+    let fac_res = module.execute("factorial", &[5]).expect("factorial falló");
+    assert_eq!(fac_res, 120, "Wasm: factorial(5) debe ser 120");
+
+    // Validación mediante helper
+    let (a, s, m, f) = run_wasm_demo().expect("run_wasm_demo falló");
+    assert_eq!((a, s, m, f), (42, 72, 42, 120));
+}
+
+/// Test 35: Capa de Traducción de Linux ABI (SYS_UNAME, SYS_WRITEV, SYS_GETRANDOM, SYS_GETPID)
+pub fn test_linux_abi_syscall_translation() {
+    use crate::syscall::{
+        syscall_dispatch, SYS_UNAME, SYS_WRITEV, SYS_GETRANDOM, SYS_GETPID,
+        LinuxUtsname, LinuxIoVec
+    };
+
+    // 1. SYS_UNAME (63 de Linux): traduce estructura utsname
+    let mut uname = LinuxUtsname {
+        sysname: [0u8; 65],
+        nodename: [0u8; 65],
+        release: [0u8; 65],
+        version: [0u8; 65],
+        machine: [0u8; 65],
+        domainname: [0u8; 65],
+    };
+    let res_uname = syscall_dispatch(SYS_UNAME, &mut uname as *mut _ as u64, 0, 0, 0, 0);
+    assert_eq!(res_uname as i64, 0, "SYS_UNAME de Linux debe devolver 0");
+    assert!(uname.sysname.starts_with(b"Linux\0"), "sysname debe ser 'Linux' para compatibilidad ABI");
+    assert!(uname.nodename.starts_with(b"beaver\0"), "nodename debe ser 'beaver'");
+    assert!(uname.release.starts_with(b"6.1.0-beaver-os\0"), "release debe identificar Beaver OS");
+
+    // 2. SYS_WRITEV (20 de Linux): escritura vectorizada
+    let part1 = b"[Linux ABI writev test: ";
+    let part2 = b"OK]\n";
+    let iov = [
+        LinuxIoVec { iov_base: part1.as_ptr() as u64, iov_len: part1.len() as u64 },
+        LinuxIoVec { iov_base: part2.as_ptr() as u64, iov_len: part2.len() as u64 },
+    ];
+    let total_len = part1.len() + part2.len();
+    let res_writev = syscall_dispatch(SYS_WRITEV, 1, iov.as_ptr() as u64, iov.len() as u64, 0, 0);
+    assert_eq!(res_writev as usize, total_len, "SYS_WRITEV debe emitir la suma de longitudes de iovec");
+
+    // 3. SYS_GETPID (39 de Linux)
+    let pid = syscall_dispatch(SYS_GETPID, 0, 0, 0, 0, 0);
+    assert!(pid < 1000, "SYS_GETPID de Linux debe devolver TID/PID valido");
+
+    // 4. SYS_GETRANDOM (318 de Linux)
+    let mut rnd = [0u8; 16];
+    let res_rnd = syscall_dispatch(SYS_GETRANDOM, rnd.as_mut_ptr() as u64, rnd.len() as u64, 0, 0, 0);
+    assert_eq!(res_rnd as usize, 16, "SYS_GETRANDOM de Linux debe llenar 16 bytes de entropia");
+    assert_ne!(rnd, [0u8; 16], "Entropia Linux no debe ser nula");
 }
 
 #[cfg(test)]

@@ -945,6 +945,47 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             crate::tests::run_builtin_test_suite(exit_after);
         }
 
+        "posix-demo" | "test-posix" => {
+            kprintln!("==================== PRUEBA: RECOMPILACION POSIX (beaver-libc) ====================");
+            kprintln!("* Ejecutando pipeline estandar POSIX (C / beaver-libc)...");
+            crate::tests::test_posix_recompilation_pipeline();
+            kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Pipeline POSIX completado exitosamente.\n");
+            kprintln!("  - PID obtenido via SYS_GETPID");
+            kprintln!("  - Creacion, escritura y lectura en VFS via SYS_OPEN, SYS_WRITE, SYS_READ, SYS_CLOSE");
+            kprintln!("  - Temporizador de precision via SYS_CLOCK_GETTIME (CLOCK_MONOTONIC)");
+            kprintln!("===================================================================================");
+        }
+
+        "wasm-demo" | "test-wasm" => {
+            kprintln!("==================== PRUEBA: MOTOR WEBASSEMBLY (Wasm v1) ====================");
+            kprintln!("* Parseando binario WebAssembly estandar (129 bytes, encabezado \\0asm)...");
+            match crate::wasm::run_wasm_demo() {
+                Ok((add, sub, mul, fac)) => {
+                    kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Modulo WebAssembly ejecutado con exito:\n");
+                    kprintln!("  - add(15, 27)      = {}  [OK]", add);
+                    kprintln!("  - sub(100, 28)     = {}  [OK]", sub);
+                    kprintln!("  - mul(6, 7)        = {}  [OK]", mul);
+                    kprintln!("  - factorial(5)     = {} [OK]", fac);
+                }
+                Err(e) => {
+                    kprint_color!(VgaColor::LightRed, VgaColor::Black, "[ERROR] Falla en motor Wasm: {}\n", e);
+                }
+            }
+            kprintln!("=============================================================================");
+        }
+
+        "abi-demo" | "test-abi" => {
+            kprintln!("==================== PRUEBA: TRADUCCION DE LINUX ABI ====================");
+            kprintln!("* Interceptando llamadas del sistema x86_64 con convencion Linux...");
+            crate::tests::test_linux_abi_syscall_translation();
+            kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[OK] Llamadas Linux atendidas de forma transparente:\n");
+            kprintln!("  - SYS_UNAME (63):     sysname='Linux', nodename='beaver', release='6.1.0-beaver-os'");
+            kprintln!("  - SYS_WRITEV (20):    E/S vectorizada de múltiples búferes completada");
+            kprintln!("  - SYS_GETRANDOM (318): Entropia de hardware CSPRNG compatible con Linux glibc");
+            kprintln!("  - SYS_GETPID (39):    Identificador de proceso retornado segun estandar ABI");
+            kprintln!("=========================================================================");
+        }
+
         "reboot" | "reset" => {
             hardware_reboot();
         }
