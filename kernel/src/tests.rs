@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 27] = [
+    let tests: [(&str, fn()); 28] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -92,6 +92,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("desktop_compositor_user_window_ipc",      test_desktop_compositor_user_window_ipc),
         ("xhci_usb3_controller_and_ports",          test_xhci_usb3_controller_and_ports),
         ("rtc_and_posix_clock_time",                test_rtc_and_posix_clock_time),
+        ("userland_audio_pcm_dma_playback",         test_userland_audio_pcm_dma_playback),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -1031,6 +1032,74 @@ pub fn test_rtc_and_posix_clock_time() {
     assert_eq!(fault_tod as i64, -14, "clock_gettime con puntero nulo debe retornar -EFAULT (-14)");
 }
 
+/// Test 28: Llamadas al Sistema de Audio PCM y Hardware DMA en Espacio de Usuario
+pub fn test_userland_audio_pcm_dma_playback() {
+    use crate::syscall::{syscall_dispatch, SYS_AUDIO_PLAY, SYS_AUDIO_STATUS, SYS_AUDIO_STOP};
+    use crate::drivers::audio::{UserAudioStatus, create_beaver_chime_wav};
+    use crate::memory::AUDIO_DMA_BUFFER_ADDR;
+
+    // 1. Consulta del estado del hardware de sonido mediante SYS_AUDIO_STATUS (131)
+    let mut status = UserAudioStatus {
+        controller_type: 99,
+        pci_audio_found: 99,
+        sample_rate: 0,
+        channels: 0,
+        bits_per_sample: 0,
+        total_pcm_bytes: 0,
+        dma_buffer_addr: 0,
+    };
+    let ret_stat = syscall_dispatch(SYS_AUDIO_STATUS, &mut status as *mut _ as u64, 0, 0, 0, 0);
+    assert_eq!(ret_stat, 0, "SYS_AUDIO_STATUS debe retornar 0 en éxito");
+    assert_eq!(status.dma_buffer_addr, AUDIO_DMA_BUFFER_ADDR as u64, "La dirección base DMA debe coincidir con AUDIO_DMA_BUFFER_ADDR (16 MiB)");
+    assert!(status.controller_type <= 2, "Tipo de controlador de audio válido (PcSpeaker=0, IntelHda=1, Ac97=2)");
+
+    // 2. Transmisión y reproducción de flujo PCM estéreo 16-bit mediante SYS_AUDIO_PLAY (130)
+    let mut pcm_samples = [0u8; 1024];
+    for (i, b) in pcm_samples.iter_mut().enumerate() {
+        *b = ((i * 7) & 0xFF) as u8;
+    }
+
+    let prev_total = status.total_pcm_bytes;
+    let fmt_packed: u64 = ((16 << 16) | 2) as u64; // 16-bit, 2 canales (estéreo)
+    let play_res = syscall_dispatch(SYS_AUDIO_PLAY, pcm_samples.as_ptr() as u64, pcm_samples.len() as u64, 44100, fmt_packed, 0);
+    assert_eq!(play_res, pcm_samples.len() as u64, "SYS_AUDIO_PLAY debe retornar los bytes transmitidos al búfer DMA");
+
+    // Verificar que el estado se actualizó con la configuración transmitida
+    let mut status_after = status;
+    let _ = syscall_dispatch(SYS_AUDIO_STATUS, &mut status_after as *mut _ as u64, 0, 0, 0, 0);
+    assert_eq!(status_after.sample_rate, 44100, "La tasa de muestreo debe ser 44100 Hz");
+    assert_eq!(status_after.channels, 2, "Debe ser estéreo (2 canales)");
+    assert_eq!(status_after.bits_per_sample, 16, "Debe ser 16-bit por muestra");
+    assert!(status_after.total_pcm_bytes >= prev_total + pcm_samples.len() as u64, "El contador total de bytes PCM debe incrementarse");
+
+    // 3. Verificar que los datos PCM se copiaron físicamente en el búfer DMA asignado
+    let dma_dest = (AUDIO_DMA_BUFFER_ADDR + 0x1000) as *const u8;
+    for i in 0..64 {
+        let dma_byte = unsafe { core::ptr::read(dma_dest.add(i)) };
+        assert_eq!(dma_byte, pcm_samples[i], "Los datos en memoria física DMA deben coincidir con las muestras enviadas");
+    }
+
+    // 4. Reproducción de archivo binario RIFF WAVE completo mediante SYS_AUDIO_PLAY con autodetección (sample_rate=0)
+    let wav = create_beaver_chime_wav();
+    let wav_play_res = syscall_dispatch(SYS_AUDIO_PLAY, wav.as_ptr() as u64, wav.len() as u64, 0, 0, 0);
+    assert!(wav_play_res > 0 && wav_play_res != u64::MAX, "SYS_AUDIO_PLAY debe reproducir un archivo RIFF WAVE detectado automáticamente");
+
+    // 5. Detención de canales de audio mediante SYS_AUDIO_STOP (132)
+    let stop_res = syscall_dispatch(SYS_AUDIO_STOP, 0, 0, 0, 0, 0);
+    assert_eq!(stop_res, 0, "SYS_AUDIO_STOP debe retornar 0");
+
+    // 6. Validación de manejo robusto de errores de memoria y parámetros
+    let null_play = syscall_dispatch(SYS_AUDIO_PLAY, 0, 1024, 44100, fmt_packed, 0);
+    assert_eq!(null_play as i64, -14, "Puntero nulo a SYS_AUDIO_PLAY debe devolver -EFAULT (-14)");
+
+    let zero_len = syscall_dispatch(SYS_AUDIO_PLAY, pcm_samples.as_ptr() as u64, 0, 44100, fmt_packed, 0);
+    assert_eq!(zero_len as i64, -14, "Longitud 0 a SYS_AUDIO_PLAY debe devolver -EFAULT (-14)");
+
+    let invalid_wav = [0x55u8; 64];
+    let bad_wav = syscall_dispatch(SYS_AUDIO_PLAY, invalid_wav.as_ptr() as u64, invalid_wav.len() as u64, 0, 0, 0);
+    assert_eq!(bad_wav as i64, -22, "Cabecera WAV inválida con sample_rate=0 debe devolver -EINVAL (-22)");
+}
+
 #[cfg(test)]
 #[test_case]
 fn ut_spotlight_search() {
@@ -1155,4 +1224,10 @@ fn ut_xhci_usb3_controller() {
 #[test_case]
 fn ut_rtc_and_posix_clock_time() {
     test_rtc_and_posix_clock_time();
+}
+
+#[cfg(test)]
+#[test_case]
+fn ut_userland_audio_pcm_dma() {
+    test_userland_audio_pcm_dma_playback();
 }

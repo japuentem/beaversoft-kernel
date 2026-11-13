@@ -472,6 +472,65 @@ pub fn play_pcm_dma(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_s
     }
 }
 
+/// Estado exportado del subsistema de audio para consultas desde espacio de usuario
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserAudioStatus {
+    pub controller_type: u32, // 0 = PcSpeaker, 1 = IntelHda, 2 = Ac97
+    pub pci_audio_found: u32, // 1 = true, 0 = false
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub total_pcm_bytes: u64,
+    pub dma_buffer_addr: u64,
+}
+
+/// Obtiene el estado actual del hardware y contadores del subsistema de audio
+pub fn get_user_audio_status() -> UserAudioStatus {
+    let state = AUDIO_STATE.lock();
+    UserAudioStatus {
+        controller_type: match state.controller_type {
+            AudioControllerType::PcSpeaker => 0,
+            AudioControllerType::IntelHda => 1,
+            AudioControllerType::Ac97 => 2,
+        },
+        pci_audio_found: if state.pci_audio_found { 1 } else { 0 },
+        sample_rate: state.sample_rate,
+        channels: state.channels,
+        bits_per_sample: state.bits_per_sample,
+        total_pcm_bytes: state.total_pcm_bytes_played,
+        dma_buffer_addr: state.dma_buffer_addr,
+    }
+}
+
+/// Detiene todos los canales activos de audio (Intel HDA, AC'97 y PC Speaker)
+pub fn stop_audio() {
+    stop_sound();
+    let state = AUDIO_STATE.lock();
+    match state.controller_type {
+        AudioControllerType::IntelHda => {
+            if state.mmio_base != 0 {
+                let mmio_ptr = state.mmio_base as *mut u8;
+                let stream0_offset = 0x80 + (state.num_input_streams as usize) * 0x20;
+                let stream_ptr = unsafe { mmio_ptr.add(stream0_offset) };
+                unsafe {
+                    let ctl_ptr = stream_ptr.add(HDA_SD_CTL) as *mut u32;
+                    let cur_ctl = core::ptr::read_volatile(ctl_ptr);
+                    core::ptr::write_volatile(ctl_ptr, cur_ctl & !0x02);
+                }
+            }
+        }
+        AudioControllerType::Ac97 => {
+            if state.nabmbar_io != 0 {
+                unsafe {
+                    outb(state.nabmbar_io + AC97_PO_CR, 0x00);
+                }
+            }
+        }
+        AudioControllerType::PcSpeaker => {}
+    }
+}
+
 /// Reproduce un archivo WAVE completo ubicado en el VFS (/disk/*.wav)
 pub fn play_wav_file(path: &str) -> Result<String, &'static str> {
     let bytes = {

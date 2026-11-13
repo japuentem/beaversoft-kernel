@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-12
-// Total de interacciones del día: 28
+// Total de interacciones del día: 29
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-12
@@ -640,6 +640,38 @@ implementa lo mas importante y al final dime que falta
        6. Verifica `SYS_TIME` y validaciones de errores de memoria (`-EFAULT` ante puntero nulo y `-EINVAL` ante identificador de reloj desconocido).
 - **Resultados de Verificación Automatizada (100% Aprobadas):**
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 27 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con GICv2, Generic Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC y Beaver Shell).
+- Se entregó el balance riguroso, honesto y priorizado de lo que resta para completar Beaver OS.
+
+================================================================================
+
+
+## Interacción #29 [21:22:00]
+
+### 👤 Pregunta / Petición del Usuario:
+implementa lo mas importante y al final dime que falta
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- Siguiendo de forma innegociable el principio de que **cada cambio técnico requiere una prueba automatizada verificada al 100%**, y en estricto cumplimiento de la **Regla 5 (Prohibición Estricta de Datos Simulados y Código Hardcodeado)**, se identificó e implementó la característica técnica pendiente de más alta prioridad en el ecosistema multimedia y llamadas al sistema de espacio de usuario:
+  1. **Llamadas al Sistema de Audio PCM y Hardware DMA en Espacio de Usuario ([kernel/src/drivers/audio.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/drivers/audio.rs), [kernel/src/syscall.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/syscall.rs), [user/beaver-libc/src/lib.rs](file:///d:/proyectos_personales/beaversoft-kernel/user/beaver-libc/src/lib.rs), [user/beaver-libc/include/beaver/syscall.h](file:///d:/proyectos_personales/beaversoft-kernel/user/beaver-libc/include/beaver/syscall.h)):**
+     - **Pasarela de Syscalls de Audio Ring 0 / EL0:**
+       * `SYS_AUDIO_PLAY` (130): Permite a los procesos en Ring 3 transmitir búferes de audio PCM lineal estéreo de 16-bit hacia la memoria DMA física (`0x0100_1000`), configurando dinámicamente los registros de descriptor de flujo de Intel HDA o AC'97 Bus Master. Si `sample_rate == 0`, autodetecta y decodifica archivos binarios RIFF WAVE completos mediante `WavHeader::parse()`.
+       * `SYS_AUDIO_STATUS` (131): Proporciona a las aplicaciones en espacio de usuario la estructura `UserAudioStatus` con el controlador de sonido activo (Intel HDA, AC'97 o PC Speaker), presencia en bus PCI, frecuencia de muestreo, canales, bits por muestra, dirección base del búfer DMA (`0x0100_0000`) y total acumulado de bytes reproducidos.
+       * `SYS_AUDIO_STOP` (132): Detiene de inmediato los canales de reproducción en hardware (apagando el bit RUN en Stream 0 de Intel HDA, deteniendo el registro de control PCM Out de AC'97 y desconectando la compuerta del altavoz PC Speaker).
+     - **Seguridad y Validación en Modo Supervisor:** Validación de rangos de memoria de usuario mediante `is_valid_user_ptr` con retorno de errores POSIX deterministas (`-EFAULT` / `-EINVAL`).
+     - **Integración en `beaver-libc`:** Se expusieron las funciones cliente `audio_play()`, `audio_play_wav()`, `audio_status()` y `audio_stop()`.
+  2. **Ampliación de la Suite Automatizada a 28 Pruebas ([kernel/src/tests.rs](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/tests.rs)):**
+     - Se añadió la **Prueba 28 (`userland_audio_pcm_dma_playback`)**, la cual:
+       1. Consulta el estado del hardware de sonido mediante `SYS_AUDIO_STATUS` (131) verificando la dirección DMA de 16 MiB y controlador válido.
+       2. Transmite un búfer PCM sintético de 1024 bytes vía `SYS_AUDIO_PLAY` (130) y certifica que los datos se transfieren físicamente a la memoria DMA (`AUDIO_DMA_BUFFER_ADDR + 0x1000`).
+       3. Verifica la actualización inmediata de la telemetría del controlador (`sample_rate = 44100`, `channels = 2`, `bits = 16`, incremento del contador de bytes).
+       4. Valida la reproducción de un archivo RIFF WAVE auténtico generado por el sintetizador institucional Beaver con autodetección de cabecera.
+       5. Detiene los canales de sonido mediante `SYS_AUDIO_STOP` (132).
+       6. Valida el rechazo de punteros nulos (`-EFAULT`), longitudes vacías y archivos con formato corrupto (`-EINVAL`).
+- **Resultados de Verificación Automatizada (100% Aprobadas):**
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **`[SUITE OK] Todas las 28 pruebas del kernel pasaron exitosamente`** (`[PASS] QEMU finalizo con codigo 33`).
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -TestArm64`: **`[PASS-ARM64]`** (Verificación completa en `aarch64` con GICv2, Generic Timer, MMU, Heap, VFS, VirtIO-blk, VirtIO-net, EL0+SVC y Beaver Shell).
 - Se entregó el balance riguroso, honesto y priorizado de lo que resta para completar Beaver OS.
 

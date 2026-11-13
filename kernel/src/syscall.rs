@@ -118,6 +118,11 @@ pub const SYS_GUI_BLIT:            u64 = 124;
 pub const SYS_GUI_GET_EVENT:       u64 = 125;
 pub const SYS_GUI_INVALIDATE:      u64 = 126;
 
+// Llamadas al sistema de Audio PCM y Hardware DMA
+pub const SYS_AUDIO_PLAY:          u64 = 130;
+pub const SYS_AUDIO_STATUS:        u64 = 131;
+pub const SYS_AUDIO_STOP:          u64 = 132;
+
 // Límites y estado del Heap para procesos de usuario Ring 3 / EL0
 #[cfg(target_arch = "x86_64")]
 pub const USER_HEAP_START: u64 = 0x0000_0000_5000_0000;
@@ -1209,6 +1214,55 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64, arg
             if let Some(win) = crate::gui::window::WINDOW_MGR.lock().get_user_window(win_id) {
                 crate::gui::canvas::Canvas::mark_dirty_rect(win.x, win.y, win.width, win.height);
             }
+            0
+        }
+
+        // SYS_AUDIO_PLAY (130): buf_ptr=arg0, len=arg1, sample_rate=arg2, format_packed=arg3
+        SYS_AUDIO_PLAY => {
+            let buf_ptr = arg0;
+            let len = arg1 as usize;
+            if len == 0 || !is_valid_user_ptr(buf_ptr, len) {
+                return (-14_isize) as u64; // -EFAULT
+            }
+
+            let slice = unsafe { core::slice::from_raw_parts(buf_ptr as *const u8, len) };
+
+            // Si sample_rate == 0, detectar si es un archivo RIFF WAVE completo
+            if arg2 == 0 {
+                if let Ok(hdr) = crate::drivers::audio::WavHeader::parse(slice) {
+                    let pcm = &slice[hdr.data_offset..hdr.data_offset + (hdr.data_size as usize)];
+                    crate::drivers::audio::play_pcm_dma(pcm, hdr.sample_rate, hdr.num_channels, hdr.bits_per_sample);
+                    return pcm.len() as u64;
+                }
+                return (-22_isize) as u64; // -EINVAL
+            }
+
+            let sample_rate = arg2 as u32;
+            let channels = (arg3 & 0xFFFF) as u16;
+            let bits = ((arg3 >> 16) & 0xFFFF) as u16;
+            let ch = if channels == 0 { 2 } else { channels };
+            let b = if bits == 0 { 16 } else { bits };
+
+            crate::drivers::audio::play_pcm_dma(slice, sample_rate, ch, b);
+            len as u64
+        }
+
+        // SYS_AUDIO_STATUS (131): status_ptr=arg0
+        SYS_AUDIO_STATUS => {
+            let ptr = arg0;
+            if !is_valid_user_ptr(ptr, core::mem::size_of::<crate::drivers::audio::UserAudioStatus>()) {
+                return (-14_isize) as u64; // -EFAULT
+            }
+            let status = crate::drivers::audio::get_user_audio_status();
+            unsafe {
+                core::ptr::write(ptr as *mut crate::drivers::audio::UserAudioStatus, status);
+            }
+            0
+        }
+
+        // SYS_AUDIO_STOP (132)
+        SYS_AUDIO_STOP => {
+            crate::drivers::audio::stop_audio();
             0
         }
 

@@ -37,6 +37,11 @@
 #define SYS_sem_wait     116
 #define SYS_sem_post     117
 
+// Audio PCM y Hardware DMA
+#define SYS_audio_play   130
+#define SYS_audio_status 131
+#define SYS_audio_stop   132
+
 // Macros de invocación de syscall x86_64 usando instrucción `syscall`
 static inline int64_t beaver_syscall0(int64_t n) {
     int64_t ret;

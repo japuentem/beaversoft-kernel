@@ -61,6 +61,23 @@ pub const SYS_GUI_BLIT:            u64 = 124;
 pub const SYS_GUI_GET_EVENT:       u64 = 125;
 pub const SYS_GUI_INVALIDATE:      u64 = 126;
 
+// Llamadas al sistema de Audio PCM y Hardware DMA
+pub const SYS_AUDIO_PLAY:          u64 = 130;
+pub const SYS_AUDIO_STATUS:        u64 = 131;
+pub const SYS_AUDIO_STOP:          u64 = 132;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserAudioStatus {
+    pub controller_type: u32,
+    pub pci_audio_found: u32,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub total_pcm_bytes: u64,
+    pub dma_buffer_addr: u64,
+}
+
 pub const GUI_EVENT_CLICK: u32 = 1;
 pub const GUI_EVENT_KEY: u32 = 2;
 pub const GUI_EVENT_CLOSE: u32 = 3;
@@ -347,5 +364,40 @@ pub fn time(tloc: Option<&mut u64>) -> u64 {
         None => 0,
     };
     unsafe { syscall1(SYS_TIME, tloc_ptr) }
+}
+
+pub fn audio_play(pcm_data: &[u8], sample_rate: u32, channels: u16, bits_per_sample: u16) -> Result<usize, isize> {
+    let fmt_packed: u64 = ((bits_per_sample as u64) << 16) | (channels as u64);
+    let res = unsafe { syscall4(SYS_AUDIO_PLAY, pcm_data.as_ptr() as u64, pcm_data.len() as u64, sample_rate as u64, fmt_packed) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as usize)
+    }
+}
+
+pub fn audio_play_wav(wav_bytes: &[u8]) -> Result<usize, isize> {
+    let res = unsafe { syscall4(SYS_AUDIO_PLAY, wav_bytes.as_ptr() as u64, wav_bytes.len() as u64, 0, 0) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(res as usize)
+    }
+}
+
+pub fn audio_status(status: &mut UserAudioStatus) -> Result<(), isize> {
+    let res = unsafe { syscall1(SYS_AUDIO_STATUS, status as *mut _ as u64) };
+    let code = res as isize;
+    if code < 0 {
+        Err(code)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn audio_stop() {
+    unsafe { syscall0(SYS_AUDIO_STOP) };
 }
 
