@@ -34,6 +34,8 @@ FONT_TITLE_HERO = ImageFont.truetype("segoeuib.ttf", 60)
 FONT_TITLE_LARGE = ImageFont.truetype("segoeuib.ttf", 40)
 FONT_TITLE_MED = ImageFont.truetype("segoeuib.ttf", 28)
 FONT_CARD_TITLE = ImageFont.truetype("segoeuib.ttf", 23)
+FONT_TABLE_TITLE = ImageFont.truetype("segoeuib.ttf", 19)
+FONT_TABLE_BOLD = ImageFont.truetype("segoeuib.ttf", 17)
 FONT_BODY = ImageFont.truetype("segoeui.ttf", 18)
 FONT_BODY_BOLD = ImageFont.truetype("segoeuib.ttf", 18)
 FONT_SMALL = ImageFont.truetype("segoeui.ttf", 15)
@@ -185,8 +187,8 @@ def generate_slide_2():
     draw = ImageDraw.Draw(img)
     draw_header(img, draw, "BONDAD 01 // ULTRA-EFICIENCIA")
     
-    draw.text((60, 110), "Menos de 16 MiB de RAM vs. Gigabytes de Sobrecarga", font=FONT_TITLE_LARGE, fill=TEXT_WHITE)
-    draw.text((60, 168), "Mientras los sistemas operativos modernos exigen de 2 a 4 GB solo para iniciar, Beaver OS opera con ligereza absoluta:", font=FONT_BODY, fill=TEXT_MUTED)
+    draw.text((60, 105), "Ultra-Eficiencia: Menos de 16 MiB de RAM", font=FONT_TITLE_LARGE, fill=TEXT_WHITE)
+    draw.text((60, 162), "Frente a gigabytes de sobrecarga en sistemas tradicionales, Beaver OS opera con ligereza:", font=FONT_BODY, fill=TEXT_MUTED)
     
     # Comparativa de consumo
     draw_card(draw, (60, 220, 525, 495),
@@ -425,11 +427,11 @@ def generate_slide_7():
     # Tabla Comparativa Visual
     rows = [
         ("Métrica / Característica", "Sistemas Tradicionales (Linux/Win)", "Beaver OS (Beaversoft)"),
-        ("Tiempo de Arranque (Boot)", "15 a 45 segundos (servicios/systemd)", "2 a 15 milisegundos (Directo al metal)"),
-        ("Consumo Base de RAM", "2 a 4 GB (miles de procesos ocultos)", "< 16 MiB (Kernel + Desktop + Shell)"),
+        ("Tiempo de Arranque", "15 a 45 seg. (servicios/systemd)", "2 a 15 ms (Directo al metal)"),
+        ("Consumo Base de RAM", "2 a 4 GB (miles de procesos)", "< 16 MiB (Kernel + Desktop + Shell)"),
         ("Sobrevivencia ante OOM", "BSOD o Kernel Panic indiscriminado", "Reserva Anti-OOM: Supervisor inmune"),
         ("Actualizaciones del Kernel", "Riesgo de brickeo por caída eléctrica", "Doble Slot A/B atómico con rollback"),
-        ("Modelo de Memoria", "C / Ensamblador vulnerable a leaks", "Rust bare-metal 100% seguro de memoria"),
+        ("Modelo de Memoria", "C / Ensamblador vulnerable a leaks", "Rust bare-metal: memoria 100% segura"),
         ("Privacidad y Telemetría", "Recolección constante de datos en nube", "Cero telemetría: Soberanía local y P2P"),
         ("Verificación y Pruebas", "Capas de abstracción opacas", "32/32 tests de hardware automatizados"),
     ]
@@ -439,18 +441,18 @@ def generate_slide_7():
     
     # Header de la tabla
     draw.rounded_rectangle([(60, table_y), (1020, table_y + 45)], radius=6, fill=(30, 41, 59))
-    draw.text((75, table_y + 12), rows[0][0], font=FONT_TAG, fill=AMBER_ACCENT)
-    draw.text((380, table_y + 12), rows[0][1], font=FONT_TAG, fill=TEXT_MUTED)
-    draw.text((720, table_y + 12), rows[0][2], font=FONT_TAG, fill=CYAN_ACCENT)
+    draw.text((75, table_y + 14), rows[0][0], font=FONT_TAG, fill=AMBER_ACCENT)
+    draw.text((325, table_y + 14), rows[0][1], font=FONT_TAG, fill=TEXT_MUTED)
+    draw.text((610, table_y + 14), rows[0][2], font=FONT_TAG, fill=CYAN_ACCENT)
     
     cur_y = table_y + 55
     for r_idx, (col1, col2, col3) in enumerate(rows[1:], start=1):
         bg = (17, 24, 39, 200) if r_idx % 2 == 0 else (11, 19, 32, 200)
         draw.rounded_rectangle([(60, cur_y), (1020, cur_y + row_height - 10)], radius=6, fill=bg, outline=(26, 36, 56), width=1)
         
-        draw.text((75, cur_y + 14), col1, font=FONT_CARD_TITLE, fill=TEXT_WHITE)
-        draw.text((380, cur_y + 16), col2, font=FONT_SMALL, fill=TEXT_MUTED)
-        draw.text((720, cur_y + 16), col3, font=FONT_BODY_BOLD, fill=GREEN_ACCENT)
+        draw.text((75, cur_y + 16), col1, font=FONT_TABLE_TITLE, fill=TEXT_WHITE)
+        draw.text((325, cur_y + 18), col2, font=FONT_SMALL, fill=TEXT_MUTED)
+        draw.text((610, cur_y + 18), col3, font=FONT_TABLE_BOLD, fill=GREEN_ACCENT)
         cur_y += row_height
         
     draw_footer(img, draw, 7)
@@ -538,3 +540,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

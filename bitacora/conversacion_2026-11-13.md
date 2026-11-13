@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-13
-// Total de interacciones del día: 4
+// Total de interacciones del día: 5
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-13
@@ -117,3 +117,35 @@ crea un pdf con esas bondades que tiene BEAVER OS, incluye el titulo y descripci
   * Compilación validada en 0.06s con `cargo check --target x86_64-unknown-none`.
 
 ================================================================================
+
+## Interacción #5 [12:12:00]
+
+### 👤 Pregunta / Petición del Usuario:
+la diapositiva 2 y 7 se salen del borde
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- **1. Diagnóstico y Corrección de Desbordamientos de Texto en Diapositivas:**
+  * **Diapositiva 2 (Título):**
+    - *Causa:* El título anterior `"Menos de 16 MiB de RAM vs. Gigabytes de Sobrecarga"` medía 1,032 px de ancho; sumado al margen izquierdo de 60 px, alcanzaba 1,092 px (desbordando el ancho total del lienzo de 1,080 px por 12 px).
+    - *Solución:* Se ajustó la redacción a `"Ultra-Eficiencia: Menos de 16 MiB de RAM"` (ancho: 830 px, margen derecho libre de 130 px) y se afinó el subtítulo para mantener máxima armonía visual y legibilidad.
+  * **Diapositiva 7 (Tabla Comparativa - Columna 3):**
+    - *Causa:* La columna 3 ("Beaver OS") comenzaba en x=720 px, dejando solo 300 px antes del borde de la tarjeta (1,020 px). Cadenas como `"Rust bare-metal 100% seguro de memoria"` (356 px) se salían del borde de la tarjeta hasta en 56 px.
+    - *Solución:*
+      1. Se rebalancearon las posiciones horizontales de las columnas de la tabla:
+         - Columna 1 (Métrica): x = 75 px (ancho ~240 px).
+         - Columna 2 (Sistemas Tradicionales): x = 325 px (ancho ~270 px).
+         - Columna 3 (Beaver OS): x = 610 px (ancho ~380 px).
+      2. Se incorporaron fuentes optimizadas para tablas (`FONT_TABLE_TITLE` en 19 pt y `FONT_TABLE_BOLD` en 17 pt).
+      3. Se sintetizaron los textos manteniendo todo el rigor técnico.
+- **2. Verificación Automatizada de Límites (Bounds Detector):**
+  * Se ejecutó un detector automático de texto en Pillow sobre las 8 diapositivas comprobando que el 100% de los textos respeten los límites:
+    - *Desbordamientos totales:* 0.
+    - *Margen mínimo de seguridad al borde de las tarjetas:* 20 px a 33 px en el cuerpo; 80 px a 93 px al borde del lienzo (1,080 px).
+- **3. Regeneración de Artefactos:**
+  * Se regeneraron las diapositivas en `docs/beaver_os_bondades_slides/` y el archivo compilado `docs/beaver_os_bondades_linkedin_carousel.pdf` (1.07 MB).
+  * `cargo check --target x86_64-unknown-none` validado en 0.08s.
+
+================================================================================
+
