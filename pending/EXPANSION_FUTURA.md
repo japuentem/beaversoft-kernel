@@ -44,3 +44,18 @@ Beaver OS compila y ejecuta nativamente en modo bi-arquitectura verificada:
    - Automatización de arranque en QEMU (`qemu-system-riscv64 -M virt`).
    - Soporte para placas monoplaca reales accesibles en el mercado (e.g. StarFive VisionFive 2, SiFive HiFive Unleashed).
 
+---
+
+## 3. Arreglos de Discos por Software Soberanos (BeaverRAID)
+
+### Contexto Actual:
+Beaver OS soporta nativamente arreglos RAID por Hardware (Dell PERC, HP Smart Array, LSI) a través de los controladores AHCI DMA y NVMe exponiendo un LUN unificado. Para equipos y appliances sin controladoras físicas dedicadas, se proyecta el soporte de arreglos por software administrados directamente por el kernel.
+
+### Objetivos de la Expansión (Ver especificación detallada en [BEAVERRAID_SOFTWARE_ARRAY.md](BEAVERRAID_SOFTWARE_ARRAY.md)):
+1. **BeaverRAID 1 (Espejo de Alta Disponibilidad):** Escritura síncrona duplicada y tolerancia completa ante la pérdida física o desconexión de una unidad de almacenamiento sin interrumpir Ring 3.
+2. **BeaverRAID 0 (Striping):** Segmentación y balanceo concurrente de sectores para multiplicar el ancho de banda en discos SATA y NVMe.
+3. **BeaverRAID 5 (Paridad Distribuida Rotativa):** Resiliencia ante la falla de un disco mediante cálculo XOR de paridad y reconstrucción en caliente (*hot-rebuild*) en segundo plano.
+4. **Superbloque BeaverRAID con CRC32:** Encabezado atómico de metadatos de 512 bytes al final del disco físico para ensamblado automático durante el arranque (`init_storage()`).
+5. **Telemetría y Diagnóstico en Beaver Shell:** Comandos `raid status`, `raid rebuild` y `raid scrub` para monitoreo transparente sin herramientas heredadas de Linux.
+
+
