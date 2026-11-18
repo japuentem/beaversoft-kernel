@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-18
-// Total de interacciones del día: 5
+// Total de interacciones del día: 6
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-18
@@ -143,6 +143,27 @@ si unifica el boton Aceptar a verde/teal y revisa tambien que los textos no se s
   * **Monitor de Recursos, BeaverFiles y BeaverSync (`apps_system.rs`):** Se acortaron y protegieron con recorte seguro las cadenas de estadísticas de memoria, descripciones de papelera/sistema, el pie de página de BeaverFiles y las líneas de log de telemetría en tiempo real.
 - **3. Verificación:**
   * `cargo check --target x86_64-unknown-none`: OK (2.51s).
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **35/35 pruebas aprobadas** (código QEMU 33).
+
+================================================================================
+
+## Interacción #6 [12:36:26]
+
+### 👤 Pregunta / Petición del Usuario:
+aunque ya revisaste, aqui hay algo que se sale de su ventana
+[Imagen adjunta: media_1795026984760_4552a17d.png]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- **1. Diagnóstico en la Barra Lateral de BeaverFiles (`kernel/src/gui/apps_system.rs`):**
+  * **Desbordamiento horizontal:** Con `sb_w = 140`, la etiqueta `"Papelera (/trash)"` comenzaba en `x + 34`, tocando y cruzando el separador vertical.
+  * **Desbordamiento vertical:** La ventana tiene `height = 260`, pero el arreglo `sb_offsets = [210, 232, 254]` dibujaba el tercer nodo (`-- sin nodos --`) en `y + 254` (hasta `y + 270`), saliéndose 10 píxeles por debajo del borde inferior de la ventana.
+- **2. Corrección Aplicada en [`kernel/src/gui/apps_system.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_system.rs):**
+  * Se amplió `sb_w` de `140` a `152` (y su hitbox de clic en `handle_files_click`) y se aplicó `Canvas::draw_string_prop_clipped` a todas las ubicaciones y nodos de la barra lateral.
+  * Se añadió guarda de altura (`if sb_offsets[i] + 18 > h.saturating_sub(6) { break; }`) para garantizar que nunca se dibuje un elemento sobre o fuera del borde inferior de la ventana.
+- **3. Verificación:**
+  * `cargo check --target x86_64-unknown-none`: OK (1.01s).
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **35/35 pruebas aprobadas** (código QEMU 33).
 
 ================================================================================

@@ -114,7 +114,7 @@ pub fn draw_files_window() {
     let tab = *FILES_VIEW_TAB.lock();
 
     // 1. Barra Lateral Izquierda (Sidebar estilo Lord OS / Finder)
-    let sb_w = 140;
+    let sb_w = 152;
     Canvas::fill_rect(x + 1, y + 32, sb_w, h.saturating_sub(33), Color::BEAVER_TITANIUM_BAR);
     Canvas::draw_line_v(x + 1 + sb_w, y + 32, h.saturating_sub(33), Color::BEAVER_BORDER_LIGHT);
 
@@ -129,15 +129,16 @@ pub fn draw_files_window() {
         (FilesViewTab::Trash, "Papelera (/trash)",SidebarIconKind::Trash,    166),
     ];
 
+    let sb_label_max_w = sb_w.saturating_sub(38);
     for (t, label, icon_kind, ty) in &tabs {
         let is_selected = *t == tab;
         if is_selected {
             Canvas::fill_rounded_rect(x + 6, y + ty - 3, sb_w - 12, 22, 6, 0xDBEAFE);
             draw_sidebar_icon(x + 12, y + ty - 1, *icon_kind, Color::BEAVER_AMBER);
-            Canvas::draw_string_prop(x + 34, y + ty + 1, label, Color::BEAVER_TEXT_DARK, None);
+            Canvas::draw_string_prop_clipped(x + 34, y + ty + 1, label, sb_label_max_w, Color::BEAVER_TEXT_DARK, None);
         } else {
             draw_sidebar_icon(x + 12, y + ty - 1, *icon_kind, Color::BEAVER_TEXT_MUTED);
-            Canvas::draw_string_prop(x + 34, y + ty + 1, label, Color::BEAVER_TEXT_DARK, None);
+            Canvas::draw_string_prop_clipped(x + 34, y + ty + 1, label, sb_label_max_w, Color::BEAVER_TEXT_DARK, None);
         }
     }
 
@@ -150,13 +151,19 @@ pub fn draw_files_window() {
     };
     let sb_offsets = [210usize, 232, 254];
     for (i, (label, is_online)) in mesh_nodes_sb.iter().enumerate().take(3) {
+        if sb_offsets[i] + 18 > h.saturating_sub(6) {
+            break;
+        }
         let icon_col = if *is_online { Color::BEAVER_TEAL } else { Color::SLATE_400 };
         draw_sidebar_icon(x + 12, y + sb_offsets[i], SidebarIconKind::Mesh, icon_col);
-        Canvas::draw_string_prop(x + 34, y + sb_offsets[i], label, Color::BEAVER_TEXT_MUTED, None);
+        Canvas::draw_string_prop_clipped(x + 34, y + sb_offsets[i], label, sb_label_max_w, Color::BEAVER_TEXT_MUTED, None);
     }
     for i in mesh_nodes_sb.len()..3 {
+        if sb_offsets[i] + 18 > h.saturating_sub(6) {
+            break;
+        }
         draw_sidebar_icon(x + 12, y + sb_offsets[i], SidebarIconKind::Mesh, Color::SLATE_400);
-        Canvas::draw_string_prop(x + 34, y + sb_offsets[i], "-- sin nodos --", Color::SLATE_400, None);
+        Canvas::draw_string_prop_clipped(x + 34, y + sb_offsets[i], "-- sin nodos --", sb_label_max_w, Color::SLATE_400, None);
     }
 
     // 2. Panel Principal Derecho (Lienzo Blanco / Lord OS)
@@ -271,7 +278,7 @@ pub fn render_files_window() {
 }
 
 pub fn handle_files_click(mx: usize, my: usize, wx: usize, wy: usize) {
-    if mx >= wx && mx <= wx + 140 {
+    if mx >= wx && mx <= wx + 152 {
         if my >= wy + 46 && my <= wy + 66 {
             *FILES_VIEW_TAB.lock() = FilesViewTab::Net;
         } else if my >= wy + 68 && my <= wy + 88 {
