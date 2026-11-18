@@ -39,32 +39,33 @@ pub fn enter_smart_hub() {
 }
 
 /// Dibuja la interfaz completa de Smart Hub con doble búfer TrueColor usando telemetría real
+/// Inspirada en la consola táctil interestelar de la nave Starship Avalon (Passengers 2016)
 pub fn render_smart_hub() {
     let (width, height) = Canvas::screen_dimensions();
 
-    // 1. Fondo Oscuro Obsidian Keynote (Atmósfera Cinematográfica para TV)
-    Canvas::fill_rect(0, 0, width, height, 0x07090E);
+    // 1. Fondo Oscuro Obsidian Espacial (#040812)
+    Canvas::fill_rect(0, 0, width, height, Color::AVALON_BG);
 
-    // Rejilla sutil de fondo
-    for x in (30..width).step_by(40) {
-        for y in (70..height).step_by(40) {
-            Canvas::put_pixel(x, y, 0x172033);
+    // Rejilla sutil táctica cian
+    for x in (20..width).step_by(32) {
+        for y in (70..height).step_by(32) {
+            Canvas::put_pixel(x, y, 0x0A2B45);
         }
     }
 
-    // 2. Barra Superior de Estado y Cabecera Institucional
-    Canvas::fill_rect(0, 0, width, 65, 0x0B132B);
-    Canvas::draw_line_h(0, 64, width, Color::SLATE_700);
+    // 2. Barra Superior de Estado y Cabecera Institucional Avalon Glass
+    Canvas::fill_rect(0, 0, width, 65, Color::AVALON_GLASS);
+    Canvas::draw_line_h(0, 64, width, Color::AVALON_CYAN);
 
-    // Emblema Beaver
-    Canvas::fill_rounded_rect(30, 14, 36, 36, 8, Color::BEAVER_AMBER);
-    Canvas::draw_string(42, 22, "B", Color::WHITE, None);
+    // Emblema Beaver en verde menta bioluminiscente
+    Canvas::fill_rounded_rect(30, 14, 36, 36, 8, Color::AVALON_MINT);
+    Canvas::draw_string(42, 22, "B", Color::AVALON_BG, None);
 
     // Título Principal y Pastilla de Modo
-    Canvas::draw_string_prop(76, 16, "BEAVER SMART HUB", Color::WHITE, None);
-    Canvas::fill_rounded_rect(240, 18, 230, 24, 12, 0x111E38);
-    Canvas::draw_rounded_rect(240, 18, 230, 24, 12, Color::BEAVER_ACCENT_CYAN);
-    Canvas::draw_string_prop(252, 21, "[MODO TV & KIOSCO REAL]", Color::BEAVER_ACCENT_CYAN, None);
+    Canvas::draw_string_prop(76, 16, "BEAVER SMART HUB // AVALON HUD", Color::WHITE, None);
+    Canvas::fill_rounded_rect(360, 18, 230, 24, 12, 0x092238);
+    Canvas::draw_rounded_rect(360, 18, 230, 24, 12, Color::AVALON_MINT);
+    Canvas::draw_string_prop(372, 21, "[CONSOLA TACTIL PASSENGERS]", Color::AVALON_MINT, None);
 
     // Información en Vivo Real (Uptime, Red Mesh, IP Real)
     let uptime = get_uptime_seconds();
@@ -78,9 +79,9 @@ pub fn render_smart_hub() {
     let mesh_hdr = format!("Malla P2P: :4242 [{} Nodos]", mesh_count);
     let ip_hdr = format!("IP Local: {} | Cero Nube", local_ip);
 
-    Canvas::draw_string_prop(width - 320, 16, &mesh_hdr, Color::BEAVER_TEAL_BRIGHT, None);
-    Canvas::draw_string_prop(width - 130, 16, &clock_str, Color::BEAVER_AMBER_LIGHT, None);
-    Canvas::draw_string_prop(width - 320, 38, &ip_hdr, Color::SLATE_400, None);
+    Canvas::draw_string_prop(width - 320, 16, &mesh_hdr, Color::AVALON_MINT, None);
+    Canvas::draw_string_prop(width - 130, 16, &clock_str, Color::AVALON_GOLD, None);
+    Canvas::draw_string_prop(width - 320, 38, &ip_hdr, Color::AVALON_TEXT, None);
 
     // 3. Renderizado de la Cuadrícula de 6 Mosaicos Inteligentes (3 Cols x 2 Rows)
     let (focused, last_act) = {
@@ -138,27 +139,27 @@ pub fn render_smart_hub() {
     }
 
     // 4. Barra Inferior de Acción Táctil y Teclas de Control Remoto
-    Canvas::fill_rect(0, 620, width, 148, 0x090D1A);
-    Canvas::draw_line_h(0, 620, width, 0x1E293B);
+    Canvas::fill_rect(0, 620, width, 148, Color::AVALON_GLASS);
+    Canvas::draw_line_h(0, 620, width, Color::AVALON_CYAN);
 
     // Línea de Estado / Feedback de Última Acción
     let status_text = if last_act.is_empty() {
-        String::from("Listo. Telemetria real activa. Usa flechas, D-Pad o toca cualquier mosaico.")
+        String::from("Consola Avalon lista. Telemetria real activa. Toca o usa D-Pad.")
     } else {
         last_act
     };
-    Canvas::fill_circle(45, 638, 5, Color::BEAVER_GREEN);
-    Canvas::draw_string_prop(60, 630, &status_text, Color::BEAVER_AMBER_LIGHT, None);
+    Canvas::fill_circle(45, 638, 5, Color::AVALON_MINT);
+    Canvas::draw_string_prop(60, 630, &status_text, Color::AVALON_TEXT, None);
 
     // Botones Táctiles de Gran Escala en la Parte Inferior
-    draw_touch_button(42, 655, 215, 48, "[ ESC ] MODO ESCRITORIO", Color::BEAVER_ACCENT_CYAN, 0x131E33);
-    draw_touch_button(275, 655, 215, 48, "[ P ] SONDEAR HARDWARE", Color::BEAVER_GREEN, 0x10261E);
-    draw_touch_button(508, 655, 215, 48, "[ A ] AUDIO BEAVER", Color::BEAVER_AMBER, 0x2E2010);
-    draw_touch_button(741, 655, 240, 48, "[ M ] ANUNCIAR MESH :4242", Color::BEAVER_PURPLE, 0x221538);
+    draw_touch_button(42, 655, 215, 48, "[ ESC ] MODO ESCRITORIO", Color::AVALON_CYAN, 0x071D33);
+    draw_touch_button(275, 655, 215, 48, "[ P ] SONDEAR HARDWARE", Color::AVALON_MINT, 0x062822);
+    draw_touch_button(508, 655, 215, 48, "[ A ] AUDIO BEAVER", Color::AVALON_GOLD, 0x2A1C06);
+    draw_touch_button(741, 655, 240, 48, "[ M ] ANUNCIAR MESH :4242", Color::AVALON_CYAN, 0x071D33);
 
     // Indicaciones de Navegación D-Pad
-    Canvas::draw_string_prop(42, 715, "Controles de Sala:  [FLECHAS / D-PAD / WASD] Mover Foco   |   [ENTER / ESPACIO] Abrir   |   [ESC] Escritorio", Color::SLATE_400, None);
-    Canvas::draw_string_prop(42, 735, "Beaver OS v0.9.0 | Arquitectura Determinista Anti-Bloqueos | Creado por Jose Alberto Puente Maldonado", 0x475569, None);
+    Canvas::draw_string_prop(42, 715, "Controles de Sala:  [FLECHAS / D-PAD / WASD] Mover Foco   |   [ENTER / ESPACIO] Abrir   |   [ESC] Escritorio", Color::AVALON_ACCENT_DIM, None);
+    Canvas::draw_string_prop(42, 735, "Beaver OS v0.9.5 | Starship Avalon Edition (Passengers 2016) | Desarrollado por Beaversoft", 0x0E3C60, None);
 
     // 5. Dibujar puntero de ratón o toque
     let (mx, my) = {
@@ -185,20 +186,20 @@ fn draw_smart_tile(
     mesh_nodes: &[(String, String)],
     disk_entries: &[(String, bool, usize)],
 ) {
-    let (bg_color, border_color, border_thickness) = if is_focused {
-        (0x152238, Color::BEAVER_ACCENT_CYAN, 3)
+    let (bg_color, border_color, is_f) = if is_focused {
+        (0x0A223B, Color::AVALON_MINT, true)
     } else {
-        (0x0E1626, Color::SLATE_700, 1)
+        (Color::AVALON_GLASS, Color::AVALON_BORDER, false)
     };
 
     Canvas::fill_rounded_rect(x, y, w, h, 14, bg_color);
 
-    if border_thickness == 3 {
+    if is_f {
         Canvas::draw_rounded_rect(x, y, w, h, 14, border_color);
         Canvas::draw_rounded_rect(x + 1, y + 1, w - 2, h - 2, 13, border_color);
-        Canvas::draw_rounded_rect(x + 2, y + 2, w - 4, h - 4, 12, border_color);
-        Canvas::fill_rounded_rect(x + w - 105, y + 12, 92, 20, 10, Color::BEAVER_ACCENT_CYAN);
-        Canvas::draw_string_prop(x + w - 98, y + 14, "ENFOCADO", Color::BEAVER_NAVY, None);
+        Canvas::draw_hud_corners(x, y, w, h, 12, Color::AVALON_CYAN);
+        Canvas::fill_rounded_rect(x + w - 105, y + 12, 92, 20, 10, Color::AVALON_MINT);
+        Canvas::draw_string_prop(x + w - 98, y + 14, "ENFOCADO", Color::AVALON_BG, None);
     } else {
         Canvas::draw_rounded_rect(x, y, w, h, 14, border_color);
     }

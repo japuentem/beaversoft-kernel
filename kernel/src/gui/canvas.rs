@@ -60,6 +60,16 @@ impl Color {
     pub const BEAVER_RUBY: u32        = 0xEF4444; // Semáforo Cerrar
     pub const BEAVER_EMERALD: u32     = 0x10B981; // Semáforo Maximizar
 
+    // --- Identidad Visual Futurista Starship Avalon (Passengers 2016) ---
+    pub const AVALON_BG: u32          = 0x040812; // Obsidiana Espacial Profunda
+    pub const AVALON_GLASS: u32       = 0x061528; // Cristal de Ventana Translúcido
+    pub const AVALON_CYAN: u32        = 0x00F0FF; // Neón Cian Eléctrico
+    pub const AVALON_MINT: u32        = 0x00FFC2; // Neón Verde Menta Bioluminiscente
+    pub const AVALON_GOLD: u32        = 0xFFB703; // Oro de Advertencia Avalon
+    pub const AVALON_BORDER: u32      = 0x0E3854; // Borde de Rejilla Guiada
+    pub const AVALON_TEXT: u32        = 0xE2F1FF; // Texto Técnico Luminiscente
+    pub const AVALON_ACCENT_DIM: u32  = 0x005F73; // Cian Atenuado
+
     pub const WINDOW_BG: u32          = 0xF8FAFC;
     pub const WINDOW_TITLEBAR: u32    = 0xEEF2F6;
     pub const WINDOW_TITLEBAR_ACT: u32= 0xE2E8F0;
@@ -104,6 +114,12 @@ impl Canvas {
         } else {
             (SCREEN_WIDTH, SCREEN_HEIGHT)
         }
+    }
+
+    /// Indica si el tema futurista Starship Avalon (Passengers 2016) está activo
+    #[inline(always)]
+    pub fn is_avalon_theme() -> bool {
+        crate::gui::desktop::ACTIVE_THEME_RAW.load(core::sync::atomic::Ordering::Relaxed) == 2
     }
 
     /// Registra una región rectangular como sucia (Dirty Rect) para redibujo parcial
@@ -372,6 +388,11 @@ impl Canvas {
 
     /// Renderiza un carácter tipográfico usando el mapa de bits 8x16 en RAM
     pub fn draw_char(x: usize, y: usize, c: char, fg: u32, bg: Option<u32>) {
+        let fg = if Self::is_avalon_theme() && fg == Color::BEAVER_TEXT_DARK {
+            Color::AVALON_TEXT
+        } else {
+            fg
+        };
         let glyph = get_glyph(c);
         let ptr = Self::backbuffer_ptr();
 
@@ -418,6 +439,17 @@ impl Canvas {
 
     /// Dibuja un carácter con ancho proporcional recortando los espacios vacíos
     pub fn draw_char_prop(x: usize, y: usize, c: char, fg: u32, bg: Option<u32>) -> usize {
+        let fg = if Self::is_avalon_theme() {
+            if fg == Color::BEAVER_TEXT_DARK {
+                Color::AVALON_TEXT
+            } else if fg == Color::BEAVER_TEXT_MUTED {
+                0x80B3CC
+            } else {
+                fg
+            }
+        } else {
+            fg
+        };
         let (min_col, glyph_w, advance) = crate::gui::font::get_glyph_metrics(c);
         if glyph_w == 0 {
             if let Some(bg_color) = bg {
@@ -658,10 +690,151 @@ impl Canvas {
         Self::draw_string_prop((w.saturating_sub(wm_w)) / 2, h / 2 - 10, wm_text, 0x94A3B8, None);
     }
 
+    /// Fondo de pantalla futurista Starship Avalon (Inspirado en la película Passengers 2016)
+    /// Combina obsidiana espacial, rejilla táctica cian, estrellas deterministas y HUD circular
+    pub fn draw_avalon_wallpaper(w: usize, h: usize) {
+        // 1. Gradiente base de obsidiana espacial profunda (#030610 -> #061122)
+        Self::draw_gradient_v(0, 0, w, h, Color::AVALON_BG, 0x071426);
+
+        // 2. Rejilla sutil táctica milimétrica (puntos de intersección cada 32 px)
+        for x in (16..w).step_by(32) {
+            for y in (36..h).step_by(32) {
+                Self::put_pixel(x, y, 0x0A2B45);
+            }
+        }
+
+        // 3. Campo de estrellas en el espacio interestelar (con tinte azul/cian)
+        let mut seed: u32 = 0x51A85;
+        for _ in 0..120 {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let sx = (seed as usize) % w;
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let sy = ((seed as usize) % (h.saturating_sub(60))).max(30);
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let star_type = seed % 8;
+
+            match star_type {
+                0..=4 => {
+                    Self::put_pixel(sx, sy, 0x005F73); // Estrella tenue cian
+                }
+                5..=6 => {
+                    Self::put_pixel(sx, sy, Color::AVALON_CYAN); // Estrella brillante
+                }
+                _ => {
+                    Self::put_pixel(sx, sy, Color::AVALON_MINT);
+                    if sx > 0 && sx + 1 < w {
+                        Self::put_pixel(sx - 1, sy, 0x007A8C);
+                        Self::put_pixel(sx + 1, sy, 0x007A8C);
+                    }
+                    if sy > 0 && sy + 1 < h {
+                        Self::put_pixel(sx, sy - 1, 0x007A8C);
+                        Self::put_pixel(sx, sy + 1, 0x007A8C);
+                    }
+                }
+            }
+        }
+
+        // 4. Elemento Gráfico Circular Holográfico (Dial Radial de fondo en cuadrante derecho)
+        let rc_x = if w > 300 { w - 240 } else { w / 2 };
+        let rc_y = if h > 300 { h / 2 + 40 } else { h / 2 };
+        
+        // Anillo 1 (Exterior punteado)
+        Self::draw_circle(rc_x, rc_y, 130, 0x092842);
+        Self::draw_circle(rc_x, rc_y, 110, 0x0E3C60);
+        Self::draw_circle(rc_x, rc_y, 80, 0x092842);
+        Self::draw_circle(rc_x, rc_y, 40, Color::AVALON_ACCENT_DIM);
+
+        // Rayos de retícula táctica en el círculo
+        Self::draw_line_h(rc_x.saturating_sub(140), rc_y, 280, 0x092842);
+        Self::draw_line_v(rc_x, rc_y.saturating_sub(140), 280, 0x092842);
+
+        // 5. Marca de agua técnica holográfica
+        let wm_text = "BEAVER OS // AVALON HUD // PASSENGERS EDITION";
+        let wm_w = Self::string_width_prop(wm_text);
+        Self::draw_string_prop((w.saturating_sub(wm_w)) / 2, h / 2 - 12, wm_text, 0x0A3350, None);
+    }
+
+    /// Dibuja esquinas angulares tácticas (HUD brackets) estilo sci-fi
+    pub fn draw_hud_corners(x: usize, y: usize, w: usize, h: usize, len: usize, color: u32) {
+        if w < len * 2 || h < len * 2 { return; }
+        // Top-left
+        Self::draw_line_h(x, y, len, color);
+        Self::draw_line_v(x, y, len, color);
+        // Top-right
+        Self::draw_line_h(x + w - len, y, len, color);
+        Self::draw_line_v(x + w - 1, y, len, color);
+        // Bottom-left
+        Self::draw_line_h(x, y + h - 1, len, color);
+        Self::draw_line_v(x, y + h - len, len, color);
+        // Bottom-right
+        Self::draw_line_h(x + w - len, y + h - 1, len, color);
+        Self::draw_line_v(x + w - 1, y + h - len, len, color);
+    }
+
+    /// Dibuja una ventana con diseño táctico futurista Starship Avalon (Passengers 2016)
+    pub fn draw_avalon_window(x: usize, y: usize, w: usize, h: usize, title: &str, active: bool) {
+        if w < 60 || h < 40 { return; }
+
+        // 1. Sombra suave de resplandor neón
+        let glow_col = if active { 0x002B3D } else { 0x040A14 };
+        Self::fill_rounded_rect(x + 4, y + 4, w, h, 10, glow_col);
+
+        // 2. Fondo de cristal oscuro de obsidiana
+        Self::fill_rounded_rect(x, y, w, h, 8, Color::AVALON_GLASS);
+
+        // 3. Barra de Título (Titlebar) con estética de consola de navegación
+        let tb_bg = if active { 0x081D36 } else { 0x051322 };
+        Self::fill_rounded_rect(x, y, w, 32, 8, tb_bg);
+        Self::fill_rect(x, y + 18, w, 14, tb_bg);
+        
+        let line_col = if active { Color::AVALON_CYAN } else { Color::AVALON_BORDER };
+        Self::draw_line_h(x + 1, y + 31, w.saturating_sub(2), line_col);
+
+        // 4. Semáforos tácticos
+        let cy = y + 15;
+        // Cerrar (Ruby con borde cian)
+        Self::fill_circle(x + 16, cy, 6, Color::BEAVER_RUBY);
+        Self::draw_circle(x + 16, cy, 6, Color::AVALON_CYAN);
+        Self::put_pixel(x + 15, cy.saturating_sub(1), Color::WHITE);
+
+        // Minimizar (Oro Avalon)
+        Self::fill_circle(x + 32, cy, 6, Color::AVALON_GOLD);
+        Self::draw_circle(x + 32, cy, 6, 0xB45309);
+        Self::put_pixel(x + 31, cy.saturating_sub(1), Color::WHITE);
+
+        // Maximizar (Verde Menta Bioluminiscente)
+        Self::fill_circle(x + 48, cy, 6, Color::AVALON_MINT);
+        Self::draw_circle(x + 48, cy, 6, Color::AVALON_CYAN);
+        Self::put_pixel(x + 47, cy.saturating_sub(1), Color::WHITE);
+
+        // 5. Contorno perimetral y corchetes HUD en las esquinas
+        let border_color = if active { Color::AVALON_CYAN } else { Color::AVALON_BORDER };
+        Self::draw_rounded_rect(x, y, w, h, 8, border_color);
+        if active {
+            Self::draw_hud_corners(x, y, w, h, 10, Color::AVALON_MINT);
+        }
+
+        // 6. Título técnico en cian / menta brillante
+        let title_col = if active { Color::AVALON_MINT } else { Color::AVALON_TEXT };
+        Self::draw_string_prop(x + 64, y + 8, title, title_col, None);
+
+        // 7. Etiqueta de modo técnico a la derecha
+        let badge_text = if active { "[HUD: ACTIVO]" } else { "[HUD: INACTIVO]" };
+        let badge_w = Self::string_width_prop(badge_text);
+        if w > badge_w + 160 {
+            Self::draw_string_prop(x + w - badge_w - 12, y + 8, badge_text, Color::AVALON_ACCENT_DIM, None);
+        }
+    }
+
     /// Dibuja el marco completo de una ventana del sistema operativo estilo Lord OS
     /// Incorpora esquinas redondeadas, sombra suave multi-capa y semáforos circulares con brillo de gema
     pub fn draw_window(x: usize, y: usize, w: usize, h: usize, title: &str, active: bool) {
         if w < 60 || h < 40 {
+            return;
+        }
+
+        if Self::is_avalon_theme() {
+            Self::draw_avalon_window(x, y, w, h, title, active);
             return;
         }
 

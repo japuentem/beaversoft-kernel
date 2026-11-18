@@ -23,13 +23,18 @@ use crate::gui::icons::*;
 pub use crate::gui::apps_system::*;
 pub use crate::gui::apps_media::*;
 
+use core::sync::atomic::{AtomicU8, Ordering};
+
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
 pub enum DesktopTheme {
-    DarkCosmic,
-    LightNordic,
+    DarkCosmic = 0,
+    LightNordic = 1,
+    AvalonHolo = 2,
 }
 
-pub static CURRENT_THEME: SpinMutex<DesktopTheme> = SpinMutex::new(DesktopTheme::DarkCosmic);
+pub static ACTIVE_THEME_RAW: AtomicU8 = AtomicU8::new(2);
+pub static CURRENT_THEME: SpinMutex<DesktopTheme> = SpinMutex::new(DesktopTheme::AvalonHolo);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Beaver Modular Deskbar (Opción B: BeOS / SGI IRIX Modernizada)
@@ -48,14 +53,17 @@ pub fn draw_beaver_drawer(theme: DesktopTheme) {
     let bg_color = match theme {
         DesktopTheme::DarkCosmic => 0x0B1222,
         DesktopTheme::LightNordic => 0xF8FAFC,
+        DesktopTheme::AvalonHolo => Color::AVALON_GLASS,
     };
     let border_color = match theme {
         DesktopTheme::DarkCosmic => Color::BEAVER_AMBER,
         DesktopTheme::LightNordic => Color::BEAVER_BORDER_LIGHT,
+        DesktopTheme::AvalonHolo => Color::AVALON_CYAN,
     };
     let text_color = match theme {
         DesktopTheme::DarkCosmic => Color::WHITE,
         DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
+        DesktopTheme::AvalonHolo => Color::AVALON_TEXT,
     };
 
     // Sombra difusa
@@ -65,8 +73,17 @@ pub fn draw_beaver_drawer(theme: DesktopTheme) {
     Canvas::draw_rounded_rect(dx, dy, dw, dh, 10, border_color);
 
     // Cabecera del Drawer
-    Canvas::fill_rounded_rect(dx + 2, dy + 2, dw - 4, 26, 8, if theme == DesktopTheme::DarkCosmic { 0x1E293B } else { 0xE2E8F0 });
-    Canvas::draw_string_prop(dx + 12, dy + 8, "LANZADOR BEAVER OS", Color::BEAVER_AMBER, None);
+    let header_bg = match theme {
+        DesktopTheme::DarkCosmic => 0x1E293B,
+        DesktopTheme::LightNordic => 0xE2E8F0,
+        DesktopTheme::AvalonHolo => 0x081D36,
+    };
+    Canvas::fill_rounded_rect(dx + 2, dy + 2, dw - 4, 26, 8, header_bg);
+    let header_title_col = match theme {
+        DesktopTheme::AvalonHolo => Color::AVALON_MINT,
+        _ => Color::BEAVER_AMBER,
+    };
+    Canvas::draw_string_prop(dx + 12, dy + 8, "LANZADOR BEAVER OS", header_title_col, None);
 
     let items: [(&str, &str, u32); 14] = [
         (">_", "Terminal Shell", 0x22C55E),
@@ -88,7 +105,12 @@ pub fn draw_beaver_drawer(theme: DesktopTheme) {
     for (i, (badge, label, badge_col)) in items.iter().enumerate() {
         let iy = dy + 32 + i * 27;
         if i > 0 {
-            Canvas::draw_line_h(dx + 8, iy, dw - 16, if theme == DesktopTheme::DarkCosmic { 0x1E293B } else { 0xE2E8F0 });
+            let sep_col = match theme {
+                DesktopTheme::DarkCosmic => 0x1E293B,
+                DesktopTheme::LightNordic => 0xE2E8F0,
+                DesktopTheme::AvalonHolo => Color::AVALON_BORDER,
+            };
+            Canvas::draw_line_h(dx + 8, iy, dw - 16, sep_col);
         }
         Canvas::fill_rounded_rect(dx + 8, iy + 3, 20, 20, 4, *badge_col);
         Canvas::draw_string(dx + 13, iy + 6, badge, Color::WHITE, None);
@@ -241,10 +263,12 @@ pub fn draw_desktop_grid_icons(theme: DesktopTheme) {
     let text_color = match theme {
         DesktopTheme::DarkCosmic => Color::WHITE,
         DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
+        DesktopTheme::AvalonHolo => Color::AVALON_TEXT,
     };
     let shadow_color = match theme {
         DesktopTheme::DarkCosmic => 0x020617,
         DesktopTheme::LightNordic => 0xCBD5E1,
+        DesktopTheme::AvalonHolo => 0x02050E,
     };
 
     for item in &DESKTOP_GRID_ICONS {
@@ -260,6 +284,7 @@ pub fn draw_desktop_grid_icons(theme: DesktopTheme) {
         let tile_bg = match theme {
             DesktopTheme::DarkCosmic => item.bg_color,
             DesktopTheme::LightNordic => 0xF1F5F9,
+            DesktopTheme::AvalonHolo => Color::AVALON_GLASS,
         };
         Canvas::fill_rounded_rect(icon_x, icon_y, ICON_BOX_SIZE, ICON_BOX_SIZE, 12, tile_bg);
         Canvas::draw_rounded_rect(icon_x, icon_y, ICON_BOX_SIZE, ICON_BOX_SIZE, 12, item.border_color);
@@ -371,27 +396,39 @@ pub fn render_desktop() {
 
     let theme = *CURRENT_THEME.lock();
 
-    // 1. Fondo de Pantalla Cósmico (Noche) o Nórdico (Día)
+    // 1. Fondo de Pantalla Cósmico (Noche), Nórdico (Día) o Avalon (Passengers 2016)
     match theme {
         DesktopTheme::DarkCosmic => Canvas::draw_cosmic_wallpaper(width, height),
         DesktopTheme::LightNordic => Canvas::draw_nordic_wallpaper(width, height),
+        DesktopTheme::AvalonHolo => Canvas::draw_avalon_wallpaper(width, height),
     }
 
     // 2. Barra Superior Modular Deskbar (Todo-en-Uno estilo BeOS / SGI IRIX)
     let topbar_bg = match theme {
         DesktopTheme::DarkCosmic => Color::BEAVER_OBSIDIAN,
         DesktopTheme::LightNordic => 0xE2E8F0,
+        DesktopTheme::AvalonHolo => Color::AVALON_GLASS,
     };
     let topbar_border = match theme {
         DesktopTheme::DarkCosmic => Color::SLATE_700,
         DesktopTheme::LightNordic => Color::BEAVER_BORDER_LIGHT,
+        DesktopTheme::AvalonHolo => Color::AVALON_CYAN,
     };
     let topbar_text = match theme {
         DesktopTheme::DarkCosmic => Color::WHITE,
         DesktopTheme::LightNordic => Color::BEAVER_TEXT_DARK,
+        DesktopTheme::AvalonHolo => Color::AVALON_TEXT,
     };
-    let pill_bg = if theme == DesktopTheme::DarkCosmic { Color::SLATE_800 } else { Color::WHITE };
-    let pill_border = if theme == DesktopTheme::DarkCosmic { Color::SLATE_700 } else { Color::BEAVER_BORDER_LIGHT };
+    let pill_bg = match theme {
+        DesktopTheme::DarkCosmic => Color::SLATE_800,
+        DesktopTheme::LightNordic => Color::WHITE,
+        DesktopTheme::AvalonHolo => 0x091D33,
+    };
+    let pill_border = match theme {
+        DesktopTheme::DarkCosmic => Color::SLATE_700,
+        DesktopTheme::LightNordic => Color::BEAVER_BORDER_LIGHT,
+        DesktopTheme::AvalonHolo => Color::AVALON_BORDER,
+    };
 
     Canvas::fill_rect(0, 0, width, 28, topbar_bg);
     Canvas::draw_line_h(0, 27, width, topbar_border);
@@ -431,6 +468,22 @@ pub fn render_desktop() {
             Color::WHITE,
             Color::WHITE,
             Color::WHITE,
+        ),
+        (DesktopTheme::AvalonHolo, false) => (
+            0x071D33,
+            Color::AVALON_CYAN,
+            Color::AVALON_MINT,
+            0x040812,
+            Color::AVALON_MINT,
+            Color::AVALON_CYAN,
+        ),
+        (DesktopTheme::AvalonHolo, true) => (
+            0x0B2D4D,
+            Color::AVALON_MINT,
+            Color::AVALON_CYAN,
+            0x040812,
+            Color::WHITE,
+            Color::AVALON_MINT,
         ),
     };
 
@@ -564,10 +617,15 @@ pub fn render_desktop() {
     Canvas::fill_circle(mesh_x + 10, 14, 3, dot_color);
     Canvas::draw_string_prop(mesh_x + 18, 6, &mesh_pill_text, topbar_text, None);
 
-    // Dibujar Tema (Día / Noche)
+    // Dibujar Tema (Día / Noche / Avalon)
     Canvas::fill_rounded_rect(theme_x, 4, theme_w, 20, 10, pill_bg);
     Canvas::draw_rounded_rect(theme_x, 4, theme_w, 20, 10, pill_border);
     match theme {
+        DesktopTheme::AvalonHolo => {
+            Canvas::fill_circle(theme_x + 12, 14, 5, Color::AVALON_MINT);
+            Canvas::draw_circle(theme_x + 12, 14, 7, Color::AVALON_CYAN);
+            Canvas::draw_string_prop(theme_x + 24, 6, "Avalon", Color::AVALON_MINT, None);
+        }
         DesktopTheme::DarkCosmic => {
             Canvas::fill_circle(theme_x + 12, 14, 6, Color::BEAVER_AMBER);
             Canvas::fill_circle(theme_x + 15, 12, 5, pill_bg);
@@ -1663,9 +1721,11 @@ fn handle_desktop_click(mx: usize, my: usize) {
             {
                 let mut th = CURRENT_THEME.lock();
                 *th = match *th {
+                    DesktopTheme::AvalonHolo => DesktopTheme::DarkCosmic,
                     DesktopTheme::DarkCosmic => DesktopTheme::LightNordic,
-                    DesktopTheme::LightNordic => DesktopTheme::DarkCosmic,
+                    DesktopTheme::LightNordic => DesktopTheme::AvalonHolo,
                 };
+                ACTIVE_THEME_RAW.store(*th as u8, Ordering::Relaxed);
             }
             render_desktop();
             return;
