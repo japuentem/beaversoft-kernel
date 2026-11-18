@@ -530,22 +530,39 @@ pub fn draw_calendar_window() {
     let rtc = crate::drivers::timer::local_datetime();
 
     let cal_title = format!("{} {}", month_name(rtc.month), rtc.year);
-    Canvas::draw_string_prop(x + 18, y + 42, &cal_title, Color::BEAVER_TEXT_DARK, None);
+    let title_col = if Canvas::is_avalon_theme() { Color::AVALON_MINT } else { Color::BEAVER_TEXT_DARK };
+    Canvas::draw_string_prop(x + 18, y + 42, &cal_title, title_col, None);
 
     let pill_x = x + w.saturating_sub(190);
-    Canvas::fill_rounded_rect(pill_x, y + 38, 175, 24, 6, Color::BEAVER_TITANIUM_BAR);
-    Canvas::draw_string_prop(pill_x + 10, y + 43, "Dia", Color::BEAVER_TEXT_MUTED, None);
-    Canvas::draw_string_prop(pill_x + 50, y + 43, "Semana", Color::BEAVER_TEXT_MUTED, None);
-    Canvas::fill_rounded_rect(pill_x + 115, y + 40, 56, 20, 4, Color::WHITE);
-    Canvas::draw_string_prop(pill_x + 125, y + 43, "Mes", Color::BEAVER_TEXT_DARK, None);
+    let (pill_bg, pill_tab_bg, tab_mes_txt) = if Canvas::is_avalon_theme() {
+        (0x071526, 0x0B2D4D, Color::AVALON_MINT)
+    } else {
+        (Color::BEAVER_TITANIUM_BAR, Color::WHITE, Color::BEAVER_TEXT_DARK)
+    };
+    Canvas::fill_rounded_rect(pill_x, y + 38, 175, 24, 6, pill_bg);
+    let tab_muted = if Canvas::is_avalon_theme() { 0x80B3CC } else { Color::BEAVER_TEXT_MUTED };
+    Canvas::draw_string_prop(pill_x + 10, y + 43, "Dia", tab_muted, None);
+    Canvas::draw_string_prop(pill_x + 50, y + 43, "Semana", tab_muted, None);
+    Canvas::fill_rounded_rect(pill_x + 115, y + 40, 56, 20, 4, pill_tab_bg);
+    if Canvas::is_avalon_theme() {
+        Canvas::draw_rounded_rect(pill_x + 115, y + 40, 56, 20, 4, Color::AVALON_CYAN);
+    }
+    Canvas::draw_string_prop(pill_x + 125, y + 43, "Mes", tab_mes_txt, None);
 
-    Canvas::draw_line_h(x + 15, y + 68, w.saturating_sub(30), Color::BEAVER_BORDER_LIGHT);
+    let line_sep = if Canvas::is_avalon_theme() { Color::AVALON_BORDER } else { Color::BEAVER_BORDER_LIGHT };
+    Canvas::draw_line_h(x + 15, y + 68, w.saturating_sub(30), line_sep);
 
     let day_names = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
     let cell_w = (w.saturating_sub(36)) / 7;
     for (i, dname) in day_names.iter().enumerate() {
         let dx = x + 18 + i * cell_w;
-        let col = if i >= 5 { Color::BEAVER_AMBER_DARK } else { Color::BEAVER_TEXT_MUTED };
+        let col = if i >= 5 {
+            if Canvas::is_avalon_theme() { Color::AVALON_GOLD } else { Color::BEAVER_AMBER_DARK }
+        } else if Canvas::is_avalon_theme() {
+            Color::AVALON_CYAN
+        } else {
+            Color::BEAVER_TEXT_MUTED
+        };
         Canvas::draw_string_prop(dx + cell_w / 2 - 10, y + 74, dname, col, None);
     }
 
@@ -568,7 +585,8 @@ pub fn draw_calendar_window() {
         } else {
             let num_str = format!("{}", day_num);
             let tw = Canvas::string_width_prop(&num_str);
-            Canvas::draw_string_prop(cx.saturating_sub(tw / 2), cy + 1, &num_str, Color::BEAVER_TEXT_DARK, None);
+            let num_col = if Canvas::is_avalon_theme() { Color::AVALON_TEXT } else { Color::BEAVER_TEXT_DARK };
+            Canvas::draw_string_prop(cx.saturating_sub(tw / 2), cy + 1, &num_str, num_col, None);
         }
 
         col += 1;
@@ -579,19 +597,27 @@ pub fn draw_calendar_window() {
     }
 
     let events_y = y + 250;
-    Canvas::fill_rounded_rect(x + 15, events_y, w.saturating_sub(30), h.saturating_sub(262), 8, Color::WHITE);
-    Canvas::draw_rounded_rect(x + 15, events_y, w.saturating_sub(30), h.saturating_sub(262), 8, Color::BEAVER_BORDER_LIGHT);
+    let (ev_bg, ev_border, ev_title_col, ev_txt_col) = if Canvas::is_avalon_theme() {
+        (0x081A2E, Color::AVALON_BORDER, Color::AVALON_GOLD, Color::AVALON_TEXT)
+    } else {
+        (Color::WHITE, Color::BEAVER_BORDER_LIGHT, Color::BEAVER_AMBER_DARK, Color::BEAVER_TEXT_DARK)
+    };
+    Canvas::fill_rounded_rect(x + 15, events_y, w.saturating_sub(30), h.saturating_sub(262), 8, ev_bg);
+    Canvas::draw_rounded_rect(x + 15, events_y, w.saturating_sub(30), h.saturating_sub(262), 8, ev_border);
 
-    Canvas::draw_string_prop(x + 25, events_y + 8, "[DEMO] AGENDA DE EJEMPLO (no hay tareas programadas reales):", Color::BEAVER_AMBER_DARK, None);
+    Canvas::draw_string_prop(x + 25, events_y + 8, "[DEMO] AGENDA DE EJEMPLO (no hay tareas programadas reales):", ev_title_col, None);
 
-    Canvas::fill_circle(x + 32, events_y + 32, 4, Color::BEAVER_EMERALD);
-    Canvas::draw_string_prop(x + 44, events_y + 26, "09:00 - Sincronizacion Automatica Malla P2P (/net)", Color::BEAVER_TEXT_DARK, None);
+    let dot1 = if Canvas::is_avalon_theme() { Color::AVALON_MINT } else { Color::BEAVER_EMERALD };
+    Canvas::fill_circle(x + 32, events_y + 32, 4, dot1);
+    Canvas::draw_string_prop(x + 44, events_y + 26, "09:00 - Sincronizacion Automatica Malla P2P (/net)", ev_txt_col, None);
 
-    Canvas::fill_circle(x + 32, events_y + 52, 4, Color::BEAVER_AMBER);
-    Canvas::draw_string_prop(x + 44, events_y + 46, "14:30 - Verificacion de Paridad BeaverFS (Espejo LBA 16)", Color::BEAVER_TEXT_DARK, None);
+    let dot2 = if Canvas::is_avalon_theme() { Color::AVALON_GOLD } else { Color::BEAVER_AMBER };
+    Canvas::fill_circle(x + 32, events_y + 52, 4, dot2);
+    Canvas::draw_string_prop(x + 44, events_y + 46, "14:30 - Verificacion de Paridad BeaverFS (Espejo LBA 16)", ev_txt_col, None);
 
-    Canvas::fill_circle(x + 32, events_y + 72, 4, Color::BEAVER_BLUE);
-    Canvas::draw_string_prop(x + 44, events_y + 66, "18:00 - Auditoria y Respaldo Slot A/B Anti-Brickeo", Color::BEAVER_TEXT_DARK, None);
+    let dot3 = if Canvas::is_avalon_theme() { Color::AVALON_CYAN } else { Color::BEAVER_BLUE };
+    Canvas::fill_circle(x + 32, events_y + 72, 4, dot3);
+    Canvas::draw_string_prop(x + 44, events_y + 66, "18:00 - Auditoria y Respaldo Slot A/B Anti-Brickeo", ev_txt_col, None);
 }
 
 pub fn render_calendar_window() {

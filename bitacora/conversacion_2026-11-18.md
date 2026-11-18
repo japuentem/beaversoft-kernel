@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-18
-// Total de interacciones del día: 2
+// Total de interacciones del día: 3
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-18
@@ -66,3 +66,36 @@ lo apruebo, procede a implementarlo, solo espero no tener problema de derecho
 
 ================================================================================
 
+## Interacción #3 [12:02:19]
+
+### 👤 Pregunta / Petición del Usuario:
+aqui aparece un boton que no se nota su texto y en la parte inferior se sale el texto, en la agenda tampoco se ven los datos inferiores
+[Imágenes adjuntas: media_1795024916203_2add0283.png y media_1795024919150_19349075.png]
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- **1. Diagnóstico de Causa Raíz Visual en BeaverNote y BeaverCalendar:**
+  * **Problema 1 (Texto invisible en botón "Limpiar" y en la Agenda):**
+    - En el tema Avalon, la conversión global de fuentes a alto contraste mapeaba `Color::BEAVER_TEXT_DARK` a `Color::AVALON_TEXT` (`#E2F1FF`, casi blanco).
+    - Sin embargo, el botón *"Limpiar"* de BeaverNote y la tarjeta de eventos de BeaverCalendar utilizaban fondos claros predeterminados (`Color::BEAVER_TITANIUM_BAR` y `Color::WHITE`), resultando en texto blanco sobre fondo blanco (cero contraste).
+  * **Problema 2 (Desbordamiento del pie de página en BeaverNote):**
+    - El texto inferior de estado (`Ruta: /disk/notas.txt...`) se dibujaba con monoespaciado fijo de 8px (552px de ancho) y la altura del editor (`edit_h = h - 86`) empujaba el texto a `y + h - 22`, colisionando directamente contra el borde inferior de la ventana y los corchetes HUD angulares.
+  * **Problema 3 (Pestaña "Mes" y bullets en BeaverCalendar):**
+    - La pastilla activa *"Mes"* y el contenedor de eventos usaban cajas blancas que no correspondían con el estilo de cristal de obsidiana del tema Avalon.
+- **2. Correcciones de Arquitectura y Renderizado:**
+  * **[`kernel/src/gui/canvas.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/canvas.rs):**
+    - `Canvas::fill_rounded_rect` y `Canvas::fill_rect` mapean automáticamente contenedores y tarjetas claras (`WHITE`, `BEAVER_TITANIUM`, `BEAVER_TITANIUM_BAR`) a cristal de obsidiana espacial (`0x081A2E` y `0x071526`).
+    - `Canvas::draw_rounded_rect`, `draw_line_h` y `draw_line_v` adaptan los bordes claros a `Color::AVALON_BORDER` (`#0E3854`).
+  * **[`kernel/src/gui/note.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/note.rs):**
+    - El botón *"Limpiar"* ahora tiene fondo de cristal oscuro `0x081D36`, borde `Color::AVALON_BORDER` y texto nítido en `Color::AVALON_TEXT`.
+    - La cápsula de estado se estila en cristal de obsidiana `0x061528` con texto en `Color::AVALON_MINT` (o `Color::AVALON_GOLD` al modificar).
+    - El área de edición se ajustó a `edit_h = h - 94` y la barra de estado se ubicó a `y + h - 25`, utilizando texto proporcional (`draw_string_prop`) con truncamiento seguro anti-desbordamiento, eliminando cualquier colisión con el borde inferior o corchetes HUD.
+  * **[`kernel/src/gui/apps_media.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_media.rs):**
+    - BeaverCalendar ahora renderiza la pastilla de selector de vistas con fondo `0x071526` y la pestaña activa *"Mes"* en `0x0B2D4D` con borde cian y texto menta.
+    - La tarjeta inferior de eventos ahora es un panel de cristal oscuro `0x081A2E` con borde `Color::AVALON_BORDER`, título en `Color::AVALON_GOLD` y bullets luminiscentes en menta (`#00FFC2`), oro (`#FFB703`) y cian (`#00F0FF`) con texto en blanco estelar `Color::AVALON_TEXT` de máxima legibilidad.
+- **3. Verificación de Compilación y Suite de Hardware:**
+  * Compilación exitosa en release para `x86_64-unknown-none`.
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **100% (35/35 pruebas aprobadas)** con código QEMU 33.
+
+================================================================================

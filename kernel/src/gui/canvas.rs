@@ -189,6 +189,18 @@ impl Canvas {
 
     /// Rellena un rectángulo directamente en el búfer secundario (sin tocar video bus)
     pub fn fill_rect(x: usize, y: usize, w: usize, h: usize, color: u32) {
+        let color = if Self::is_avalon_theme() {
+            if color == Color::BEAVER_TITANIUM {
+                Color::AVALON_GLASS
+            } else if color == Color::BEAVER_TITANIUM_BAR {
+                0x071526
+            } else {
+                color
+            }
+        } else {
+            color
+        };
+
         let max_x = (x + w).min(SCREEN_WIDTH);
         let max_y = (y + h).min(SCREEN_HEIGHT);
         if max_x <= x || max_y <= y {
@@ -209,11 +221,21 @@ impl Canvas {
 
     /// Dibuja una línea horizontal en el búfer secundario
     pub fn draw_line_h(x: usize, y: usize, w: usize, color: u32) {
+        let color = if Self::is_avalon_theme() && color == Color::BEAVER_BORDER_LIGHT {
+            Color::AVALON_BORDER
+        } else {
+            color
+        };
         Self::fill_rect(x, y, w, 1, color);
     }
 
     /// Dibuja una línea vertical en el búfer secundario
     pub fn draw_line_v(x: usize, y: usize, h: usize, color: u32) {
+        let color = if Self::is_avalon_theme() && color == Color::BEAVER_BORDER_LIGHT {
+            Color::AVALON_BORDER
+        } else {
+            color
+        };
         Self::fill_rect(x, y, 1, h, color);
     }
 
@@ -293,6 +315,17 @@ impl Canvas {
         if w == 0 || h == 0 {
             return;
         }
+
+        let color = if Self::is_avalon_theme() {
+            if color == Color::WHITE || color == Color::BEAVER_TITANIUM || color == Color::BEAVER_TITANIUM_BAR {
+                0x081A2E
+            } else {
+                color
+            }
+        } else {
+            color
+        };
+
         let rad = r.min(w / 2).min(h / 2);
         if rad == 0 {
             Self::fill_rect(x, y, w, h, color);
@@ -327,6 +360,13 @@ impl Canvas {
         if w == 0 || h == 0 {
             return;
         }
+
+        let color = if Self::is_avalon_theme() && color == Color::BEAVER_BORDER_LIGHT {
+            Color::AVALON_BORDER
+        } else {
+            color
+        };
+
         let rad = r.min(w / 2).min(h / 2);
         if rad == 0 {
             Self::draw_rect(x, y, w, h, color);

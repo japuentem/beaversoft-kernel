@@ -202,9 +202,14 @@ pub fn draw_note_window() {
 
     // Botón Limpiar
     let btn_clear_x = x + 182;
-    Canvas::fill_rounded_rect(btn_clear_x, btn_y, 80, 22, 4, Color::BEAVER_TITANIUM_BAR);
-    Canvas::draw_rounded_rect(btn_clear_x, btn_y, 80, 22, 4, Color::BEAVER_BORDER_LIGHT);
-    Canvas::draw_string(btn_clear_x + 10, btn_y + 4, "Limpiar", Color::BEAVER_TEXT_DARK, None);
+    let (clear_bg, clear_border, clear_txt) = if Canvas::is_avalon_theme() {
+        (0x081D36, Color::AVALON_BORDER, Color::AVALON_TEXT)
+    } else {
+        (Color::BEAVER_TITANIUM_BAR, Color::BEAVER_BORDER_LIGHT, Color::BEAVER_TEXT_DARK)
+    };
+    Canvas::fill_rounded_rect(btn_clear_x, btn_y, 80, 22, 4, clear_bg);
+    Canvas::draw_rounded_rect(btn_clear_x, btn_y, 80, 22, 4, clear_border);
+    Canvas::draw_string(btn_clear_x + 10, btn_y + 4, "Limpiar", clear_txt, None);
 
     // Botón Cerrar
     let btn_close_x = x + 266;
@@ -214,10 +219,21 @@ pub fn draw_note_window() {
     // Indicador de Estado en cápsula dedicada derecha
     let status_pill_x = x + 348;
     let status_pill_w = w.saturating_sub(360);
-    Canvas::fill_rounded_rect(status_pill_x, btn_y, status_pill_w, 22, 4, Color::BEAVER_TITANIUM_BAR);
-    Canvas::draw_rounded_rect(status_pill_x, btn_y, status_pill_w, 22, 4, Color::BEAVER_BORDER_LIGHT);
+    let (pill_bg, pill_border) = if Canvas::is_avalon_theme() {
+        (0x061528, Color::AVALON_BORDER)
+    } else {
+        (Color::BEAVER_TITANIUM_BAR, Color::BEAVER_BORDER_LIGHT)
+    };
+    Canvas::fill_rounded_rect(status_pill_x, btn_y, status_pill_w, 22, 4, pill_bg);
+    Canvas::draw_rounded_rect(status_pill_x, btn_y, status_pill_w, 22, 4, pill_border);
 
-    let status_color = if note.is_dirty { Color::BEAVER_AMBER_DARK } else { Color::BEAVER_TEAL };
+    let status_color = if note.is_dirty {
+        Color::AVALON_GOLD
+    } else if Canvas::is_avalon_theme() {
+        Color::AVALON_MINT
+    } else {
+        Color::BEAVER_TEAL
+    };
     let max_status_chars = (status_pill_w.saturating_sub(12)) / 8;
     let disp_status = if note.status_msg.len() > max_status_chars {
         &note.status_msg[..max_status_chars]
@@ -230,7 +246,7 @@ pub fn draw_note_window() {
     let edit_x = x + 12;
     let edit_y = y + 60;
     let edit_w = w.saturating_sub(24);
-    let edit_h = h.saturating_sub(86);
+    let edit_h = h.saturating_sub(94);
 
     Canvas::fill_rounded_rect(edit_x, edit_y, edit_w, edit_h, 6, Color::SLATE_900);
     Canvas::draw_rounded_rect(edit_x, edit_y, edit_w, edit_h, 6, Color::SLATE_700);
@@ -261,15 +277,24 @@ pub fn draw_note_window() {
         }
     }
 
-    // 3. Barra de Estado Inferior de la Ventana
-    let footer_y = y + h - 22;
+    // 3. Barra de Estado Inferior de la Ventana (con margen seguro anti-desbordamiento)
+    let footer_y = y + h - 25;
     let footer_text = format!(
         "Ruta: {} | Lineas: {} | Modificado: {} | Persistencia: BeaverFS ATA",
         note.file_path,
         note.content.len(),
         if note.is_dirty { "SI*" } else { "NO" }
     );
-    Canvas::draw_string(x + 16, footer_y, &footer_text, Color::BEAVER_TEXT_MUTED, None);
+    let footer_col = if Canvas::is_avalon_theme() { Color::AVALON_TEXT } else { Color::BEAVER_TEXT_MUTED };
+    let max_footer_w = w.saturating_sub(36);
+    let mut disp_footer = footer_text;
+    while Canvas::string_width_prop(&disp_footer) > max_footer_w && disp_footer.len() > 10 {
+        disp_footer.pop();
+    }
+    if disp_footer.len() < 60 && Canvas::string_width_prop(&disp_footer) > max_footer_w {
+        disp_footer.push_str("...");
+    }
+    Canvas::draw_string_prop(x + 16, footer_y, &disp_footer, footer_col, None);
 }
 
 pub fn render_note_window() {
