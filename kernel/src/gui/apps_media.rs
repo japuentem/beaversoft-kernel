@@ -92,25 +92,36 @@ pub fn draw_player_window() {
         Canvas::draw_string_prop(x + 30, y + cat_y_offsets[i] + 4, lbl, Color::BEAVER_TEXT_DARK, None);
     }
 
-    // 2. Lista de Pistas (Estilo Lord OS)
+    // 2. Lista de Pistas (Adaptativa al ancho de ventana)
     let list_x = x + sb_w + 12;
     let list_w = w.saturating_sub(sb_w + 22);
+    let show_artist = list_w > 280;
 
-    Canvas::draw_string_prop(list_x, y + 40, "#   Titulo                      Artista               Tiempo", Color::BEAVER_TEXT_MUTED, None);
+    Canvas::draw_string_prop(list_x, y + 40, "#", Color::BEAVER_TEXT_MUTED, None);
+    Canvas::draw_string_prop(list_x + 24, y + 40, "Pista", Color::BEAVER_TEXT_MUTED, None);
+    if show_artist {
+        Canvas::draw_string_prop(list_x + 170, y + 40, "Artista", Color::BEAVER_TEXT_MUTED, None);
+    }
+    Canvas::draw_string_prop(list_x + list_w.saturating_sub(44), y + 40, "Tiempo", Color::BEAVER_TEXT_MUTED, None);
     Canvas::draw_line_h(list_x, y + 54, list_w, Color::BEAVER_BORDER_LIGHT);
 
+    let title_max_w = if show_artist { 140 } else { list_w.saturating_sub(72) };
     for (i, (num, title, artist, duration)) in tracks.iter().enumerate() {
         let ty = y + 64 + i * 26;
         if i == state.track_idx {
             Canvas::fill_rounded_rect(list_x - 4, ty - 3, list_w, 22, 5, 0xFEF3C7);
             Canvas::draw_string_prop(list_x, ty + 1, num, Color::BEAVER_AMBER_DARK, None);
-            Canvas::draw_string_prop(list_x + 24, ty + 1, title, Color::BEAVER_TEXT_DARK, None);
-            Canvas::draw_string_prop(list_x + 240, ty + 1, artist, Color::BEAVER_TEXT_MUTED, None);
+            Canvas::draw_string_prop_clipped(list_x + 24, ty + 1, title, title_max_w, Color::BEAVER_TEXT_DARK, None);
+            if show_artist {
+                Canvas::draw_string_prop_clipped(list_x + 170, ty + 1, artist, list_w.saturating_sub(220), Color::BEAVER_TEXT_MUTED, None);
+            }
             Canvas::draw_string_prop(list_x + list_w.saturating_sub(44), ty + 1, duration, Color::BEAVER_AMBER_DARK, None);
         } else {
             Canvas::draw_string_prop(list_x, ty + 1, num, Color::BEAVER_TEXT_MUTED, None);
-            Canvas::draw_string_prop(list_x + 24, ty + 1, title, Color::BEAVER_TEXT_DARK, None);
-            Canvas::draw_string_prop(list_x + 240, ty + 1, artist, Color::BEAVER_TEXT_MUTED, None);
+            Canvas::draw_string_prop_clipped(list_x + 24, ty + 1, title, title_max_w, Color::BEAVER_TEXT_DARK, None);
+            if show_artist {
+                Canvas::draw_string_prop_clipped(list_x + 170, ty + 1, artist, list_w.saturating_sub(220), Color::BEAVER_TEXT_MUTED, None);
+            }
             Canvas::draw_string_prop(list_x + list_w.saturating_sub(44), ty + 1, duration, Color::BEAVER_TEXT_MUTED, None);
         }
     }
@@ -126,17 +137,18 @@ pub fn draw_player_window() {
     Canvas::draw_rounded_rect(art_x, art_y, 42, 42, 8, Color::SLATE_600);
     Canvas::draw_string(art_x + 17, art_y + 13, "B", Color::BEAVER_AMBER, None);
 
+    let ctrl_cx = x + w.saturating_sub(76);
+    let btn_cy = ctrl_y + 24;
+
+    let info_max_w = ctrl_cx.saturating_sub(62).saturating_sub(x + 68);
     let cur_track_name = tracks[state.track_idx.min(3)].1;
     let (cur_title, cur_status) = if state.is_playing {
-        (cur_track_name, "Reproduciendo - HDA Duplex 44.1kHz")
+        (cur_track_name, "Reproduciendo - HDA 44.1k")
     } else {
-        (cur_track_name, "En pausa - Presione Play")
+        (cur_track_name, "En pausa - Play")
     };
-    Canvas::draw_string_prop(x + 62, ctrl_y + 14, cur_title, Color::BEAVER_TEXT_DARK, None);
-    Canvas::draw_string_prop(x + 62, ctrl_y + 30, cur_status, Color::BEAVER_TEXT_MUTED, None);
-
-    let ctrl_cx = x + w / 2 + 40;
-    let btn_cy = ctrl_y + 24;
+    Canvas::draw_string_prop_clipped(x + 62, ctrl_y + 14, cur_title, info_max_w, Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop_clipped(x + 62, ctrl_y + 30, cur_status, info_max_w, Color::BEAVER_TEXT_MUTED, None);
 
     draw_media_button(ctrl_cx.saturating_sub(56), btn_cy, 10, MediaBtnKind::Shuffle, false);
     draw_media_button(ctrl_cx.saturating_sub(28), btn_cy, 11, MediaBtnKind::Previous, false);
@@ -218,7 +230,7 @@ pub fn handle_player_click(mx: usize, my: usize, wx: usize, wy: usize) {
 
         // 3. Controles inferiores
         let ctrl_y = wy + w.height.saturating_sub(68);
-        let ctrl_cx = wx + w.width / 2 + 40;
+        let ctrl_cx = wx + w.width.saturating_sub(76);
 
         // Previous
         if mx >= ctrl_cx.saturating_sub(38) && mx <= ctrl_cx.saturating_sub(18) && my >= ctrl_y + 12 && my <= ctrl_y + 36 {

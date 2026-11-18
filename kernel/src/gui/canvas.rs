@@ -582,6 +582,30 @@ impl Canvas {
         total_w
     }
 
+    /// Dibuja una cadena proporcional recortando limpiamente con "..." si excede `max_w` píxeles
+    pub fn draw_string_prop_clipped(x: usize, y: usize, text: &str, max_w: usize, fg: u32, bg: Option<u32>) -> usize {
+        if Self::string_width_prop(text) <= max_w {
+            return Self::draw_string_prop(x, y, text, fg, bg);
+        }
+        let ellipsis_w = Self::string_width_prop("...");
+        let limit_w = max_w.saturating_sub(ellipsis_w);
+        let mut curr_x = x;
+        for c in text.chars() {
+            if c == '\n' {
+                break;
+            }
+            let (_, _, adv) = crate::gui::font::get_glyph_metrics(c);
+            if (curr_x - x) + adv > limit_w {
+                break;
+            }
+            curr_x += Self::draw_char_prop(curr_x, y, c, fg, bg);
+        }
+        if max_w >= ellipsis_w {
+            curr_x += Self::draw_string_prop(curr_x, y, "...", fg, bg);
+        }
+        curr_x - x
+    }
+
     /// Renderiza un Wallpaper Cósmico y Espacial de Alta Fidelidad (Lord OS / Deep Space Style)
     /// Combina gradiente atmosférico, campo estelar determinista y nubes de nebulosa con alpha blending
     pub fn draw_cosmic_wallpaper(w: usize, h: usize) {

@@ -54,7 +54,7 @@ pub fn draw_monitor_window() {
 
     Canvas::draw_string_prop(x + 15, y + 96, "MEMORIA DINAMICA (Cero Buffers Ocultos)", Color::BEAVER_TEAL, None);
     let heap_str = format!("Heap: {} KiB | Usado: {} KiB | Libre: {} KiB", total_heap / 1024, used_heap / 1024, free_heap / 1024);
-    Canvas::draw_string_prop(x + 15, y + 116, &heap_str, Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop_clipped(x + 15, y + 116, &heap_str, w.saturating_sub(30), Color::BEAVER_TEXT_DARK, None);
 
     let bar_w = w.saturating_sub(30);
     Canvas::fill_rounded_rect(x + 15, y + 136, bar_w, 16, 4, Color::BEAVER_TITANIUM_BAR);
@@ -72,8 +72,8 @@ pub fn draw_monitor_window() {
     Canvas::draw_string_prop(x + 15, y + 220, "TID 1: telemetry_daemon | SLEEP   | UID: 0 (root)", Color::BEAVER_TEXT_MUTED, None);
     Canvas::draw_string_prop(x + 15, y + 238, "TID 2: storage_guard    | SLEEP   | UID: 0 (root)", Color::BEAVER_TEXT_MUTED, None);
 
-    let stats_str = format!("Heap allocs: {} | RAM: {} MiB libre / {} MiB total | Marcos: {}", alloc_count, ram_free_mib, ram_total_mib, frames_alloc);
-    Canvas::draw_string_prop(x + 15, y + 262, &stats_str, Color::BEAVER_TEXT_MUTED, None);
+    let stats_str = format!("Allocs: {} | RAM: {}/{} MiB libres | Marcos: {}", alloc_count, ram_free_mib, ram_total_mib, frames_alloc);
+    Canvas::draw_string_prop_clipped(x + 15, y + 262, &stats_str, w.saturating_sub(30), Color::BEAVER_TEXT_MUTED, None);
 }
 
 pub fn render_monitor_window() {
@@ -235,26 +235,28 @@ pub fn draw_files_window() {
             Canvas::fill_rounded_rect(main_x + 12, y + 78, main_w.saturating_sub(24), 130, 8, Color::WHITE);
             Canvas::draw_rounded_rect(main_x + 12, y + 78, main_w.saturating_sub(24), 130, 8, Color::BEAVER_BORDER_LIGHT);
 
+            let trash_max_w = main_w.saturating_sub(68);
             draw_sidebar_icon(main_x + 24, y + 96, SidebarIconKind::Trash, Color::SLATE_400);
-            Canvas::draw_string_prop(main_x + 50, y + 96, "Papelera de Reciclaje (Vacia)", Color::BEAVER_TEXT_DARK, None);
-            Canvas::draw_string_prop(main_x + 50, y + 116, "Los archivos eliminados en BeaverFS se depositan aqui.", Color::BEAVER_TEXT_MUTED, None);
-            Canvas::draw_string_prop(main_x + 50, y + 134, "Cero elementos pendientes de purga o restauracion en disco.", Color::BEAVER_TEXT_MUTED, None);
-            Canvas::draw_string_prop(main_x + 50, y + 154, "Almacenamiento: Libre | BeaverFS Paridad OK", Color::BEAVER_EMERALD, None);
+            Canvas::draw_string_prop_clipped(main_x + 50, y + 96, "Papelera de Reciclaje (Vacia)", trash_max_w, Color::BEAVER_TEXT_DARK, None);
+            Canvas::draw_string_prop_clipped(main_x + 50, y + 116, "Los archivos eliminados en BeaverFS se depositan aqui.", trash_max_w, Color::BEAVER_TEXT_MUTED, None);
+            Canvas::draw_string_prop_clipped(main_x + 50, y + 134, "Cero elementos pendientes de purga o restauracion en disco.", trash_max_w, Color::BEAVER_TEXT_MUTED, None);
+            Canvas::draw_string_prop_clipped(main_x + 50, y + 154, "Almacenamiento: Libre | BeaverFS Paridad OK", trash_max_w, Color::BEAVER_EMERALD, None);
         }
         _ => {
             Canvas::fill_rounded_rect(main_x + 8, y + 78, main_w.saturating_sub(16), 80, 8, Color::WHITE);
             Canvas::draw_rounded_rect(main_x + 8, y + 78, main_w.saturating_sub(16), 80, 8, Color::BEAVER_BORDER_LIGHT);
-            Canvas::draw_string_prop(main_x + 18, y + 90, "DIRECTORIO DEL SISTEMA VFS (Lord OS Style)", Color::BEAVER_AMBER_DARK, None);
-            Canvas::draw_string_prop(main_x + 18, y + 112, "Acceso seguro mediante arquitectura microkernel y sandbox Ring 3.", Color::BEAVER_TEXT_DARK, None);
+            let sys_max_w = main_w.saturating_sub(36);
+            Canvas::draw_string_prop_clipped(main_x + 18, y + 90, "DIRECTORIO DEL SISTEMA VFS", sys_max_w, Color::BEAVER_AMBER_DARK, None);
+            Canvas::draw_string_prop_clipped(main_x + 18, y + 112, "Acceso seguro mediante arquitectura microkernel y sandbox Ring 3.", sys_max_w, Color::BEAVER_TEXT_DARK, None);
         }
     }
 
-    let footer_y = y + h - 22;
+    let footer_y = y + h - 24;
     let footer_text = match tab {
         FilesViewTab::Trash => "0 elementos en Papelera, 2.4 MB disponibles en BeaverFS",
         _ => "5 elementos, 2.4 MB disponibles en BeaverFS",
     };
-    Canvas::draw_string_prop(main_x + 12, footer_y + 3, footer_text, Color::BEAVER_TEXT_MUTED, None);
+    Canvas::draw_string_prop_clipped(main_x + 12, footer_y + 2, footer_text, main_w.saturating_sub(24), Color::BEAVER_TEXT_MUTED, None);
 }
 
 pub fn render_files_window() {
@@ -382,9 +384,11 @@ pub fn draw_sync_window() {
     Canvas::draw_rounded_rect(x + 10, feed_y, w - 20, feed_h, 8, Color::SLATE_700);
 
     Canvas::draw_string(x + 18, feed_y + 6, "REGISTRO DE TELEMETRIA EN VIVO (EVENTOS BEAVERSYNC):", Color::SLATE_400, None);
+    let max_log_chars = (w.saturating_sub(44)) / 8;
     let mut log_y = feed_y + 24;
     for log in logs.iter().rev().take(4) {
-        Canvas::draw_string(x + 18, log_y, log, Color::BEAVER_GREEN, None);
+        let disp_log = if log.len() > max_log_chars { &log[..max_log_chars] } else { log.as_str() };
+        Canvas::draw_string(x + 18, log_y, disp_log, Color::BEAVER_GREEN, None);
         log_y += 18;
     }
 }
@@ -849,9 +853,10 @@ pub fn draw_about_window() {
     Canvas::draw_rounded_rect(x + 20, y + 42, 44, 44, 10, Color::BEAVER_AMBER_LIGHT);
     Canvas::draw_string(x + 36, y + 54, "B", Color::WHITE, None);
 
-    Canvas::draw_string_prop(x + 76, y + 42, "Beaver OS v0.9.0 (beaver-kernel)", Color::BEAVER_TEXT_DARK, None);
-    Canvas::draw_string_prop(x + 76, y + 58, "Marca: Beaversoft | Autor: Jose Alberto Puente Maldonado", Color::BEAVER_AMBER_DARK, None);
-    Canvas::draw_string_prop(x + 76, y + 74, "Rust Bare-Metal Kernel (x86_64 & AArch64)", Color::BEAVER_TEXT_MUTED, None);
+    let hdr_max_w = w.saturating_sub(92);
+    Canvas::draw_string_prop_clipped(x + 76, y + 42, "Beaver OS v0.9.5 (beaver-kernel)", hdr_max_w, Color::BEAVER_TEXT_DARK, None);
+    Canvas::draw_string_prop_clipped(x + 76, y + 58, "Marca: Beaversoft | Autor: Jose Alberto Puente Maldonado", hdr_max_w, Color::BEAVER_AMBER_DARK, None);
+    Canvas::draw_string_prop_clipped(x + 76, y + 74, "Rust Bare-Metal Kernel (x86_64 & AArch64)", hdr_max_w, Color::BEAVER_TEXT_MUTED, None);
 
     Canvas::draw_line_h(x + 20, y + 96, w.saturating_sub(40), Color::BEAVER_BORDER_LIGHT);
 
@@ -865,19 +870,21 @@ pub fn draw_about_window() {
         ("Entorno Dual:", "Beaver Desktop (Ventanas) + Beaver Shell (CLI)"),
     ];
 
+    let val_max_w = w.saturating_sub(148);
     for (i, (k, v)) in specs.iter().enumerate() {
         let sy = y + 108 + i * 22;
         Canvas::draw_string_prop(x + 24, sy, k, Color::BEAVER_TEXT_DARK, None);
-        Canvas::draw_string_prop(x + 130, sy, v, Color::BEAVER_TEXT_MUTED, None);
+        Canvas::draw_string_prop_clipped(x + 130, sy, v, val_max_w, Color::BEAVER_TEXT_MUTED, None);
     }
 
-    // Botón Aceptar / Cerrar
+    // Botón Aceptar / Cerrar (Estandarizado a Verde / Teal de confirmación)
     let btn_w = 110;
     let btn_h = 28;
     let btn_x = x + (w.saturating_sub(btn_w)) / 2;
     let btn_y = y + h.saturating_sub(38);
-    Canvas::fill_rounded_rect(btn_x, btn_y, btn_w, btn_h, 6, Color::BEAVER_AMBER);
-    Canvas::draw_rounded_rect(btn_x, btn_y, btn_w, btn_h, 6, Color::BEAVER_AMBER_DARK);
+    let btn_border = if Canvas::is_avalon_theme() { Color::AVALON_MINT } else { 0x0F766E };
+    Canvas::fill_rounded_rect(btn_x, btn_y, btn_w, btn_h, 6, 0x0D9488);
+    Canvas::draw_rounded_rect(btn_x, btn_y, btn_w, btn_h, 6, btn_border);
     let tw = Canvas::string_width_prop("Aceptar");
     Canvas::draw_string_prop(btn_x + (btn_w.saturating_sub(tw)) / 2, btn_y + 6, "Aceptar", Color::WHITE, None);
 }

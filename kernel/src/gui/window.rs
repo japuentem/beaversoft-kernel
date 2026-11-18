@@ -259,15 +259,15 @@ impl WindowManager {
             self.windows.push(Window {
                 id: WindowId::About,
                 title: "Acerca de Beaver OS",
-                x: 270,
+                x: 240,
                 y: 120,
-                width: 480,
+                width: 540,
                 height: 320,
                 minimized: true,
                 maximized: false,
-                restore_x: 270,
+                restore_x: 240,
                 restore_y: 120,
-                restore_w: 480,
+                restore_w: 540,
                 restore_h: 320,
             });
             self.z_order = [

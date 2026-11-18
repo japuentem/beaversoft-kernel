@@ -3,7 +3,7 @@
 // Author: José Alberto Puente Maldonado (japuentem)
 // Brand: Beaversoft
 // Bitácora: Sesión 2026-11-18
-// Total de interacciones del día: 4
+// Total de interacciones del día: 5
 // ============================================================================
 
 # Bitácora de Sesión — 2026-11-18
@@ -122,6 +122,27 @@ revisa si hay mas texto que se pierde con el fondo y dime si los botones estan e
     - **Inconsistencia Detectada en Ámbar/Naranja:** Se usa `BEAVER_AMBER` tanto para *Cargar* (BeaverNote), como para *Sincronizar Malla Ahora* (BeaverSync), *Aceptar* (Acerca de) y *Audio Beaver* (Smart Hub), en lugar de reservar Ámbar/Oro exclusivamente para lectura/sincronización o advertencia y Verde/Menta para confirmar/aceptar.
 - **3. Verificación:**
   * `cargo check --target x86_64-unknown-none`: OK (1.05s).
+  * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **35/35 pruebas aprobadas** (código QEMU 33).
+
+================================================================================
+
+## Interacción #5 [12:18:47]
+
+### 👤 Pregunta / Petición del Usuario:
+si unifica el boton Aceptar a verde/teal y revisa tambien que los textos no se salgan de las ventanas
+
+---
+
+### 🤖 Respuesta del Asistente (Antigravity):
+- **1. Estandarización del Botón "Aceptar":**
+  * En [`kernel/src/gui/apps_system.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_system.rs) (`draw_about_window`), el botón **Aceptar** pasó de Ámbar (`BEAVER_AMBER`) a **Verde/Teal (`0x0D9488`)** con borde en `Color::AVALON_MINT` y texto blanco, quedando 100% unificado con el estándar semántico de confirmación positiva (`Guardar`, `=`).
+- **2. Auditoría y Corrección Anti-Desbordamiento en Todas las Ventanas:**
+  * **[`kernel/src/gui/canvas.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/canvas.rs):** Se implementó `Canvas::draw_string_prop_clipped(x, y, text, max_w, fg, bg)` (sin asignaciones de heap, compatible `no_std`) para recortar limpiamente con `"..."` cualquier texto que exceda el ancho disponible.
+  * **[`kernel/src/gui/apps_media.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_media.rs) (BeaverAudio):** Se corrigió un desbordamiento grave donde la columna *Artista* (`list_x + 240`) se dibujaba fuera de la ventana de `350px` de ancho, y donde el título de la pista chocaba con los botones de control inferiores. Ahora las columnas se adaptan dinámicamente al ancho de ventana y se actualizaron los *hitboxes* de clic (`ctrl_cx = wx + w.width - 76`).
+  * **[`kernel/src/gui/window.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/window.rs) & [`kernel/src/gui/apps_system.rs`](file:///d:/proyectos_personales/beaversoft-kernel/kernel/src/gui/apps_system.rs) (Acerca de Beaver OS):** Se amplió la ventana de `480px` a `540px` y se aplicó `draw_string_prop_clipped` para que las especificaciones técnicas no salgan del margen derecho.
+  * **Monitor de Recursos, BeaverFiles y BeaverSync (`apps_system.rs`):** Se acortaron y protegieron con recorte seguro las cadenas de estadísticas de memoria, descripciones de papelera/sistema, el pie de página de BeaverFiles y las líneas de log de telemetría en tiempo real.
+- **3. Verificación:**
+  * `cargo check --target x86_64-unknown-none`: OK (2.51s).
   * `powershell -ExecutionPolicy Bypass -File run.ps1 -Test`: **35/35 pruebas aprobadas** (código QEMU 33).
 
 ================================================================================
