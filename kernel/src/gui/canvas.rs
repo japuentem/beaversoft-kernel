@@ -194,6 +194,10 @@ impl Canvas {
                 Color::AVALON_GLASS
             } else if color == Color::BEAVER_TITANIUM_BAR {
                 0x071526
+            } else if color == 0xDBEAFE {
+                0x0B2D4D
+            } else if color == 0xFEF3C7 {
+                0x2A1C06
             } else {
                 color
             }
@@ -319,6 +323,10 @@ impl Canvas {
         let color = if Self::is_avalon_theme() {
             if color == Color::WHITE || color == Color::BEAVER_TITANIUM || color == Color::BEAVER_TITANIUM_BAR {
                 0x081A2E
+            } else if color == 0xDBEAFE {
+                0x0B2D4D
+            } else if color == 0xFEF3C7 {
+                0x2A1C06
             } else {
                 color
             }
@@ -428,8 +436,18 @@ impl Canvas {
 
     /// Renderiza un carácter tipográfico usando el mapa de bits 8x16 en RAM
     pub fn draw_char(x: usize, y: usize, c: char, fg: u32, bg: Option<u32>) {
-        let fg = if Self::is_avalon_theme() && fg == Color::BEAVER_TEXT_DARK {
-            Color::AVALON_TEXT
+        let fg = if Self::is_avalon_theme() {
+            if fg == Color::BEAVER_TEXT_DARK {
+                Color::AVALON_TEXT
+            } else if fg == Color::BEAVER_TEXT_MUTED {
+                0x80B3CC
+            } else if fg == Color::BEAVER_AMBER_DARK {
+                Color::AVALON_GOLD
+            } else if fg == Color::BEAVER_BLUE {
+                Color::AVALON_CYAN
+            } else {
+                fg
+            }
         } else {
             fg
         };
@@ -484,6 +502,12 @@ impl Canvas {
                 Color::AVALON_TEXT
             } else if fg == Color::BEAVER_TEXT_MUTED {
                 0x80B3CC
+            } else if fg == Color::BEAVER_AMBER_DARK {
+                Color::AVALON_GOLD
+            } else if fg == Color::BEAVER_BLUE {
+                Color::AVALON_CYAN
+            } else if fg == Color::BEAVER_TEAL {
+                Color::AVALON_MINT
             } else {
                 fg
             }

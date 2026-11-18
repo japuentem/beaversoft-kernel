@@ -538,17 +538,21 @@ pub fn render_desktop() {
                 break;
             }
             let tab_bg = if is_active {
-                if theme == DesktopTheme::DarkCosmic { 0x1E3A8A } else { 0xDBEAFE }
+                match theme {
+                    DesktopTheme::DarkCosmic => 0x1E3A8A,
+                    DesktopTheme::LightNordic => 0xDBEAFE,
+                    DesktopTheme::AvalonHolo => 0x0B2D4D,
+                }
             } else {
                 pill_bg
             };
             let tab_border = if is_active {
-                Color::BEAVER_ACCENT_CYAN
+                if theme == DesktopTheme::AvalonHolo { Color::AVALON_MINT } else { Color::BEAVER_ACCENT_CYAN }
             } else {
                 pill_border
             };
             let tab_txt = if is_active {
-                Color::BEAVER_ACCENT_CYAN
+                if theme == DesktopTheme::AvalonHolo { Color::AVALON_MINT } else { Color::BEAVER_ACCENT_CYAN }
             } else {
                 topbar_text
             };
