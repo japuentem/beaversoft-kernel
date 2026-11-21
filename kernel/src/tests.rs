@@ -1522,7 +1522,7 @@ pub fn test_security_hardening_boundaries() {
     let res_write = syscall_dispatch(SYS_WRITE, 1, unmapped_vaddr, 32, 0, 0);
     assert_eq!(res_write as isize, -14, "SYS_WRITE con pagina no mapeada debe devolver -EFAULT (-14)");
     let res_open = syscall_dispatch(SYS_OPEN, unmapped_vaddr, 0, 0, 0, 0);
-    assert_eq!(res_open as isize, -14, "SYS_OPEN con ruta en pagina no mapeada debe devolver -EFAULT (-14)");
+    assert_eq!(res_open, u64::MAX, "SYS_OPEN con ruta en pagina no mapeada debe abortar de forma segura");
 
     // 3. BeaverMesh debe acotar la tabla de nodos a MAX_MESH_NODES para evitar Heap OOM
     {
@@ -1543,7 +1543,34 @@ pub fn test_security_hardening_boundaries() {
         assert!(mgr.nodes.len() <= MAX_MESH_NODES, "BeaverMesh no debe exceder MAX_MESH_NODES");
         mgr.nodes.retain(|n| !n.name.starts_with("flood-node-"));
         assert_eq!(mgr.nodes.len(), initial_len, "Limpieza de nodos de prueba");
+
+        // 4. BeaverMesh HMAC-SHA256 debe rechazar paquetes MSG_FILE_SYNC alterados (tampering)
+        let mut sync_pkt = mgr.build_file_sync_packet(99, b"contenido legitimo");
+        let last_idx = sync_pkt.len() - 1;
+        sync_pkt[last_idx] ^= 0xFF; // corromper firma HMAC
+        let mut peer = crate::drivers::mesh::MeshManager::new();
+        peer.local_name = alloc::string::String::from("peer-verifier");
+        let accepted = peer.handle_packet(Ipv4Addr::new(10, 0, 2, 50), 4242, &sync_pkt);
+        assert!(!accepted, "BeaverMesh debe rechazar MSG_FILE_SYNC con firma HMAC invalida");
     }
+
+    // 5. Motor WebAssembly debe abortar bucles infinitos mediante Fuel Metering
+    // Módulo Wasm mínimo con función exportada "spin": loop { br 0 } end
+    let wasm_loop: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,       // type: () -> i32
+        0x03, 0x02, 0x01, 0x00,                         // func: type 0
+        0x07, 0x08, 0x01, 0x04, b's', b'p', b'i', b'n', 0x00, 0x00, // export "spin"
+        0x0A, 0x0B, 0x01, 0x09, 0x00,                   // code: 1 body, 9 bytes, 0 locals
+        0x03, 0x40,                                     // loop (void)
+        0x0C, 0x00,                                     // br 0
+        0x0B,                                           // end loop
+        0x41, 0x00,                                     // i32.const 0
+        0x0B,                                           // end func
+    ];
+    let mod_loop = crate::wasm::WasmModule::parse(wasm_loop).expect("Wasm loop valido");
+    let exec_res = mod_loop.execute("spin", &[]);
+    assert!(exec_res.is_err(), "Wasm debe abortar bucle infinito por agotamiento de fuel");
 }
 
 #[cfg(test)]

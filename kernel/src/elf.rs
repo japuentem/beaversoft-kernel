@@ -292,15 +292,24 @@ impl<'a> ElfBinary<'a> {
             return Err("El archivo ELF no contiene segmentos cargables PT_LOAD");
         }
 
-        // Asignar pila privada de usuario de 16 KiB (4 páginas de 4 KiB) en `USER_STACK_VADDR` con bit PAGE_USER
+        // Asignar pila privada de usuario de 16 KiB (4 páginas de 4 KiB) con desplazamiento ASLR por proceso
+        let aslr_pages = {
+            let tsc_lo: u64;
+            // SAFETY: `rdtsc` lee el contador de ciclos de la CPU de forma no destructiva para entropía ASLR.
+            unsafe {
+                core::arch::asm!("rdtsc", out("eax") tsc_lo, out("edx") _, options(nomem, nostack, preserves_flags));
+            }
+            ((tsc_lo ^ (proc_cr3 >> 12)) & 0x1F) * PAGE_SIZE as u64
+        };
+        let stack_base = USER_STACK_VADDR + aslr_pages;
         for i in 0..USER_STACK_PAGES {
             let stack_frame = FRAME_ALLOCATOR
                 .allocate_frame()
                 .ok_or("No hay marcos libres para la pila de usuario")?;
-            let stack_vaddr = USER_STACK_VADDR + (i * PAGE_SIZE) as u64;
+            let stack_vaddr = stack_base + (i * PAGE_SIZE) as u64;
             paging::map_user_page(proc_cr3, stack_vaddr, stack_frame as u64, true)?;
         }
-        let user_stack_top = USER_STACK_VADDR + (USER_STACK_PAGES * PAGE_SIZE) as u64;
+        let user_stack_top = stack_base + (USER_STACK_PAGES * PAGE_SIZE) as u64;
 
         Ok((proc_cr3, entry_rip, user_stack_top))
     }

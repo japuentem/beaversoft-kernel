@@ -20,6 +20,43 @@ use crate::drivers::timer::{get_uptime_seconds, get_ticks};
 pub const MESH_PORT: u16 = 4242;
 pub const MAX_MESH_NODES: usize = 64;
 pub const MAX_NODE_NAME_LEN: usize = 64;
+const MESH_AUTH_TAG_LEN: usize = 16;
+const MESH_CLUSTER_SECRET: &[u8] = b"BEAVERSOFT_MESH_HMAC_V1_SOVEREIGN_KEY";
+
+/// Calcula etiqueta de autenticación HMAC-SHA256 truncada a 16 bytes para paquetes BeaverMesh
+fn compute_mesh_auth_tag(data: &[u8]) -> [u8; MESH_AUTH_TAG_LEN] {
+    let mut ipad = [0x36u8; 64];
+    let mut opad = [0x5Cu8; 64];
+    for (i, &b) in MESH_CLUSTER_SECRET.iter().take(64).enumerate() {
+        ipad[i] ^= b;
+        opad[i] ^= b;
+    }
+    let mut inner = crate::crypto::Sha256::new();
+    inner.update(&ipad);
+    inner.update(data);
+    let inner_hash = inner.finalize();
+
+    let mut outer = crate::crypto::Sha256::new();
+    outer.update(&opad);
+    outer.update(&inner_hash);
+    let full = outer.finalize();
+
+    let mut tag = [0u8; MESH_AUTH_TAG_LEN];
+    tag.copy_from_slice(&full[..MESH_AUTH_TAG_LEN]);
+    tag
+}
+
+/// Comparación en tiempo constante para evitar ataques de temporización sobre firmas HMAC
+fn constant_time_eq_16(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != MESH_AUTH_TAG_LEN || b.len() != MESH_AUTH_TAG_LEN {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for i in 0..MESH_AUTH_TAG_LEN {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
+}
 pub const MESH_MAGIC: &[u8; 8] = b"BEAVMESH";
 
 pub const MSG_ANNOUNCE:  u8 = 0x01;
@@ -156,11 +193,11 @@ impl MeshManager {
         pkt
     }
 
-    /// Construye el paquete de sincronizacion de `/disk/notas.txt` (MSG_FILE_SYNC)
+    /// Construye el paquete de sincronizacion de `/disk/notas.txt` (MSG_FILE_SYNC) con firma HMAC-SHA256
     pub fn build_file_sync_packet(&self, seq: u32, content: &[u8]) -> Vec<u8> {
         let clamped_len = content.len().min(1200);
         let name_bytes = self.local_name.as_bytes();
-        let mut pkt = Vec::with_capacity(20 + name_bytes.len() + clamped_len);
+        let mut pkt = Vec::with_capacity(20 + name_bytes.len() + clamped_len + MESH_AUTH_TAG_LEN);
         pkt.extend_from_slice(MESH_MAGIC);              // [0..8]
         pkt.push(MSG_FILE_SYNC);                        // [8]
         pkt.push(1);                                    // [9] version
@@ -169,6 +206,8 @@ impl MeshManager {
         pkt.extend_from_slice(name_bytes);              // [15..15+name_len]
         pkt.extend_from_slice(&(clamped_len as u16).to_be_bytes()); // [after_name..+2]
         pkt.extend_from_slice(&content[..clamped_len]);
+        let tag = compute_mesh_auth_tag(&pkt);
+        pkt.extend_from_slice(&tag);
         pkt
     }
 
@@ -338,10 +377,20 @@ impl MeshManager {
                     return false;
                 }
                 let content_len = u16::from_be_bytes([payload[after_name], payload[after_name + 1]]) as usize;
-                if payload.len() < after_name + 2 + content_len {
+                let data_end = after_name + 2 + content_len;
+                if payload.len() < data_end + MESH_AUTH_TAG_LEN {
                     return false;
                 }
-                let content_bytes = payload[after_name + 2..after_name + 2 + content_len].to_vec();
+                let expected_tag = compute_mesh_auth_tag(&payload[..data_end]);
+                let received_tag = &payload[data_end..data_end + MESH_AUTH_TAG_LEN];
+                if !constant_time_eq_16(&expected_tag, received_tag) {
+                    self.push_log(format!(
+                        "[MESH-SEC] MSG_FILE_SYNC de {} rechazado: firma HMAC invalida.",
+                        sender_name
+                    ));
+                    return false;
+                }
+                let content_bytes = payload[after_name + 2..data_end].to_vec();
                 let now = get_ticks();
 
                 if let Some(existing) = self.nodes.iter_mut().find(|n| n.ip.0 == src_ip.0) {

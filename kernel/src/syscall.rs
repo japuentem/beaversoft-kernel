@@ -241,9 +241,55 @@ pub fn init_syscalls() {
         let base = core::ptr::addr_of_mut!(SYSCALL_KERNEL_STACK) as u64;
         SYSCALL_KERNEL_STACK_TOP = base + SYSCALL_STACK_SIZE as u64;
 
-        // 1. Habilitar bit SCE (System Call Enable) en IA32_EFER
+        // 1. Habilitar bit SCE (System Call Enable) y NXE (No-Execute si es soportado) en IA32_EFER
+        let mut efer_flags: u64 = 0x1; // SCE
+        let ext_edx: u32;
+        core::arch::asm!(
+            "mov eax, 0x80000001",
+            "cpuid",
+            out("edx") ext_edx,
+            out("eax") _,
+            out("ecx") _,
+            options(nomem, nostack)
+        );
+        if (ext_edx & (1 << 20)) != 0 {
+            efer_flags |= 1 << 11; // IA32_EFER.NXE
+        }
         let efer = rdmsr(MSR_EFER);
-        wrmsr(MSR_EFER, efer | 0x1);
+        wrmsr(MSR_EFER, efer | efer_flags);
+
+        // 1.1 Habilitar CR4.SMEP (bit 20) si el procesador lo soporta (impide ejecución de Ring 3 desde Ring 0)
+        let max_leaf: u32;
+        core::arch::asm!(
+            "xor eax, eax",
+            "cpuid",
+            out("eax") max_leaf,
+            out("ecx") _,
+            out("edx") _,
+            options(nomem, nostack)
+        );
+        if max_leaf >= 7 {
+            let feat_ebx: u32;
+            core::arch::asm!(
+                "push rbx",
+                "mov eax, 7",
+                "xor ecx, ecx",
+                "cpuid",
+                "mov {out_ebx:e}, ebx",
+                "pop rbx",
+                out_ebx = out(reg) feat_ebx,
+                out("eax") _,
+                out("ecx") _,
+                out("edx") _,
+                options(nomem)
+            );
+            if (feat_ebx & (1 << 7)) != 0 {
+                let mut cr4: u64;
+                core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack));
+                cr4 |= 1 << 20; // SMEP
+                core::arch::asm!("mov cr4, {}", in(reg) cr4, options(nostack));
+            }
+        }
 
         // 2. Configurar IA32_STAR:
         //    bits 63:48 = base de selectores User: 0x0010

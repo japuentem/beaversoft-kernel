@@ -556,13 +556,30 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
         let mut sender_mac = [0u8; 6];
         sender_mac.copy_from_slice(&payload[8..14]);
 
-        // Registrar o actualizar tabla ARP
-        for entry in net.arp_table.iter_mut() {
-            if !entry.valid || entry.ip.0 == sender_ip.0 {
-                entry.ip  = sender_ip;
-                entry.mac = sender_mac;
-                entry.valid = true;
-                break;
+        // Registrar o actualizar tabla ARP con protección anti-spoofing (protege gateway y MACs inválidas)
+        let valid_mac = sender_mac != [0u8; 6] && sender_mac != [0xFFu8; 6];
+        if valid_mac && sender_ip.0 != [0, 0, 0, 0] && sender_ip.0 != net.ip_address.0 {
+            let is_gateway = sender_ip.0 == net.gateway.0;
+            let mut found = false;
+            for entry in net.arp_table.iter_mut() {
+                if entry.valid && entry.ip.0 == sender_ip.0 {
+                    // Proteger la entrada del gateway ya aprendida frente a envenenamiento ARP
+                    if !is_gateway {
+                        entry.mac = sender_mac;
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                for entry in net.arp_table.iter_mut() {
+                    if !entry.valid {
+                        entry.ip  = sender_ip;
+                        entry.mac = sender_mac;
+                        entry.valid = true;
+                        break;
+                    }
+                }
             }
         }
 
@@ -604,14 +621,17 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
             return false;
         }
 
-        // Aprender MAC del remitente IPv4 en la tabla ARP
-        if src_ip.0 != [0, 0, 0, 0] {
-            for entry in net.arp_table.iter_mut() {
-                if !entry.valid || entry.ip.0 == src_ip.0 {
-                    entry.ip = src_ip;
-                    entry.mac = src_eth;
-                    entry.valid = true;
-                    break;
+        // Aprender MAC del remitente IPv4 solo si la IP no estaba ya registrada (evita ARP spoofing por IPv4)
+        if src_ip.0 != [0, 0, 0, 0] && src_eth != [0u8; 6] && src_eth != [0xFFu8; 6] {
+            let already_known = net.arp_table.iter().any(|e| e.valid && e.ip.0 == src_ip.0);
+            if !already_known {
+                for entry in net.arp_table.iter_mut() {
+                    if !entry.valid {
+                        entry.ip = src_ip;
+                        entry.mac = src_eth;
+                        entry.valid = true;
+                        break;
+                    }
                 }
             }
         }

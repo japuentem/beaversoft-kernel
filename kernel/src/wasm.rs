@@ -208,10 +208,20 @@ impl WasmModule {
         }
 
         // Estructura de control: (is_loop, start_ip, end_ip)
+        const WASM_MAX_FUEL: usize = 100_000;
+        const WASM_MAX_STACK_DEPTH: usize = 1024;
+        let mut fuel: usize = WASM_MAX_FUEL;
         let mut control_flow: Vec<(bool, usize, usize)> = Vec::new();
         let mut ip = 0;
 
         while ip < bytes.len() {
+            if fuel == 0 {
+                return Err("WebAssembly fuel limit exceeded (infinite loop aborted)");
+            }
+            fuel -= 1;
+            if stack.len() > WASM_MAX_STACK_DEPTH {
+                return Err("WebAssembly stack overflow");
+            }
             let op = bytes[ip];
             match op {
                 OP_I32_CONST => {
