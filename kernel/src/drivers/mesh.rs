@@ -18,6 +18,8 @@ use crate::drivers::net::{Ipv4Addr, send_udp_datagram};
 use crate::drivers::timer::{get_uptime_seconds, get_ticks};
 
 pub const MESH_PORT: u16 = 4242;
+pub const MAX_MESH_NODES: usize = 64;
+pub const MAX_NODE_NAME_LEN: usize = 64;
 pub const MESH_MAGIC: &[u8; 8] = b"BEAVMESH";
 
 pub const MSG_ANNOUNCE:  u8 = 0x01;
@@ -224,7 +226,7 @@ impl MeshManager {
                     return false;
                 }
                 let name_len = payload[14] as usize;
-                if payload.len() < 15 + name_len {
+                if name_len == 0 || name_len > MAX_NODE_NAME_LEN || payload.len() < 15 + name_len {
                     return false;
                 }
                 let name_bytes = &payload[15..15 + name_len];
@@ -280,6 +282,15 @@ impl MeshManager {
                         ));
                     }
                 } else {
+                    if self.nodes.len() >= MAX_MESH_NODES {
+                        // Evitar agotamiento de heap (OOM): expulsar primero un nodo Offline si existe;
+                        // si la tabla está llena de nodos activos, descartar nuevos registros.
+                        if let Some(offline_idx) = self.nodes.iter().position(|n| n.status != "Online") {
+                            self.nodes.remove(offline_idx);
+                        } else {
+                            return false;
+                        }
+                    }
                     self.push_log(format!(
                         "[MESH] Nuevo nodo descubierto: {} en {} ({} core, {} MB).",
                         name, src_ip.to_string(), cores, ram_mb

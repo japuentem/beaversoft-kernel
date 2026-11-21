@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 35] = [
+    let tests: [(&str, fn()); 36] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -100,6 +100,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("posix_recompilation_pipeline",            test_posix_recompilation_pipeline),
         ("webassembly_module_execution",            test_webassembly_module_execution),
         ("linux_abi_syscall_translation",           test_linux_abi_syscall_translation),
+        ("security_hardening_boundaries",           test_security_hardening_boundaries),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -1502,6 +1503,47 @@ pub fn test_linux_abi_syscall_translation() {
     let res_rnd = syscall_dispatch(SYS_GETRANDOM, rnd.as_mut_ptr() as u64, rnd.len() as u64, 0, 0, 0);
     assert_eq!(res_rnd as usize, 16, "SYS_GETRANDOM de Linux debe llenar 16 bytes de entropia");
     assert_ne!(rnd, [0u8; 16], "Entropia Linux no debe ser nula");
+}
+
+/// Prueba 36: Verificación de endurecimiento de frontera Ring 3 -> Ring 0 y límites BeaverMesh
+pub fn test_security_hardening_boundaries() {
+    use crate::syscall::{syscall_dispatch, SYS_ARCH_PRCTL, SYS_WRITE, SYS_OPEN, ARCH_SET_FS};
+    use crate::drivers::mesh::{MESH_MANAGER, MAX_MESH_NODES, MESH_MAGIC, MSG_ANNOUNCE};
+    use crate::drivers::net::Ipv4Addr;
+
+    // 1. ARCH_SET_FS debe rechazar direcciones no canónicas / fuera de espacio de usuario (-EINVAL = -22)
+    let bad_fs_1 = syscall_dispatch(SYS_ARCH_PRCTL, ARCH_SET_FS as u64, 0x0000_8000_0000_0000, 0, 0, 0);
+    assert_eq!(bad_fs_1 as isize, -22, "ARCH_SET_FS debe rechazar direccion no canonica");
+    let bad_fs_2 = syscall_dispatch(SYS_ARCH_PRCTL, ARCH_SET_FS as u64, 0xFFFF_8000_0000_0000, 0, 0, 0);
+    assert_eq!(bad_fs_2 as isize, -22, "ARCH_SET_FS debe rechazar direccion de espacio kernel");
+
+    // 2. Punteros de usuario no mapeados en CR3 deben devolver error (-EFAULT / usize::MAX) sin #PF en Ring 0
+    let unmapped_vaddr: u64 = 0x0000_6FFF_DEAD_0000;
+    let res_write = syscall_dispatch(SYS_WRITE, 1, unmapped_vaddr, 32, 0, 0);
+    assert_eq!(res_write as isize, -14, "SYS_WRITE con pagina no mapeada debe devolver -EFAULT (-14)");
+    let res_open = syscall_dispatch(SYS_OPEN, unmapped_vaddr, 0, 0, 0, 0);
+    assert_eq!(res_open as isize, -14, "SYS_OPEN con ruta en pagina no mapeada debe devolver -EFAULT (-14)");
+
+    // 3. BeaverMesh debe acotar la tabla de nodos a MAX_MESH_NODES para evitar Heap OOM
+    {
+        let mut mgr = MESH_MANAGER.lock();
+        let initial_len = mgr.nodes.len();
+        for i in 0..(MAX_MESH_NODES + 20) {
+            let name = alloc::format!("flood-node-{}", i);
+            let mut pkt = alloc::vec::Vec::new();
+            pkt.extend_from_slice(MESH_MAGIC);
+            pkt.push(MSG_ANNOUNCE);
+            pkt.push(1);
+            pkt.extend_from_slice(&0u32.to_be_bytes());
+            pkt.push(name.len() as u8);
+            pkt.extend_from_slice(name.as_bytes());
+            let ip = Ipv4Addr::new(10, 99, (i / 250) as u8, ((i % 250) + 1) as u8);
+            mgr.handle_packet(ip, 4242, &pkt);
+        }
+        assert!(mgr.nodes.len() <= MAX_MESH_NODES, "BeaverMesh no debe exceder MAX_MESH_NODES");
+        mgr.nodes.retain(|n| !n.name.starts_with("flood-node-"));
+        assert_eq!(mgr.nodes.len(), initial_len, "Limpieza de nodos de prueba");
+    }
 }
 
 #[cfg(test)]

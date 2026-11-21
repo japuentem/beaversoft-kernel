@@ -483,28 +483,67 @@ static USER_SEMAPHORES: [core::sync::atomic::AtomicU32; 16] = [
     core::sync::atomic::AtomicU32::new(1), core::sync::atomic::AtomicU32::new(1),
 ];
 
-/// Valida si un puntero y rango de longitud pertenecen a memoria válida
+/// Valida si un puntero y rango de longitud pertenecen a memoria válida y mapeada
 fn is_valid_user_ptr(ptr: u64, len: usize) -> bool {
-    if ptr == 0 {
+    if ptr == 0 || len > 16 * 1024 * 1024 {
         return false;
     }
-    if len == 0 {
-        return true;
+    let end = if len == 0 {
+        ptr
+    } else {
+        match ptr.checked_add(len as u64) {
+            Some(e) => e,
+            None => return false,
+        }
+    };
+    if end > 0x0000_7FFF_FFFF_FFFF {
+        return false;
     }
-    match ptr.checked_add(len as u64) {
-        Some(end) => end <= 0x0000_7FFF_FFFF_FFFF,
-        None => false,
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        let cr3 = crate::memory::paging::read_cr3();
+        if cr3 != 0 {
+            let start_page = ptr & !0xFFF;
+            let last_byte = if len == 0 { ptr } else { end - 1 };
+            let end_page = last_byte & !0xFFF;
+            let mut page = start_page;
+            while page <= end_page {
+                if crate::memory::paging::query_mapping(cr3, page).is_none() {
+                    return false;
+                }
+                page = match page.checked_add(4096) {
+                    Some(next) => next,
+                    None => return false,
+                };
+            }
+        }
     }
+
+    true
 }
 
 /// Lee una cadena terminada en nulo desde el espacio de usuario (hasta max_len bytes)
 fn read_user_string(ptr: u64, max_len: usize) -> Option<String> {
-    if !is_valid_user_ptr(ptr, 1) {
+    if ptr == 0 || ptr > 0x0000_7FFF_FFFF_FFFF {
         return None;
     }
     let mut bytes = Vec::new();
     let raw = ptr as *const u8;
+    #[cfg(target_arch = "x86_64")]
+    let cr3 = crate::memory::paging::read_cr3();
+
     for i in 0..max_len {
+        let curr_addr = ptr.checked_add(i as u64)?;
+        if curr_addr > 0x0000_7FFF_FFFF_FFFF {
+            return None;
+        }
+        #[cfg(target_arch = "x86_64")]
+        if cr3 != 0 && (i == 0 || (curr_addr & 0xFFF) == 0) {
+            if crate::memory::paging::query_mapping(cr3, curr_addr).is_none() {
+                return None;
+            }
+        }
         let b = unsafe { core::ptr::read(raw.add(i)) };
         if b == 0 {
             break;
@@ -1527,6 +1566,10 @@ pub extern "C" fn syscall_dispatch(nr: u64, arg0: u64, arg1: u64, arg2: u64, arg
             let addr = arg1;
             match code {
                 ARCH_SET_FS => {
+                    // Validar que la dirección sea canónica de usuario para evitar #GP en Ring 0 al ejecutar wrmsr
+                    if addr > 0x0000_7FFF_FFFF_FFFF {
+                        return (-22_isize) as u64; // -EINVAL
+                    }
                     #[cfg(target_arch = "x86_64")]
                     unsafe {
                         wrmsr(0xC000_0100, addr);
