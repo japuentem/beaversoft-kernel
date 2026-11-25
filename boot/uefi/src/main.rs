@@ -201,7 +201,7 @@ fn print_str(con_out: *mut EfiSimpleTextOutputProtocol, s: &str) {
     }
 }
 
-static mut MEM_MAP: [u8; 8192] = [0; 8192];
+static mut MEM_MAP: [u64; 2048] = [0; 2048]; // 16 KiB alineado a 8 bytes para EFI_MEMORY_DESCRIPTOR
 
 #[no_mangle]
 pub extern "win64" fn efi_main(image_handle: *mut (), system_table: *mut EfiSystemTable) -> usize {
@@ -364,7 +364,7 @@ pub extern "win64" fn efi_main(image_handle: *mut (), system_table: *mut EfiSyst
     }
 
     // 6. Cerrar servicios de firmware UEFI (ExitBootServices)
-    let mut mem_map_size = 8192_usize;
+    let mut mem_map_size = 16384_usize;
     let mut map_key: usize = 0;
     let mut desc_size: usize = 0;
     let mut desc_ver: u32 = 0;
@@ -379,7 +379,7 @@ pub extern "win64" fn efi_main(image_handle: *mut (), system_table: *mut EfiSyst
         };
         if status != 0 {
             // Reintentar si el map_key cambio durante la llamada
-            mem_map_size = 8192_usize;
+            mem_map_size = 16384_usize;
             let _ = unsafe {
                 ((*bs).get_memory_map)(&mut mem_map_size, mem_map_ptr, &mut map_key, &mut desc_size, &mut desc_ver)
             };

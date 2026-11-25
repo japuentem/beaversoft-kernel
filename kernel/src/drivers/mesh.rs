@@ -384,9 +384,11 @@ impl MeshManager {
                 let expected_tag = compute_mesh_auth_tag(&payload[..data_end]);
                 let received_tag = &payload[data_end..data_end + MESH_AUTH_TAG_LEN];
                 if !constant_time_eq_16(&expected_tag, received_tag) {
+                    let banned = crate::drivers::firewall::record_auth_failure(src_ip);
                     self.push_log(format!(
-                        "[MESH-SEC] MSG_FILE_SYNC de {} rechazado: firma HMAC invalida.",
-                        sender_name
+                        "[MESH-SEC] MSG_FILE_SYNC de {} rechazado: firma HMAC invalida{}.",
+                        sender_name,
+                        if banned { " [IP BANEADA]" } else { "" }
                     ));
                     return false;
                 }

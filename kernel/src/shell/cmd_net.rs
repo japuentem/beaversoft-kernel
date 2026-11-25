@@ -334,6 +334,124 @@ pub fn try_execute(shell: &mut Shell, cmd: &str, args: &[&str]) -> bool {
             kprintln!("=================================================================");
         }
 
+        "fw" | "firewall" => {
+            use crate::drivers::firewall::{FIREWALL, FirewallMode};
+            use crate::drivers::net::{Ipv4Addr, IP_PROTO_TCP, IP_PROTO_UDP};
+            use crate::drivers::timer::get_ticks;
+
+            let sub = args.get(0).copied().unwrap_or("status");
+            match sub {
+                "mode" => {
+                    let m = args.get(1).copied().unwrap_or("");
+                    let mut fw = FIREWALL.lock();
+                    fw.ensure_defaults();
+                    match m {
+                        "strict" | "deny" => {
+                            fw.mode = FirewallMode::DefaultDeny;
+                            kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[FW] Modo cambiado a STRICT (DefaultDeny).\n");
+                        }
+                        "permissive" | "open" => {
+                            fw.mode = FirewallMode::Permissive;
+                            kprint_color!(VgaColor::Yellow, VgaColor::Black, "[FW] Modo cambiado a PERMISSIVE (solo Rate-Limit y Bans).\n");
+                        }
+                        _ => kprintln!("Uso: fw mode <strict|permissive>"),
+                    }
+                }
+                "allow" | "close" => {
+                    if args.len() < 3 {
+                        kprintln!("Uso: fw {} <tcp|udp> <puerto>", sub);
+                        return true;
+                    }
+                    let proto = match args[1] {
+                        "tcp" => IP_PROTO_TCP,
+                        "udp" => IP_PROTO_UDP,
+                        _ => {
+                            kprintln!("Protocolo invalido (usa tcp o udp).");
+                            return true;
+                        }
+                    };
+                    let port: u16 = match args[2].parse() {
+                        Ok(p) if p > 0 => p,
+                        _ => {
+                            kprintln!("Puerto invalido.");
+                            return true;
+                        }
+                    };
+                    let mut fw = FIREWALL.lock();
+                    if sub == "allow" {
+                        if fw.allow_port(proto, port) {
+                            kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[FW] Puerto {}/{} permitido.\n", args[1], port);
+                        } else {
+                            kprintln!("[FW] Tabla de reglas llena.");
+                        }
+                    } else if fw.deny_port(proto, port) {
+                        kprint_color!(VgaColor::Yellow, VgaColor::Black, "[FW] Puerto {}/{} cerrado.\n", args[1], port);
+                    } else {
+                        kprintln!("[FW] Regla no encontrada.");
+                    }
+                }
+                "deny" | "ban" => {
+                    let Some(ip_str) = args.get(1) else {
+                        kprintln!("Uso: fw deny <ipv4>");
+                        return true;
+                    };
+                    let Some(ip) = Ipv4Addr::parse(ip_str) else {
+                        kprintln!("Direccion IPv4 invalida.");
+                        return true;
+                    };
+                    let mut fw = FIREWALL.lock();
+                    fw.ban_ip(ip.0, None, "Bloqueo manual", get_ticks());
+                    kprint_color!(VgaColor::LightRed, VgaColor::Black, "[FW] IP {} bloqueada permanentemente.\n", ip_str);
+                }
+                "unban" => {
+                    let Some(ip_str) = args.get(1) else {
+                        kprintln!("Uso: fw unban <ipv4>");
+                        return true;
+                    };
+                    let Some(ip) = Ipv4Addr::parse(ip_str) else {
+                        kprintln!("Direccion IPv4 invalida.");
+                        return true;
+                    };
+                    let mut fw = FIREWALL.lock();
+                    if fw.unban_ip(ip.0) {
+                        kprint_color!(VgaColor::LightGreen, VgaColor::Black, "[FW] IP {} desbloqueada.\n", ip_str);
+                    } else {
+                        kprintln!("[FW] La IP {} no estaba en la lista de bloqueo.", ip_str);
+                    }
+                }
+                _ => {
+                    let mut fw = FIREWALL.lock();
+                    fw.ensure_defaults();
+                    let now = get_ticks();
+                    let mode_str = if fw.mode == FirewallMode::DefaultDeny { "STRICT (DefaultDeny)" } else { "PERMISSIVE" };
+                    kprintln!("=============== BEAVERGUARD FIREWALL & RATE LIMITER ===============");
+                    kprintln!("  Estado: {} | Politica: {}", if fw.enabled { "ACTIVO" } else { "INACTIVO" }, mode_str);
+                    kprintln!("  Trafico Inspeccionado: {} | Permitidos: {}", fw.total_inspected, fw.total_allowed);
+                    kprintln!("  Bloqueados -> Politica: {} | Rate-Limit: {} | Baneados: {}",
+                        fw.total_dropped_policy, fw.total_dropped_ratelimit, fw.total_dropped_banned);
+                    kprintln!("  Puertos Permitidos:");
+                    for rule in &fw.allowed_ports {
+                        let pname = if rule.proto == IP_PROTO_UDP { "UDP" } else { "TCP" };
+                        kprintln!("    * {}/{}", pname, rule.port);
+                    }
+                    kprintln!("  IPs Baneadas (Fail2Ban / Manual):");
+                    let mut ban_count = 0;
+                    for b in fw.bans.iter() {
+                        if b.active && (b.until_tick == u64::MAX || now < b.until_tick) {
+                            let ip = Ipv4Addr(b.ip);
+                            kprintln!("    * {} ({})", ip.to_string(), b.reason);
+                            ban_count += 1;
+                        }
+                    }
+                    if ban_count == 0 {
+                        kprintln!("    (ninguna IP bloqueada actualmente)");
+                    }
+                    kprintln!("  Uso: fw <status|mode|allow|close|deny|unban>");
+                    kprintln!("===================================================================");
+                }
+            }
+        }
+
         _ => return false,
     }
     true

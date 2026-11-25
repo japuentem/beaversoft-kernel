@@ -64,7 +64,7 @@ pub fn test_runner(tests: &[&dyn Testable]) {
 
 /// Ejecuta la batería completa de pruebas automatizadas del kernel y sale por `0xF4` si `exit_on_complete` es `true`.
 pub fn run_builtin_test_suite(exit_on_complete: bool) {
-    let tests: [(&str, fn()); 36] = [
+    let tests: [(&str, fn()); 37] = [
         ("spinmutex_owner_and_reentrancy_guard",    test_spinmutex_owner_and_reentrancy_guard),
         ("frame_allocator_alloc_and_free",          test_frame_allocator_alloc_and_free),
         ("heap_dynamic_allocations",                test_heap_dynamic_allocations),
@@ -101,6 +101,7 @@ pub fn run_builtin_test_suite(exit_on_complete: bool) {
         ("webassembly_module_execution",            test_webassembly_module_execution),
         ("linux_abi_syscall_translation",           test_linux_abi_syscall_translation),
         ("security_hardening_boundaries",           test_security_hardening_boundaries),
+        ("beaverguard_firewall_and_ratelimit",      test_beaverguard_firewall_and_ratelimit),
     ];
 
     kprintln!("\n==================== BEAVER KERNEL AUTOMATED TEST SUITE ====================");
@@ -1522,7 +1523,7 @@ pub fn test_security_hardening_boundaries() {
     let res_write = syscall_dispatch(SYS_WRITE, 1, unmapped_vaddr, 32, 0, 0);
     assert_eq!(res_write as isize, -14, "SYS_WRITE con pagina no mapeada debe devolver -EFAULT (-14)");
     let res_open = syscall_dispatch(SYS_OPEN, unmapped_vaddr, 0, 0, 0, 0);
-    assert_eq!(res_open, u64::MAX, "SYS_OPEN con ruta en pagina no mapeada debe abortar de forma segura");
+    assert_eq!(res_open as isize, -14, "SYS_OPEN con ruta en pagina no mapeada debe devolver -EFAULT (-14)");
 
     // 3. BeaverMesh debe acotar la tabla de nodos a MAX_MESH_NODES para evitar Heap OOM
     {
@@ -1571,6 +1572,77 @@ pub fn test_security_hardening_boundaries() {
     let mod_loop = crate::wasm::WasmModule::parse(wasm_loop).expect("Wasm loop valido");
     let exec_res = mod_loop.execute("spin", &[]);
     assert!(exec_res.is_err(), "Wasm debe abortar bucle infinito por agotamiento de fuel");
+}
+
+/// Prueba 37: BeaverGuard Mini-Firewall (DefaultDeny), Rate Limiter y Auto-Ban (Fail2Ban)
+pub fn test_beaverguard_firewall_and_ratelimit() {
+    use crate::drivers::firewall::{
+        FIREWALL, FirewallVerdict, MAX_AUTH_FAILURES, MAX_PKTS_PER_WINDOW,
+        inspect_incoming_ipv4, record_auth_failure,
+    };
+    use crate::drivers::net::{Ipv4Addr, IP_PROTO_TCP, IP_PROTO_UDP};
+
+    let attacker_ip = Ipv4Addr::new(192, 168, 77, 66);
+    let flood_ip = Ipv4Addr::new(192, 168, 77, 99);
+
+    // 1. Politica DefaultDeny: rechaza puerto TCP no autorizado (ej. Telnet 23) y permite UDP 4242
+    assert_eq!(
+        inspect_incoming_ipv4(attacker_ip, IP_PROTO_TCP, 50000, 23),
+        FirewallVerdict::DropPolicy,
+        "DefaultDeny debe bloquear puerto TCP 23 no autorizado"
+    );
+    assert_eq!(
+        inspect_incoming_ipv4(attacker_ip, IP_PROTO_UDP, 4242, 4242),
+        FirewallVerdict::Allow,
+        "DefaultDeny debe permitir BeaverMesh UDP 4242"
+    );
+
+    // 2. Apertura dinamica de puerto TCP 8080 y verificacion
+    {
+        let mut fw = FIREWALL.lock();
+        assert!(fw.allow_port(IP_PROTO_TCP, 8080));
+    }
+    assert_eq!(
+        inspect_incoming_ipv4(attacker_ip, IP_PROTO_TCP, 50001, 8080),
+        FirewallVerdict::Allow,
+        "Puerto TCP 8080 permitido debe aceptarse"
+    );
+    {
+        let mut fw = FIREWALL.lock();
+        assert!(fw.deny_port(IP_PROTO_TCP, 8080));
+    }
+
+    // 3. Auto-Ban estilo Fail2Ban tras MAX_AUTH_FAILURES fallos HMAC
+    for _ in 0..(MAX_AUTH_FAILURES - 1) {
+        assert!(!record_auth_failure(attacker_ip));
+    }
+    assert!(record_auth_failure(attacker_ip), "El fallo N debe disparar auto-ban");
+    assert_eq!(
+        inspect_incoming_ipv4(attacker_ip, IP_PROTO_UDP, 4242, 4242),
+        FirewallVerdict::DropBanned,
+        "IP baneada debe ser descartada incluso en puertos permitidos"
+    );
+
+    // 4. Rate Limiter por ventana deslizante y auto-ban por inundacion
+    for _ in 0..MAX_PKTS_PER_WINDOW {
+        let v = inspect_incoming_ipv4(flood_ip, IP_PROTO_UDP, 4242, 4242);
+        assert_eq!(v, FirewallVerdict::Allow);
+    }
+    assert_eq!(
+        inspect_incoming_ipv4(flood_ip, IP_PROTO_UDP, 4242, 4242),
+        FirewallVerdict::DropRateLimit,
+        "Exceder MAX_PKTS_PER_WINDOW debe activar DropRateLimit"
+    );
+    assert_eq!(
+        inspect_incoming_ipv4(flood_ip, IP_PROTO_UDP, 4242, 4242),
+        FirewallVerdict::DropBanned,
+        "IP que inunda debe quedar auto-baneada"
+    );
+
+    // Limpiar IPs de prueba para no afectar el estado operativo
+    let mut fw = FIREWALL.lock();
+    fw.unban_ip(attacker_ip.0);
+    fw.unban_ip(flood_ip.0);
 }
 
 #[cfg(test)]

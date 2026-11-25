@@ -636,6 +636,21 @@ fn process_incoming_packet(frame: &[u8], net: &mut NetworkInterface) -> bool {
             }
         }
 
+        // Inspección por BeaverGuard Mini-Firewall + Rate Limiter + Auto-Ban
+        let (fw_src_port, fw_dst_port) = if (proto == IP_PROTO_UDP || proto == IP_PROTO_TCP) && payload.len() >= ihl + 4 {
+            (
+                u16::from_be_bytes([payload[ihl], payload[ihl + 1]]),
+                u16::from_be_bytes([payload[ihl + 2], payload[ihl + 3]]),
+            )
+        } else {
+            (0, 0)
+        };
+        if crate::drivers::firewall::inspect_incoming_ipv4(src_ip, proto, fw_src_port, fw_dst_port)
+            != crate::drivers::firewall::FirewallVerdict::Allow
+        {
+            return false;
+        }
+
         if proto == IP_PROTO_ICMP && payload.len() >= ihl + 8 {
             let icmp_data = &payload[ihl..];
             let icmp_type = icmp_data[0];

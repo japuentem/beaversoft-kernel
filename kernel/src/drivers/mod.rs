@@ -12,6 +12,7 @@ pub mod vbe;
 pub mod mouse;
 pub mod audio;
 pub mod net;
+pub mod firewall;
 pub mod e1000;
 pub mod usb;
 pub mod mesh;
